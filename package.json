@@ -1,0 +1,15 @@
+{
+  "name": "editfast",
+  "version": "1.0.0",
+  "description": "EditFast — إضافة مونتاج ذكية لبريمير برو (CEP)",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.js\" \"tests/host/*.test.js\"",
+    "test:ui": "node --test \"tests/ui/*.test.js\"",
+    "test:all": "node --test \"tests/**/*.test.js\"",
+    "package": "node scripts/package.js"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0"
+  }
+}
