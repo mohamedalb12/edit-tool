@@ -17,6 +17,7 @@
     library: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
     motion: '<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
     titles: '<path d="M4 7V4h16v3M9 20h6M12 4v16"/>',
+    glass: '<path d="M12 2.8s6.4 7 6.4 11.3a6.4 6.4 0 0 1-12.8 0C5.6 9.8 12 2.8 12 2.8z"/><path d="M9.2 14.6a3 3 0 0 0 2.6 2.8"/>',
     search: '<circle cx="11" cy="11" r="7.5"/><path d="M21 21l-4.5-4.5"/>',
     broll: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3 16l5-5 4 4 3-3 6 6"/>',
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'

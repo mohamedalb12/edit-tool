@@ -389,7 +389,7 @@ EFAPI.placeFile = function (a) {
   var seq = EF.seq(), item = EF.importFile(a.path, a.bin || 'EditFast'), kind = a.kind || 'video';
   var t = a.time === undefined || a.time === null ? EF.sec(seq.getPlayerPosition()) : a.time;
   var dur = a.duration || 5;
-  var ti = (a.track === undefined || a.track === null || a.track < 0) ? EF.pickTrack(seq, kind, t, t + dur, kind === 'video' ? 1 : 1) : a.track;
+  var ti = (a.track === undefined || a.track === null || a.track < 0) ? EF.pickTrack(seq, kind, t, t + dur, a.minTrack || 1) : a.track;
   var tracks = EF.tracks(seq, kind);
   tracks[ti].overwriteClip(item, t);
   var clip = EF.clipAt(tracks[ti], t + 0.01);

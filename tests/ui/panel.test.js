@@ -26,7 +26,7 @@ test.before(async () => {
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
   const { chromium } = loadPlaywright();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   page = await browser.newPage({ viewport: { width: 420, height: 820 }, deviceScaleFactor: 1 });
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   // the test page is served over http, so previews of local media (file://) are blocked here; inside Premiere the panel runs from file:// with --allow-file-access
@@ -44,9 +44,9 @@ async function open(id) { await page.click(`#nav button[data-id="${id}"]`); awai
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 14 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
+test('boots: 15 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'quickcut', 'autofx', 'sfx', 'transcribe', 'multicam', 'organize', 'curves', 'library', 'motion', 'titles', 'search', 'broll', 'settings']);
+  assert.deepEqual(ids, ['agent', 'quickcut', 'autofx', 'sfx', 'transcribe', 'multicam', 'organize', 'curves', 'library', 'motion', 'titles', 'glass', 'search', 'broll', 'settings']);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
   assert.deepEqual(errors, []);
@@ -200,6 +200,21 @@ test('التايتلات: 25 animated previews, text + click places at playhead'
   await shot('09-titles');
 });
 
+test('ليكود جلاس: 10 styles with live WebGL previews, controls, apply puts it on the video', async () => {
+  await open('glass'); await clearCalls();
+  assert.equal(await page.locator('.tile[data-preset]').count(), 10);
+  await page.waitForTimeout(400);
+  const lit = await page.evaluate(() => { const c = document.querySelector('canvas.glass-stage'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 16) if (d[i] + d[i + 1] + d[i + 2] > 60) n++; return n; });
+  assert.ok(lit > 2000, 'stage painted: ' + lit);
+  await page.locator('.tile[data-preset="lens"]').click();
+  await page.locator('.tile[data-preset="subscribe"]').click();
+  await page.fill('#view .card input.grow >> nth=0', 'تابعنا');
+  await clickText('حط الزجاج على الفيديو');
+  const a = await page.evaluate(() => window.__calls.find(c => c.name === 'liquidGlass').args.params);
+  assert.equal(a.preset, 'subscribe'); assert.equal(a.label, 'تابعنا'); assert.equal(a.tint, '#ff2d55');
+  await shot('13-glass-tab');
+});
+
 test('بحث وماركرز: word search jumps, chapters (copy + markers), beat markers', async () => {
   await open('search'); await clearCalls();
   await page.fill('#view input', 'المونتاج'); await page.keyboard.press('Enter'); await page.waitForTimeout(250);
@@ -250,7 +265,7 @@ test('text motion: titles/card headings/AI replies reveal word by word, splash l
 
 test('narrow panel (320px): no horizontal overflow on any tab', async () => {
   await page.setViewportSize({ width: 320, height: 700 });
-  for (const id of ['agent', 'quickcut', 'motion', 'titles', 'settings', 'curves']) {
+  for (const id of ['agent', 'quickcut', 'motion', 'titles', 'glass', 'settings', 'curves']) {
     await open(id);
     const over = await page.evaluate(() => document.getElementById('view').scrollWidth - document.getElementById('view').clientWidth);
     assert.ok(over <= 1, id + ' overflows by ' + over);
@@ -280,4 +295,39 @@ test('scene engine renders Arabic motion graphics in Chromium → ffmpeg video (
     assert.equal(/yuva/.test(v.pix_fmt), transparent, v.pix_fmt);
     if (!transparent) execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-ss', '1.0', '-i', out, '-frames:v', '1', path.join(SHOTS, '12-scene-render.png')]);
   }
+});
+
+test('Liquid Glass real render: footage → WebGL shader → ProRes 4444 alpha layer that bends the picture', async () => {
+  const io = require('../../core/glassIO');
+  const W = 640, H = 360, fps = 25;
+  const vid = path.join(TMP, 'glass-src.mp4');
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=${W}x${H}:d=2:r=${fps}`, '-pix_fmt', 'yuv420p', vid]);
+  const out = path.join(TMP, 'glass-out.mov');
+  const enc = io.startRawEncoder(FFMPEG, { width: W, height: H, fps, out });
+  await page.evaluate(({ W, H }) => { window.__g = EFLiquid.createRenderer(document.createElement('canvas'), W, H); window.__g.setParams({ preset: 'card', label: 'Liquid', duration: 2 }); }, { W, H });
+  let lastSrc, lastOut, n = 0;
+  await io.decodeFrames(FFMPEG, { mediaPath: vid, start: 0, duration: 1.2, width: W, height: H, fps }, async (f, i) => {
+    const b64 = await page.evaluate(({ b64, t }) => {
+      const bin = atob(b64), u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+      const px = window.__g.render(u, t); let s = ''; for (let k = 0; k < px.length; k += 32768) s += String.fromCharCode.apply(null, px.subarray(k, k + 32768)); return btoa(s);
+    }, { b64: f.toString('base64'), t: i / fps });
+    const px = Buffer.from(b64, 'base64'); await enc.write(px); n++;
+    if (i === 20) { lastSrc = f; lastOut = px; }
+  });
+  await enc.end();
+  assert.equal(n, 30);
+  const v = JSON.parse(execFileSync(FFPROBE, ['-v', 'error', '-count_frames', '-show_streams', '-print_format', 'json', out]).toString()).streams[0];
+  assert.equal(+v.nb_read_frames, 30); assert.match(v.pix_fmt, /yuva444/); assert.equal(v.width, W);
+  const at = (b, x, y) => { const i = (y * W + x) * 4; return [b[i], b[i + 1], b[i + 2], b[i + 3]]; };
+  assert.equal(at(lastOut, 5, 5)[3], 0, 'outside the glass is transparent');
+  assert.equal(at(lastOut, W / 2, Math.round(H * 0.4))[3], 255, 'inside is solid glass');
+  // inside the glass the picture is bent/blurred: it differs from the straight source over the card
+  let diff = 0, cnt = 0;
+  for (let y = Math.round(H * 0.32); y < H * 0.68; y += 3) for (let x = Math.round(W * 0.3); x < W * 0.7; x += 3) { const a = at(lastOut, x, y), b = at(lastSrc, x, y); diff += Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]); cnt++; }
+  assert.ok(diff / cnt > 12, 'refraction/blur changed the picture: ' + (diff / cnt).toFixed(1));
+  // showcase still for the docs: glass composited over the frame (straight alpha blend, RGB, no chroma subsampling)
+  const comp = Buffer.alloc(W * H * 3);
+  for (let i = 0, j = 0; i < lastOut.length; i += 4, j += 3) { const a = lastOut[i + 3] / 255; for (let c = 0; c < 3; c++) comp[j + c] = Math.round(lastOut[i + c] * a + lastSrc[i + c] * (1 - a)); }
+  fs.writeFileSync(path.join(TMP, 'comp.rgb'), comp);
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-i', path.join(TMP, 'comp.rgb'), '-frames:v', '1', path.join(SHOTS, '14-liquid-glass-render.png')]);
 });

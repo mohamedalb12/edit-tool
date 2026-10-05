@@ -263,3 +263,34 @@ test('test every AI model: reply + tool calling for the editor models, catalog c
   assert.equal(by.chapters.ok, false); assert.match(by.chapters.error, /404/); assert.equal(by.chapters.listed, false);
   assert.ok(seen.includes('broken/model'));
 });
+
+test('Liquid Glass: reads the footage under the playhead, renders, places the layer right above it (and the AI can do it)', async () => {
+  const f = makeAudio('glassv.wav', [{ tone: 200, dur: 6 }]);
+  const jobs = [];
+  const renderGlass = async job => { jobs.push(job); fs.writeFileSync(job.out, 'prores'); return job.out; };
+  const { S, h, seq } = world({ clipFile: f, clipLen: 6 });
+  S.renderGlassImpl = renderGlass;
+  // clip on V2 too: glass must go above the TOPMOST picture at the playhead
+  seq.v[1].add({ projectItem: h.pr.project.importOne('/m/broll.mp4', h.pr.project.root), start: 2, end: 5, inPoint: 10 });
+  seq.player = 3;
+  const r = await S.liquidGlass({ params: { preset: 'pill', label: 'اشترك', duration: 4 } });
+  assert.equal(jobs[0].src.mediaPath, '/m/broll.mp4');
+  assert.equal(jobs[0].src.start, 11);          // inPoint 10 + (3 - 2)
+  assert.equal(jobs[0].params.duration, 2);     // clipped to the end of the B-roll (5 - 3)
+  assert.equal(jobs[0].params.label, 'اشترك'); assert.equal(jobs[0].width, 1920); assert.equal(jobs[0].fps, 25);
+  assert.equal(r.track, 2); assert.equal(r.source, 'broll.mp4');
+  assert.ok(seq.v[2].items.find(c => /glass-[0-9a-f]+\.mov$/.test(c.projectItem.mediaPath) && c._start === 3 && c._end === 5));
+  // a second glass at the same spot ignores the first glass layer as its source
+  const r2 = await S.liquidGlass({ params: { preset: 'lens', duration: 1 } });
+  assert.equal(jobs[1].src.mediaPath, '/m/broll.mp4'); assert.equal(r2.track, 3);
+  // no footage → glass over nothing (frosted only)
+  seq.player = 20;
+  await S.liquidGlass({ params: { preset: 'card' } });
+  assert.equal(jobs[2].src, null);
+  // the AI editor's tool
+  seq.player = 1;
+  const agent = new EditFastAgent({ llm: { chat: async () => ({}) }, model: 'm', services: S, style: {} });
+  const res = await agent.callTool('liquid_glass', { preset: 'glass-text', text: 'محمد', time: 1, duration: 3, anim_in: 'pop' });
+  assert.equal(jobs[3].params.text, 'محمد'); assert.equal(jobs[3].params.animIn, 'pop'); assert.equal(jobs[3].src.start, 1);
+  assert.equal(res.track, 4, 'V2–V4 are busy at 1–4s → a new track on top'); 
+});

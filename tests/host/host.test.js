@@ -183,3 +183,10 @@ test('panel bridge → evalScript → host.jsx round-trip keeps Arabic text and 
   assert.equal(info.name, 'Main');
   await assert.rejects(win.EF.host('nope', {}), /unknown host function/);
 });
+
+test('placeFile: minTrack puts a layer above the clip it belongs to', () => {
+  const { call, seq } = setup({ withBroll: false });
+  const r = call('placeFile', { path: '/c/glass-abc.mov', time: 1, kind: 'video', duration: 2, minTrack: 2 });
+  assert.equal(r.track, 2);
+  assert.deepEqual(spans(seq.v[2]), [[1, 3, 0]]);
+});

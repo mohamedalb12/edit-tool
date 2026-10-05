@@ -30,9 +30,10 @@ class Services {
    * renderScene(spec, outPath) → Promise<path>   (canvas renderer living in the panel)
    * askUser(question, options) → Promise<string>
    */
-  constructor({ host, renderScene, askUser, fetchImpl, log } = {}) {
+  constructor({ host, renderScene, renderGlass, askUser, fetchImpl, log } = {}) {
     this.host = host;
     this.renderSceneImpl = renderScene;
+    this.renderGlassImpl = renderGlass;
     this.askUserImpl = askUser;
     this.fetch = fetchImpl || nodeFetch; // Node HTTP: no CORS problems inside Premiere
     this.log = log || (() => {});
@@ -301,6 +302,43 @@ class Services {
     if (!fs.existsSync(out)) await this.renderSceneImpl(full, out, this.ffmpeg());
     const placed = await this.host('placeFile', { path: out, time: time ?? s.playhead, kind: 'video', track: -1, bin: 'EditFast/Scenes' });
     return { ...placed, file: out };
+  }
+
+  /* ---------- Liquid Glass ---------- */
+  /** The picture the glass sits on: topmost enabled video clip at time t (our own glass renders are skipped). */
+  async glassSource(time) {
+    const s = await this.seq();
+    const t = time ?? s.playhead;
+    for (let i = s.video.length - 1; i >= 0; i--) {
+      const c = s.video[i].clips.find(c => c.start <= t + 1e-3 && t < c.end - 1e-3 && !c.disabled && c.mediaPath && !/[\\/]glass-[0-9a-f]+\.mov$/i.test(c.mediaPath));
+      if (c) return { seq: s, t, clip: c, track: i, srcStart: c.inPoint + (t - c.start), maxDur: c.end - t };
+    }
+    return { seq: s, t, clip: null, track: -1 };
+  }
+
+  /** Still of the current frame (for the panel preview). */
+  async glassFrame(time) {
+    const g = await this.glassSource(time);
+    if (!g.clip) return null;
+    const out = path.join(config.cacheDir('glass'), `frame-${hash(g.clip.mediaPath + '|' + g.srcStart.toFixed(2))}.jpg`);
+    if (!fs.existsSync(out)) await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.max(0, g.srcStart)), '-i', g.clip.mediaPath, '-frames:v', '1', '-vf', 'scale=960:-2', '-q:v', '3', out]);
+    return out;
+  }
+
+  async liquidGlass({ params = {}, time, onProgress } = {}) {
+    if (!this.renderGlassImpl) throw new Error('محرك الليكود جلاس مش متاح هنا');
+    const LG = require('./liquidGlass');
+    const P = LG.normalize(params);
+    const g = await this.glassSource(time);
+    const s = g.seq;
+    let src = null, dur = P.duration;
+    if (g.clip) { dur = Math.min(dur, g.maxDur); src = { mediaPath: g.clip.mediaPath, start: g.srcStart, duration: dur }; }
+    P.duration = +dur.toFixed(3);
+    const fps = Math.round(s.fps) || 30, width = s.width, height = s.height;
+    const out = path.join(config.cacheDir('glass'), `glass-${hash(JSON.stringify({ P, src, width, height, fps }))}.mov`);
+    if (!fs.existsSync(out)) await this.renderGlassImpl({ src, width, height, fps, params: P, out, ffmpeg: this.ffmpeg(), onProgress });
+    const placed = await this.host('placeFile', { path: out, time: g.t, kind: 'video', track: -1, minTrack: g.track + 1, duration: P.duration, bin: 'EditFast/Liquid Glass' });
+    return { ...placed, file: out, source: g.clip ? g.clip.name : null, duration: P.duration };
   }
 
   /* ---------- المؤثرات الصوتية ---------- */

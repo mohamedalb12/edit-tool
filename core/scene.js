@@ -126,7 +126,7 @@
         const px = Math.round(L.size * H);
         ctx.font = `${L.weight} ${px}px "${L.font}", "Cairo", "Tajawal", "Segoe UI", "Arial", sans-serif`;
         ctx.textBaseline = 'middle';
-        ctx.direction = /[؀-ۿ]/.test(L.text) ? 'rtl' : 'ltr';
+        ctx.direction = /[\u0600-\u06FF]/.test(L.text) ? 'rtl' : 'ltr';
         ctx.textAlign = L.align === 'center' ? 'center' : (L.align === 'right' ? 'right' : 'left');
         let text = L.text;
         if (L.in === 'typewriter' && st.reveal < 1) text = Array.from(text).slice(0, Math.ceil(Array.from(text).length * st.reveal)).join('');

@@ -319,3 +319,9 @@ button.btn.primary { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 
 :root { --grad-loop: linear-gradient(90deg, #7c3aed 0%, #c026d3 25%, #f472b6 50%, #c026d3 75%, #7c3aed 100%); }
 button.btn.primary, button.btn.primary:hover { background: var(--grad-loop); background-size: 200% 100%; }
 #status.busy, .progress > div { background: var(--grad-loop); background-size: 200% 100%; }
+
+/* Liquid Glass tab */
+.stage-wrap { position: relative; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 16px 40px -18px rgba(0,0,0,.9); margin-bottom: 8px; background: #000; }
+canvas.glass-stage { display: block; width: 100%; aspect-ratio: 16/9; }
+.stage-glint { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,.08) 48%, transparent 60%); background-size: 250% 100%; animation: sweep 7s linear infinite; }
+.tile.on { border-color: rgba(192, 132, 252, .9); box-shadow: 0 0 0 1px rgba(192,132,252,.5), 0 12px 30px -12px rgba(192, 38, 211, .9); }

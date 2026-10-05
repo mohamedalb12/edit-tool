@@ -65,6 +65,8 @@
     brollPlace: function (o) { return rec('brollPlace', { id: o.item.id, duration: o.duration }, { track: 2 }); },
     askUser: function (q, o) { return S.askUserImpl ? S.askUserImpl(q, o) : Promise.resolve('تمام'); },
     saveStyle: function (st) { settings.style = st; return rec('saveStyle', st, st); },
+    glassFrame: function () { return rec('glassFrame', null, null); },
+    liquidGlass: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('liquidGlass', { params: o.params }, { track: 2, source: 'talk', duration: 4 }); },
     sequenceSnapshot: function () { return rec('sequenceSnapshot', null, 'السيكوينس: "Main" | رأس التشغيل عند 0:02.0'); },
     testModels: function (o) {
       var res = [{ feature: 'agent_strong', label: 'المونتير الذكي — قوي', model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 840, tools: true, listed: true },

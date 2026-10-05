@@ -141,7 +141,7 @@
   var LABELS = {
     get_project_state: 'بيقرا السيكوينس', ask_user: 'سؤال ليك', save_style: 'بيحفظ ذوقك', transcribe: 'بيفرّغ الكلام', get_transcript: 'بيقرا التفريغ',
     remove_silences: 'بيشيل السكتات', remove_repeats: 'بيشيل التكرار', make_hook: 'بيعمل الهوك', add_captions: 'بينزّل الكابشن',
-    apply_motion: 'بيحط حركة', add_title: 'بينزّل تايتل', build_scene: 'بيبني مشهد متحرك', generate_sfx: 'بيولّد مؤثر صوتي',
+    apply_motion: 'بيحط حركة', add_title: 'بينزّل تايتل', build_scene: 'بيبني مشهد متحرك', liquid_glass: 'بيعمل ليكود جلاس', generate_sfx: 'بيولّد مؤثر صوتي',
     auto_effects: 'مؤثرات تلقائية', add_markers: 'بيحط ماركرز', search_broll: 'بيدوّر على B-Roll', place_broll: 'بيحط B-Roll',
     library_search: 'بيدوّر في مكتبتك', place_library_item: 'بيحط من مكتبتك', chapters: 'بيطلّع الفصول', set_playhead: 'بيحرّك رأس التشغيل'
   };

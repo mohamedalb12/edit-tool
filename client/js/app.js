@@ -19,6 +19,7 @@
     EF.services = EF.test && EF.test.services ? EF.test.services : new Services({
       host: EF.host,
       renderScene: function (spec, out, ffmpeg) { return EF.renderScene(spec, out, ffmpeg); },
+      renderGlass: function (job) { return EF.renderGlass(job); },
       log: function (m) { console.log('[EditFast]', m); }
     });
     var nav = document.getElementById('nav');

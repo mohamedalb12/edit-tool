@@ -28,7 +28,7 @@ const DIACRITICS = /[ً-ْٰ]/g;
 
 function fixWord(w) {
   if (!w) return w;
-  const m = /^([^؀-ۿA-Za-z0-9]*)(.*?)([^؀-ۿA-Za-z0-9]*)$/.exec(w);
+  const m = /^([^\u0600-\u06FFA-Za-z0-9]*)(.*?)([^\u0600-\u06FFA-Za-z0-9]*)$/.exec(w);
   const core = m[2].replace(TATWEEL, '');
   const fixed = WORDS[core] || core;
   return m[1] + fixed + m[3];
@@ -37,9 +37,9 @@ function fixWord(w) {
 function fixPunctuation(text) {
   return text
     .replace(/\s+([،؛؟!.:,])/g, '$1')
-    .replace(/([؀-ۿ])\s*\?/g, '$1؟')
-    .replace(/([؀-ۿ])\s*,/g, '$1،')
-    .replace(/([؀-ۿ]);/g, '$1؛')
+    .replace(/([\u0600-\u06FF])\s*\?/g, '$1؟')
+    .replace(/([\u0600-\u06FF])\s*,/g, '$1،')
+    .replace(/([\u0600-\u06FF]);/g, '$1؛')
     .replace(/([،؛؟!])(?=[^\s])/g, '$1 ')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -101,7 +101,7 @@ async function fixWordsAI(words, llm, model, { dialect = 'egyptian', chunk = 250
 function normalizeForSearch(s) {
   return String(s || '').replace(DIACRITICS, '').replace(TATWEEL, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
-    .replace(/[^؀-ۿa-zA-Z0-9\s]/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
+    .replace(/[^\u0600-\u06FFa-zA-Z0-9\s]/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 module.exports = { fixText, fixWords, fixPhrasesAcrossWords, fixWordsAI, normalizeForSearch, fixPunctuation };

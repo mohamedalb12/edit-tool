@@ -3,6 +3,7 @@
 const motion = require('./motionPresets');
 const titles = require('./titles');
 const scene = require('./scene');
+const glass = require('./liquidGlass');
 
 const LEVELS = {
   strong: { label: 'قوي', feature: 'agent_strong', maxSteps: 24 },
@@ -34,6 +35,12 @@ const TOOLS = [
   fn('build_scene', 'ابني مشهد متحرك (موشن جرافيك) بستايل المونتير وحطه على التايملين. layers: نصوص وأشكال بحركات دخول/خروج.', {
     time: { type: 'number' },
     spec: { type: 'object', description: 'duration (ث), background {type: solid|gradient|transparent, colors[]}, layers[{type:text|shape, text, x,y (0..1), size (نسبة من الارتفاع), color (hex أو primary|accent|text), box, underline, shape (rect|circle|line), w,h, in/out (' + scene.ANIMS.join('|') + '), delay, inDur, outDur}]' } }, ['spec']),
+  fn('liquid_glass', 'حط عنصر Liquid Glass (زجاج سايل بيكسر ويغبّش الفيديو اللي تحته، الستايل المشهور) فوق الفيديو عند وقت معين.', {
+    preset: { type: 'string', enum: glass.PRESETS.map(p => p.id) },
+    label: { type: 'string', description: 'نص على الزجاج' }, text: { type: 'string', description: 'للـ glass-text: الكلمة نفسها زجاج' },
+    x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' },
+    tint: { type: 'string', description: 'لون hex' }, tint_amount: { type: 'number' }, blur: { type: 'number' }, refract: { type: 'number' },
+    anim_in: { type: 'string', enum: glass.ANIMS_IN }, time: { type: 'number' }, duration: { type: 'number' } }, ['preset']),
   fn('generate_sfx', 'ولّد مؤثر صوتي من وصف وحطه على التايملين.', {
     prompt: { type: 'string', description: 'وصف بالإنجليزي' }, time: { type: 'number' }, duration: { type: 'number' } }, ['prompt', 'time']),
   fn('auto_effects', 'خلّي محرك المؤثرات التلقائية يقرا الكلام ويحط مؤثرات صوت وحركة مناسبة.', { density: { type: 'string', enum: ['low', 'medium', 'high'] } }),
@@ -93,6 +100,11 @@ class EditFastAgent {
       case 'apply_motion': return s.applyMotion({ preset: args.preset, level: args.level || (this.style && +this.style.motion) || 2, time: args.time, track: args.track });
       case 'add_title': return s.addTitle({ template: args.template, text: args.text, time: args.time, duration: args.duration });
       case 'build_scene': return s.buildScene({ spec: args.spec, time: args.time });
+      case 'liquid_glass': {
+        const p = { preset: args.preset, label: args.label, text: args.text, x: args.x, y: args.y, w: args.w, h: args.h, tint: args.tint, tintAmount: args.tint_amount, blur: args.blur, refract: args.refract, animIn: args.anim_in, duration: args.duration };
+        Object.keys(p).forEach(k => p[k] === undefined && delete p[k]);
+        return s.liquidGlass({ params: p, time: args.time });
+      }
       case 'generate_sfx': return s.generateSfx({ prompt: args.prompt, time: args.time, duration: args.duration, place: true });
       case 'auto_effects': return s.autoEffects({ density: args.density || (this.style && this.style.sfx) || 'medium', apply: true });
       case 'add_markers': return s.addMarkers(args.markers);
