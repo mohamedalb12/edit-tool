@@ -135,13 +135,18 @@ class Sequence {
     this.videoTracks = collection(() => this.v, 'numTracks'); this.audioTracks = collection(() => this.a, 'numTracks');
     this.player = 0; this.log = []; this.markerList = []; this.captionTracks = [];
     const self = this;
-    this.markers = { createMarker(s) { const m = { start: T(s), name: '', comments: '', end: T(s), color: null, setColorByIndex(i) { this.color = i; } }; self.markerList.push(m); return m; }, get numMarkers() { return self.markerList.length; } };
+    this.markers = {
+      getFirstMarker() { return self.markerList.slice().sort((a, b) => a.start.seconds - b.start.seconds)[0] || null; },
+      getNextMarker(m) { const l = self.markerList.slice().sort((a, b) => a.start.seconds - b.start.seconds); return l[l.indexOf(m) + 1] || null; },
+      createMarker(s) { const m = { start: T(s), name: '', comments: '', end: T(s), color: null, setColorByIndex(i) { this.color = i; } }; self.markerList.push(m); return m; }, get numMarkers() { return self.markerList.length; } };
     this.projectItem = new ProjectItem({ name, isSeq: true, parent: project.root }); project.root.kids.push(this.projectItem);
   }
   get end() { const all = [...this.v, ...this.a].flatMap(t => t.items.map(c => c._end)); return String(Math.round(Math.max(0, ...all) * TICKS)); }
   get timebase() { return String(TICKS / this.fps); }
   getSettings() { return { videoFrameRate: T(1 / this.fps), videoDisplayFormat: 101, videoFrameWidth: this.width, videoFrameHeight: this.height }; }
   getPlayerPosition() { return T(this.player); }
+  getInPointAsTime() { return T(this.inPoint || 0); }
+  getOutPointAsTime() { return T(this.outPoint || 0); }
   setPlayerPosition(ticks) { this.player = parseFloat(ticks) / TICKS; }
   getSelection() { return [...this.v, ...this.a].flatMap(t => t.items.filter(c => c.selected)); }
   clone() {

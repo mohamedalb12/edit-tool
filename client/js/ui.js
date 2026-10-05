@@ -61,7 +61,57 @@
   };
   var h = UI.h;
 
-  UI.card = function (title) { return h('div', { class: 'card' }, title ? h('h3', null, title) : null, Array.prototype.slice.call(arguments, 1)); };
+  /** Word-by-word reveal (Arabic letters must stay joined, so we animate whole words). */
+  UI.wordFx = function (el, text, opts) {
+    opts = opts || {};
+    var step = opts.step || 45, i = 0;
+    var AR = /[\u0600-\u06FF]/;
+    // tokens = words and spaces; consecutive non-Arabic words (e.g. "EditFast AI") stay in ONE isolated LTR span,
+    // otherwise inline-block words would be re-ordered by the RTL bidi algorithm
+    var tokens = String(text).split(/(\s+)/).filter(function (t) { return t !== ''; }), runs = [];
+    tokens.forEach(function (t) {
+      var last = runs[runs.length - 1];
+      var latin = !AR.test(t) && /[A-Za-z0-9]/.test(t);
+      if (latin && last && last.latin) { last.text += (last.pendingSpace || '') + t; last.pendingSpace = ''; return; }
+      if (/^\s+$/.test(t)) { if (last && last.latin) { last.pendingSpace = t; return; } runs.push({ space: true, text: t }); return; }
+      if (last && last.latin && last.pendingSpace) { runs.push({ space: true, text: last.pendingSpace }); last.pendingSpace = ''; }
+      runs.push({ text: t, latin: latin });
+    });
+    el.textContent = '';
+    el.classList.add('wordfx');
+    runs.forEach(function (r) {
+      if (r.space) { el.appendChild(document.createTextNode(r.text)); return; }
+      var sp = document.createElement('span'); sp.className = 'w' + (r.latin ? ' lat' : ''); sp.textContent = r.text;
+      sp.style.animationDelay = Math.min(i++, 60) * step + 'ms';
+      el.appendChild(sp);
+      if (r.pendingSpace) el.appendChild(document.createTextNode(r.pendingSpace));
+    });
+    return el;
+  };
+
+  /** Animated number counter. */
+  UI.countUp = function (el, to, fmt, ms) {
+    fmt = fmt || function (v) { return Math.round(v); }; ms = ms || 700;
+    var t0 = performance.now(), from = 0;
+    (function f(now) { var u = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - u, 3); el.textContent = fmt(from + (to - from) * e); if (u < 1) requestAnimationFrame(f); })(t0);
+    return el;
+  };
+
+  // liquid glass: the specular highlight follows the pointer
+  var raf = 0, lastEv = null;
+  document.addEventListener('pointermove', function (e) {
+    lastEv = e; if (raf) return;
+    raf = requestAnimationFrame(function () {
+      raf = 0;
+      var el = lastEv.target.closest && lastEv.target.closest('.card, .tile, button.btn, .msg, #nav button, .chip');
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', (lastEv.clientX - r.left) + 'px');
+      el.style.setProperty('--my', (lastEv.clientY - r.top) + 'px');
+    });
+  });
+
+  UI.card = function (title) { return h('div', { class: 'card' }, title ? UI.wordFx(h('h3'), title, { step: 60 }) : null, Array.prototype.slice.call(arguments, 1)); };
   UI.row = function () { return h('div', { class: 'row' }, Array.prototype.slice.call(arguments)); };
   UI.field = function (label, input) { return h('div', { class: 'row' }, h('label', null, label), input); };
   UI.hint = function (t) { return h('p', { class: 'hint' }, t); };
@@ -104,7 +154,7 @@
   var toastTimer;
   UI.toast = function (msg, isErr) {
     var t = document.getElementById('toast');
-    t.textContent = msg; t.className = 'show' + (isErr ? ' err' : '');
+    UI.wordFx(t, msg, { step: 25 }); t.className = 'show wordfx' + (isErr ? ' err' : '');
     clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.className = ''; }, isErr ? 6000 : 3000);
   };
 

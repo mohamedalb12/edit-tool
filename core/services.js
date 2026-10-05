@@ -58,13 +58,87 @@ class Services {
 
   async projectState() {
     const s = await this.seq();
-    const brief = t => ({ index: t.index, name: t.name, locked: t.locked, clips: t.clips.map(c => ({ name: c.name, start: +c.start.toFixed(2), end: +c.end.toFixed(2), disabled: c.disabled || undefined })) });
+    const brief = t => ({ index: t.index, name: t.name, locked: t.locked, clips: t.clips.map(c => ({ name: c.name, start: +c.start.toFixed(2), end: +c.end.toFixed(2), disabled: c.disabled || undefined, selected: c.selected || undefined, effects: c.effects && c.effects.length ? c.effects : undefined })) });
     return {
       sequence: s.name, duration: +s.duration.toFixed(2), fps: s.fps, size: `${s.width}x${s.height}`, playhead: +s.playhead.toFixed(2),
-      video: s.video.map(brief), audio: s.audio.map(brief),
+      video: s.video.map(brief), audio: s.audio.map(brief), markers: (s.markers || []).map(m => ({ time: +m.time.toFixed(2), name: m.name, comment: m.comment || undefined })),
       transcript: this.transcript && this.transcript.seqId === s.id ? { words: this.transcript.words.length } : null,
       style: this.settings.style || null
     };
+  }
+
+  /**
+   * Live, compact text picture of the sequence that the AI editor gets with every message:
+   * tracks/clips, playhead, selection, markers, effects and the transcript (closest to the playhead first).
+   */
+  async sequenceSnapshot({ maxChars = 9000 } = {}) {
+    const s = await this.seq();
+    const T = sec => { sec = Math.max(0, sec || 0); const m = Math.floor(sec / 60), r = sec - m * 60; return `${m}:${r < 10 ? '0' : ''}${r.toFixed(1)}`; };
+    const L = [];
+    L.push(`السيكوينس: "${s.name}" | المدة ${T(s.duration)} | ${Math.round(s.fps * 100) / 100}fps | ${s.width}x${s.height} | رأس التشغيل عند ${T(s.playhead)}`);
+    const under = [];
+    const sel = [];
+    const track = (t, kind) => {
+      const tag = (kind === 'video' ? 'V' : 'A') + (t.index + 1);
+      if (!t.clips.length) return;
+      const parts = t.clips.slice(0, 30).map(c => {
+        if (c.start <= s.playhead && s.playhead < c.end) under.push(`${tag} "${c.name}"`);
+        if (c.selected) sel.push(`${tag} "${c.name}" (${T(c.start)}–${T(c.end)})`);
+        return `"${c.name}" ${T(c.start)}–${T(c.end)}${c.disabled ? ' [مقفول]' : ''}${c.effects && c.effects.length ? ' {' + c.effects.join('، ') + '}' : ''}`;
+      });
+      L.push(`${tag}${t.locked ? ' (مقفول)' : ''}: ${parts.join(' | ')}${t.clips.length > 30 ? ` …(+${t.clips.length - 30})` : ''}`);
+    };
+    s.video.slice().reverse().forEach(t => track(t, 'video'));
+    s.audio.forEach(t => track(t, 'audio'));
+    L.push(`تحت رأس التشغيل: ${under.length ? under.join('، ') : 'مفيش'}`);
+    if (sel.length) L.push(`المختار: ${sel.join('، ')}`);
+    if (s.markers && s.markers.length) L.push(`ماركرز (${s.markers.length}): ` + s.markers.slice(0, 40).map(m => `${T(m.time)} ${m.name || ''}`.trim()).join(' | '));
+    const have = this.transcript && this.transcript.seqId === s.id;
+    if (!have) L.push('التفريغ: لسه مفيش تفريغ للسيكوينس دي (استخدم transcribe لو محتاج تعرف الكلام).');
+    else {
+      const sents = transcribeMod.sentences(this.transcript.words);
+      L.push(`التفريغ (${this.transcript.words.length} كلمة، ${sents.length} جملة):`);
+      const budget = maxChars - L.join('\n').length - 200;
+      // closest sentences to the playhead first, then put them back in time order
+      const order = sents.map((x, i) => ({ i, d: x.end < s.playhead ? s.playhead - x.end : Math.max(0, x.start - s.playhead) })).sort((a, b) => a.d - b.d);
+      const keep = new Set(); let used = 0;
+      for (const o of order) { const line = sents[o.i].text.length + 20; if (used + line > budget) break; keep.add(o.i); used += line; }
+      let gap = false;
+      sents.forEach((x, i) => {
+        if (keep.has(i)) { L.push(`[${T(x.start)}–${T(x.end)}] ${x.text}`); gap = false; }
+        else if (!gap) { L.push('…'); gap = true; }
+      });
+    }
+    return L.join('\n');
+  }
+
+  /** Check every AI feature's model on OpenRouter: answers? (and for the editor: can it call tools?) */
+  async testModels({ features, onResult } = {}) {
+    const { FEATURES } = require('./openrouter');
+    const list = (features || FEATURES.map(f => f.id)).map(id => FEATURES.find(f => f.id === id)).filter(Boolean);
+    let catalog = null;
+    try { catalog = new Set((await this.llm.listModels()).map(m => m.id)); } catch (_) {}
+    const tool = { type: 'function', function: { name: 'set_playhead', description: 'Move the playhead', parameters: { type: 'object', properties: { time: { type: 'number' } }, required: ['time'] } } };
+    const out = [];
+    for (const f of list) {
+      const model = this.model(f.id), t0 = Date.now();
+      const r = { feature: f.id, label: f.label, model, ok: false, ms: 0, tools: null, listed: catalog ? catalog.has(model) : null };
+      try {
+        if (f.tools) {
+          const m = await this.llm.chat({ model, maxTokens: 300, tools: [tool], messages: [{ role: 'system', content: 'You are a video editor assistant. Use the tool.' }, { role: 'user', content: 'Move the playhead to 12 seconds.' }] });
+          const call = (m.tool_calls || [])[0];
+          r.tools = !!(call && call.function && call.function.name === 'set_playhead');
+          r.ok = r.tools || !!m.content;
+          r.reply = call ? `set_playhead(${call.function.arguments})` : String(m.content || '').slice(0, 80);
+        } else {
+          const txt = await this.llm.text({ model, user: 'رد بكلمة واحدة بس: تمام', maxTokens: 30 });
+          r.ok = !!txt; r.reply = txt.slice(0, 80);
+        }
+      } catch (e) { r.error = e.message; }
+      r.ms = Date.now() - t0;
+      out.push(r); if (onResult) onResult(r);
+    }
+    return out;
   }
 
   async setPlayhead(t) { return this.host('setPlayhead', { time: +t }); }

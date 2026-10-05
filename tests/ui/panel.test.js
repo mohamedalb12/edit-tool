@@ -73,6 +73,9 @@ test('EditFast AI: taste form, model picker per level, chat runs tools and asks 
   await page.waitForSelector('text=عملت الهوك');
   const c = await calls();
   assert.ok(c.includes('projectState') && c.filter(x => x === 'llm.chat').length === 2, c.join());
+  assert.ok(c.includes('sequenceSnapshot'), 'agent gets a live picture of the sequence');
+  await page.waitForFunction(() => /شايف: Main · 0:02\.0 · 4 كليب · 1 ماركر/.test(document.querySelector('.seebar').textContent));
+  assert.ok(await page.$('.seebar.live'));
   assert.equal(await page.evaluate(() => window.__calls.find(c => c.name === 'llm.chat').args.model), 'anthropic/claude-opus-5.5');
   assert.equal(await page.locator('.msg.tool.ok').count(), 2);
   await shot('01-agent');
@@ -81,7 +84,7 @@ test('EditFast AI: taste form, model picker per level, chat runs tools and asks 
 test('القص السريع: analyse → list → cut', async () => {
   await open('quickcut'); await clearCalls();
   await clickText('حلّل السكتات');
-  await page.waitForSelector('text=1.8 ثانية');
+  await page.waitForFunction(() => [...document.querySelectorAll('.stat b')].map(b => b.textContent).join('|') === '2|1.8');
   await clickText('قص وقفّل الفراغات');
   const c = await page.evaluate(() => window.__calls);
   const qc = c.find(x => x.name === 'quickCut').args;
@@ -226,9 +229,23 @@ test('الإعدادات: keys, per-feature model panel (every AI feature), load
   for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll']) assert.ok(labels.includes(f), f);
   await clickText('حمّل قائمة الموديلات من OpenRouter');
   assert.equal(await page.locator('#ef-models option').count(), 2);
+  await clickText('اختبر كل الموديلات');
+  assert.equal(await page.locator('.mtest.pass').count(), 1);
+  assert.equal(await page.locator('.mtest.fail').count(), 1);
+  assert.match(await page.textContent('.mtest.fail'), /404/);
+  assert.match(await page.textContent('.mtest.fail'), /مش موجود في قائمة OpenRouter/);
   await page.locator('input[type=password]').first().fill('sk-or-NEW'); await page.locator('input[type=password]').first().dispatchEvent('change');
   assert.equal(await page.evaluate(() => EF.services.settings.keys.openrouter), 'sk-or-NEW');
   await shot('11-settings');
+});
+
+test('text motion: titles/card headings/AI replies reveal word by word, splash letters', async () => {
+  await open('quickcut');
+  assert.ok(await page.locator('#tab-title.wordfx .w').count() >= 2);
+  assert.ok(await page.locator('.card h3.wordfx .w').count() >= 1);
+  assert.equal(await page.textContent('#tab-title'), 'القص السريع (أوفلاين)');
+  await open('agent');
+  assert.ok(await page.locator('.msg.ai.wordfx .w').count() >= 3);
 });
 
 test('narrow panel (320px): no horizontal overflow on any tab', async () => {

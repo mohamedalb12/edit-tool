@@ -7,7 +7,7 @@
     var tab = EF.tabs.find(function (t) { return t.id === id; }) || EF.tabs[0];
     current = tab.id;
     Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) { b.classList.toggle('active', b.dataset.id === tab.id); });
-    document.getElementById('tab-title').textContent = tab.title;
+    UI.wordFx(document.getElementById('tab-title'), tab.title, { step: 70 });
     var view = UI.empty(document.getElementById('view'));
     try { tab.render(view); } catch (e) { view.appendChild(UI.card('خطأ', h('pre', { class: 'err ltr' }, e.stack || e.message))); console.error(e); }
     try { localStorage.setItem('ef-tab', tab.id); } catch (e2) {}
@@ -23,6 +23,7 @@
     });
     var nav = document.getElementById('nav');
     Array.prototype.forEach.call(document.querySelectorAll('[data-icon]'), function (el) { el.appendChild(UI.icon(el.getAttribute('data-icon'))); });
+    var sw = document.querySelector('#splash .word'); if (sw) { var txt = sw.textContent; sw.textContent = ''; txt.split('').forEach(function (c, i) { sw.appendChild(h('span', { class: 'ch', style: { animationDelay: (i * 55) + 'ms' } }, c)); }); }
     setTimeout(function () { var sp = document.getElementById('splash'); if (sp) { sp.classList.add('hide'); setTimeout(function () { sp.remove(); }, 700); } }, 650);
     EF.tabs.forEach(function (t) {
       nav.appendChild(h('button', { type: 'button', 'data-id': t.id, title: t.title, onclick: function () { show(t.id); } }, h('span', { class: 'ic' }, UI.icon(t.id)), t.label));

@@ -97,8 +97,34 @@ EF.clipInfo = function (clip, kind, ti, ci) {
     mediaPath: EF.mediaPath(clip.projectItem),
     nodeId: clip.projectItem ? clip.projectItem.nodeId : '',
     selected: clip.isSelected ? !!clip.isSelected() : false,
-    disabled: !!clip.disabled
+    disabled: !!clip.disabled,
+    effects: EF.effectNames(clip)
   };
+};
+
+EF.INTRINSIC = { 'Opacity': 1, 'Motion': 1, 'Volume': 1, 'Channel Volume': 1, 'Panner': 1, 'Time Remapping': 1, 'Vector Motion': 1 };
+/** names of the effects the user added to a clip (intrinsic Motion/Opacity/Volume are skipped) */
+EF.effectNames = function (clip) {
+  var out = [], i, c;
+  try {
+    for (i = 0; i < clip.components.numItems; i++) {
+      c = clip.components[i];
+      if (c && !EF.INTRINSIC[c.displayName]) out.push(c.displayName);
+    }
+  } catch (e) {}
+  return out;
+};
+
+EF.markerList = function (seq) {
+  var out = [], m, n = 0;
+  try {
+    m = seq.markers.getFirstMarker();
+    while (m && n < 500) {
+      out.push({ time: EF.sec(m.start), end: EF.sec(m.end), name: m.name || '', comment: m.comments || '' });
+      m = seq.markers.getNextMarker(m); n++;
+    }
+  } catch (e) {}
+  return out;
 };
 
 EF.tracks = function (seq, kind) { return kind === 'audio' ? seq.audioTracks : seq.videoTracks; };
@@ -208,6 +234,8 @@ EFAPI.sequenceInfo = function () {
   try { var st = seq.getSettings(); out.width = st.videoFrameWidth; out.height = st.videoFrameHeight; } catch (e) { out.width = 1920; out.height = 1080; }
   out.duration = EF.ticksToSec(seq.end);
   out.playhead = EF.sec(seq.getPlayerPosition());
+  out.markers = EF.markerList(seq);
+  try { var io = seq.getInPointAsTime ? EF.sec(seq.getInPointAsTime()) : null, oo = seq.getOutPointAsTime ? EF.sec(seq.getOutPointAsTime()) : null; if (io !== null) out.inOut = [io, oo]; } catch (e2) {}
   for (k = 0; k < kinds.length; k++) {
     var tracks = EF.tracks(seq, kinds[k]);
     for (ti = 0; ti < tracks.numTracks; ti++) {

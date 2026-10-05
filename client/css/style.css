@@ -234,3 +234,88 @@ pre { white-space: pre-wrap; }
 /* stacked rows: label on its own line, field takes the full width (settings) */
 .row.stack > label, .row.stack > .hint { flex-basis: 100%; min-width: 0 !important; margin-bottom: -4px; }
 .row.stack > input, .row.stack > select { flex: 1; }
+
+/* ═══════════ Liquid glass ═══════════ */
+:root {
+  --lg-fill: linear-gradient(145deg, rgba(255, 255, 255, .11) 0%, rgba(255, 255, 255, .035) 45%, rgba(255, 255, 255, .06) 100%);
+  --lg-edge: inset 0 1px 0 rgba(255, 255, 255, .38), inset 0 -1px 0 rgba(255, 255, 255, .08), inset 1px 0 0 rgba(255, 255, 255, .10), inset -1px 0 0 rgba(255, 255, 255, .05);
+  --lg-depth: 0 1px 1px rgba(0, 0, 0, .25), 0 18px 40px -18px rgba(0, 0, 0, .85), 0 30px 60px -30px rgba(124, 58, 237, .35);
+}
+#bg .orb { opacity: .75; filter: blur(50px); }
+#bg .o3 { opacity: .32; }
+#bg .o4 { width: 260px; height: 260px; background: #f59e0b; top: 55%; right: -90px; opacity: .22; animation-duration: 34s; animation-delay: -18s; }
+
+.card, .tile, #nav, #topbar, .msg.ai, .msg.ask, .seg, .list, .words, .chip, #toast, button.btn:not(.primary) {
+  background-image: var(--lg-fill);
+  backdrop-filter: blur(26px) saturate(185%) brightness(1.08);
+  -webkit-backdrop-filter: blur(26px) saturate(185%) brightness(1.08);
+}
+.card { background-color: rgba(20, 16, 36, .38); box-shadow: var(--lg-edge), var(--lg-depth); border-color: rgba(255, 255, 255, .10); border-radius: 18px; }
+.tile { background-color: rgba(20, 16, 36, .34); box-shadow: var(--lg-edge), 0 12px 26px -16px rgba(0, 0, 0, .9); border-color: rgba(255, 255, 255, .09); border-radius: 15px; }
+#nav { background-color: rgba(14, 11, 26, .55); box-shadow: inset 1px 0 0 rgba(255, 255, 255, .08); }
+#topbar { background-color: rgba(14, 11, 26, .4); }
+.msg.ai { background-color: rgba(255, 255, 255, .05); box-shadow: var(--lg-edge), 0 10px 24px -14px rgba(0, 0, 0, .9); }
+button.btn:not(.primary) { background-color: rgba(255, 255, 255, .04); box-shadow: var(--lg-edge); border-color: rgba(255, 255, 255, .12); }
+button.btn.primary { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), inset 0 -2px 6px rgba(76, 29, 149, .45), 0 10px 26px -10px rgba(192, 38, 211, .95); }
+
+/* specular light that follows the pointer (set by ui.js → --mx/--my) */
+.card::after, button.btn:not(.primary)::after, .msg.ai::after, .chip::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, .13), transparent 60%);
+  opacity: 0; transition: opacity .35s var(--ease);
+}
+.card:hover::after, button.btn:not(.primary):hover::after, .msg.ai:hover::after, .chip:hover::after { opacity: 1; }
+.msg.ai, .chip { position: relative; }
+.tile::after { background: radial-gradient(180px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, .16), rgba(217, 70, 239, .14) 35%, transparent 70%); }
+/* a soft caustic sheen sliding across glass */
+.card > h3 { position: relative; }
+.tile::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .10) 45%, transparent 60%); background-size: 250% 100%; background-position: 130% 0; transition: background-position .9s var(--ease); }
+.tile:hover::before { background-position: -30% 0; }
+/* liquid logo: the mark breathes like a drop */
+.mark { animation: blob 9s ease-in-out infinite; }
+@keyframes blob { 0%, 100% { border-radius: 11px 13px 11px 14px; } 33% { border-radius: 15px 10px 14px 10px; } 66% { border-radius: 10px 15px 10px 13px; } }
+#nav button.active .ic { animation: blob 7s ease-in-out infinite; }
+
+/* ═══════════ Text motion ═══════════ */
+.wordfx .w { display: inline-block; animation: wordIn .6s var(--ease) both; }
+@keyframes wordIn { 0% { opacity: 0; transform: translateY(.45em) scale(.96); filter: blur(6px); } 60% { filter: blur(0); } 100% { opacity: 1; transform: none; filter: none; } }
+#tab-title.wordfx .w { animation: titleIn .75s var(--spring) both; }
+@keyframes titleIn { 0% { opacity: 0; transform: translateY(14px) rotateX(70deg); filter: blur(8px); } 100% { opacity: 1; transform: none; filter: none; } }
+#tab-title { perspective: 400px; }
+.card h3.wordfx .w { background: linear-gradient(90deg, var(--text) 0%, var(--text) 40%, #f0abfc 50%, var(--text) 60%, var(--text) 100%); background-size: 300% 100%; background-position: 100% 0; -webkit-background-clip: text; background-clip: text; color: transparent; animation: wordIn .6s var(--ease) both, glint 1.6s .4s var(--ease) both; }
+.card:hover h3.wordfx .w { animation: glint 1.2s var(--ease) both; }
+@keyframes glint { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.msg.ai.wordfx .w { animation-duration: .45s; }
+#splash .word .ch { display: inline-block; animation: charIn .7s var(--spring) both; }
+@keyframes charIn { from { opacity: 0; transform: translateY(18px) scale(.6) rotate(-8deg); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+.brand .name { animation: shimmer 6s linear infinite, fadeIn .8s .3s var(--ease) both; }
+@keyframes fadeIn { from { opacity: 0; letter-spacing: 6px; } to { opacity: 1; } }
+.hint { animation: fadeIn2 .7s .15s var(--ease) both; }
+@keyframes fadeIn2 { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+#status { transition: background .4s var(--ease), color .3s; }
+
+/* stats counters */
+.stats { display: flex; gap: 10px; }
+.stat { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 6px; border-radius: 12px; background: rgba(255, 255, 255, .04); box-shadow: var(--lg-edge); }
+.stat b { font-size: 26px; font-weight: 900; line-height: 1.2; font-variant-numeric: tabular-nums; background: var(--grad-text); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 4s linear infinite; }
+.stat span { font-size: 11px; color: var(--muted); font-weight: 600; }
+
+/* "what the AI sees" bar */
+.seebar { display: flex; align-items: center; gap: 9px; padding: 8px 12px; margin-bottom: 12px; border-radius: 99px; font-size: 11.5px; font-weight: 600; color: var(--muted); background: rgba(255, 255, 255, .04) var(--lg-fill); box-shadow: var(--lg-edge); backdrop-filter: blur(20px) saturate(170%); -webkit-backdrop-filter: blur(20px) saturate(170%); border: 1px solid rgba(255, 255, 255, .08); overflow: hidden; white-space: nowrap; }
+.seebar > span.grow { overflow: hidden; text-overflow: ellipsis; }
+.seebar .eye { position: relative; width: 16px; height: 16px; flex: 0 0 auto; border-radius: 50%; background: radial-gradient(circle, #fff 0 22%, #c026d3 26% 55%, transparent 60%); box-shadow: 0 0 10px rgba(217, 70, 239, .8); }
+.seebar.live { color: var(--text); }
+.seebar.live .eye::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid rgba(217, 70, 239, .6); animation: ring 2s var(--ease) infinite; }
+@keyframes ring { from { transform: scale(.5); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+
+/* model test results */
+.mtest .badge-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.mtest.pass .badge-dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.mtest.fail .badge-dot { background: var(--err); box-shadow: 0 0 10px var(--err); }
+.mtest { animation: pop .4s var(--spring) both; }
+.wordfx .w.lat { direction: ltr; unicode-bidi: isolate; }
+
+/* seamless looping gradient for anything animated with `flow` (no hard seam where the tile repeats) */
+:root { --grad-loop: linear-gradient(90deg, #7c3aed 0%, #c026d3 25%, #f472b6 50%, #c026d3 75%, #7c3aed 100%); }
+button.btn.primary, button.btn.primary:hover { background: var(--grad-loop); background-size: 200% 100%; }
+#status.busy, .progress > div { background: var(--grad-loop); background-size: 200% 100%; }

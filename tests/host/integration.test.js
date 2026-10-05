@@ -198,3 +198,68 @@ test('EditFast AI agent: OpenRouter tool loop, asks taste once, stays in scope, 
   const a2 = new EditFastAgent({ llm: S.llm, model: 'x', services: S, style: config.load().style });
   assert.match(a2.messages[0].content, /ذوق المونتير محفوظ/);
 });
+
+test('AI sees the sequence: live snapshot (clips, playhead, selection, markers, effects, transcript near playhead)', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'أهلا بيكم النهارده هنتكلم عن الإضاءة في التصوير';
+  const f = makeAudio('snap.wav', [{ tone: 250, dur: 6 }]);
+  const { S, seq, h } = world({ clipFile: f, clipLen: 6 });
+  seq.v[1].add({ projectItem: h.pr.project.importOne('/m/broll-city.mp4', h.pr.project.root), start: 1, end: 3 });
+  seq.player = 2;
+  await S.applyMotion({ preset: 'punch-in', level: 2, time: 2 });
+  seq.v[1].items[0].selected = true;
+  await S.addMarkers([{ time: 4, name: 'هنا الإضاءة' }]);
+  await S.transcribe({});
+  const snap = await S.sequenceSnapshot();
+  assert.match(snap, /السيكوينس: "Main"/);
+  assert.match(snap, /رأس التشغيل عند 0:02\.0/);
+  assert.match(snap, /V2: "broll-city\.mp4" 0:01\.0–0:03\.0 \{Transform\}/, snap);
+  assert.match(snap, /تحت رأس التشغيل: V2 "broll-city\.mp4"، V1/);
+  assert.match(snap, /المختار: V2 "broll-city\.mp4"/);
+  assert.match(snap, /ماركرز \(1\): 0:04\.0 هنا الإضاءة/);
+  assert.match(snap, /التفريغ \(8 كلمة/);
+  assert.match(snap, /الإضاءة في التصوير/);
+  // tight budget: keeps the sentences closest to the playhead and marks the gaps
+  const tiny = await S.sequenceSnapshot({ maxChars: 600 });
+  assert.ok(tiny.length < 900);
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('AI answers questions about the sequence straight from the snapshot without editing', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'السعر النهارده ميتين جنيه بس';
+  const f = makeAudio('qa.wav', [{ tone: 250, dur: 4 }]);
+  const requests = [];
+  const fetchImpl = async (url, opts) => { requests.push(JSON.parse(opts.body)); return mockResponse({ choices: [{ message: { content: 'قال إن السعر ميتين جنيه عند 0:01.' }, finish_reason: 'stop' }] }); };
+  const { S, calls } = world({ clipFile: f, clipLen: 4, fetchImpl });
+  await S.transcribe({});
+  calls.length = 0; requests.length = 0;
+  const agent = new EditFastAgent({ llm: S.llm, model: 'm', services: S, style: { primary: '#fff' } });
+  const out = await agent.send('هو قال السعر كام؟');
+  assert.match(out.text, /ميتين/);
+  const user = requests[0].messages.find(m => m.role === 'user').content;
+  assert.match(user, /^<sequence_now>/);
+  assert.match(user, /السعر النهارده ميتين جنيه بس/);
+  assert.match(user, /هو قال السعر كام؟$/);
+  assert.match(requests[0].messages[0].content, /جاوب منها على طول/);
+  assert.deepEqual(calls.filter(c => !['sequenceInfo'].includes(c)), [], 'no editing calls');
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('test every AI model: reply + tool calling for the editor models, catalog check, errors reported', async () => {
+  const seen = [];
+  const fetchImpl = async (url, opts = {}) => {
+    if (url.endsWith('/models')) return mockResponse({ data: [{ id: 'good/tools' }, { id: 'good/text' }] });
+    const b = JSON.parse(opts.body); seen.push(b.model);
+    if (b.model === 'broken/model') return mockResponse({ error: { message: 'No endpoints found' } }, { status: 404 });
+    if (b.tools) return mockResponse({ choices: [{ message: { content: '', tool_calls: [{ id: 'x', type: 'function', function: { name: 'set_playhead', arguments: '{"time":12}' } }] } }] });
+    return mockResponse({ choices: [{ message: { content: 'تمام' } }] });
+  };
+  const { S } = world({ fetchImpl, settings: { defaultModel: 'good/text', models: { agent_strong: 'good/tools', agent_max: 'good/tools', chapters: 'broken/model' } } });
+  const live = [];
+  const res = await S.testModels({ onResult: r => live.push(r.feature) });
+  assert.equal(res.length, 8); assert.equal(live.length, 8);
+  const by = Object.fromEntries(res.map(r => [r.feature, r]));
+  assert.equal(by.agent_strong.ok, true); assert.equal(by.agent_strong.tools, true); assert.match(by.agent_strong.reply, /set_playhead/);
+  assert.equal(by.sfx_translate.ok, true); assert.equal(by.sfx_translate.tools, null); assert.equal(by.sfx_translate.listed, true);
+  assert.equal(by.chapters.ok, false); assert.match(by.chapters.error, /404/); assert.equal(by.chapters.listed, false);
+  assert.ok(seen.includes('broken/model'));
+});

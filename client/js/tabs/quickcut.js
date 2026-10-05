@@ -17,7 +17,9 @@
         UI.safe('بيسمع الصوت', function () {
           return S.quickCutAnalyze(opts()).then(function (r) {
             last = r; UI.empty(result);
-            result.appendChild(h('p', null, 'لقى ', h('b', null, r.cuts.length), ' سكتة — هيشيل ', h('b', null, r.removedSeconds.toFixed(1) + ' ثانية')));
+            result.appendChild(UI.card(null, h('div', { class: 'stats' },
+              h('div', { class: 'stat' }, UI.countUp(h('b'), r.cuts.length), h('span', null, 'سكتة')),
+              h('div', { class: 'stat' }, UI.countUp(h('b'), r.removedSeconds, function (v) { return v.toFixed(1); }), h('span', null, 'ثانية هتتشال')))));
             var list = h('div', { class: 'list' });
             r.cuts.slice(0, 300).forEach(function (c) {
               list.appendChild(h('div', { class: 'item click', onclick: function () { S.setPlayhead(c.start); } }, h('span', { class: 't' }, UI.fmtTime(c.start)), h('span', null, (c.end - c.start).toFixed(2) + 's')));

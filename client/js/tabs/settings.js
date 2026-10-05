@@ -54,7 +54,19 @@
         keyInput('openrouter', 'OpenRouter', 'https://openrouter.ai/keys'), UI.row(testBtn),
         keyInput('elevenlabs', 'ElevenLabs (SFX)', 'https://elevenlabs.io/app/settings/api-keys'),
         keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/')));
-      view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('اختار الموديل اللي يشغّل كل ميزة. اكتب أي ID من OpenRouter أو حمّل القائمة.'), UI.row(loadBtn), modelsBox));
+      var testBox = h('div', { class: 'list', style: { display: 'none' } });
+      var testAll = UI.btn('اختبر كل الموديلات', function () {
+        UI.empty(testBox); testBox.style.display = '';
+        UI.safe('بيختبر الموديلات', function () {
+          return S.testModels({ onResult: function (r) {
+            testBox.appendChild(h('div', { class: 'item mtest ' + (r.ok ? 'pass' : 'fail') },
+              h('span', { class: 'badge-dot' }),
+              h('div', { class: 'grow' }, h('div', { style: { fontWeight: 700 } }, r.label), h('div', { class: 'hint ltr' }, r.model + (r.listed === false ? '  ⚠ مش موجود في قائمة OpenRouter' : ''))),
+              h('div', { class: 'hint ltr', style: { textAlign: 'left', maxWidth: '42%', whiteSpace: 'normal' } }, r.ok ? (r.ms + 'ms' + (r.tools === true ? ' · tools ✓' : r.tools === false ? ' · tools ✗' : '')) : (r.error || 'فشل'))));
+          } }).then(function (all) { var ok = all.filter(function (r) { return r.ok; }).length; UI.toast(ok + ' من ' + all.length + ' موديل شغّالين' + (ok < all.length ? ' — غيّر اللي فشل' : ' ✓'), ok < all.length); });
+        }, testAll);
+      }, 'primary');
+      view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('اختار الموديل اللي يشغّل كل ميزة. اكتب أي ID من OpenRouter أو حمّل القائمة.'), UI.row(loadBtn, testAll), testBox, modelsBox));
       view.appendChild(UI.card('البرامج المحلية (أوفلاين)', pathInput('ffmpeg', 'ffmpeg'), pathInput('whisper', 'whisper.cpp'), pathInput('whisperModel', 'موديل Whisper'),
         UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), stBox));
       drawModels(); status();

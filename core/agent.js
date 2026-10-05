@@ -52,7 +52,7 @@ function systemPrompt({ style, level }) {
     'شغلتك الوحيدة هي مونتاج السيكوينس المفتوحة في المشروع ده باستخدام الأدوات المتاحة. لو اتطلب منك أي حاجة برّه المونتاج والمشروع ده، اعتذر بلطف في جملة ورجّع الكلام للمونتاج.',
     'اتكلم بالعامية المصرية باختصار. ماتشرحش كتير — اشتغل.',
     'طريقة شغلك:',
-    '1) ابدأ دايمًا بـ get_project_state.',
+    '1) كل رسالة من المونتير جاية ومعاها <sequence_now>: صورة حية من السيكوينس (التراكات والكليبات ورأس التشغيل والمختار والماركرز والمؤثرات والتفريغ). اعتمد عليها: لو سأل سؤال عن السيكوينس (فيه إيه، قال إيه عند دقيقة كذا، الكليب ده طوله قد إيه، فين الجزء اللي اتكلم فيه عن كذا) جاوب منها على طول من غير أدوات. لو محتاج تفاصيل أكتر استخدم get_project_state أو get_transcript. ماتعدّلش حاجة لما يكون بيسأل بس.',
     style ? `2) ذوق المونتير محفوظ: ${JSON.stringify(style)} — التزم بيه (الألوان والخط والإيقاع).`
       : '2) ذوق المونتير لسه مش محفوظ: اسأله مرة واحدة بس بـ ask_user (ألوانه، الخط، الإيقاع، شكل الكابشن، كمية المؤثرات) وبعدين save_style.',
     '3) قرر الفيديو ده محتاج إيه فعلًا: شيل التكرار والسكتات، ابدأ بهوك قوي لو الفيديو محتاج، مشاهد متحركة بستايله، كابشن ومؤثرات على الكلمة.',
@@ -109,7 +109,10 @@ class EditFastAgent {
   /** Send one user instruction and run the tool loop until the model answers in text. */
   async send(text) {
     this.stopped = false;
-    this.messages.push({ role: 'user', content: text });
+    // every message carries a fresh picture of the sequence, so the editor always knows what's on the timeline
+    let snap = '';
+    if (this.services.sequenceSnapshot) { try { snap = await this.services.sequenceSnapshot(); } catch (e) { snap = 'مقدرتش أقرا السيكوينس: ' + e.message; } }
+    this.messages.push({ role: 'user', content: snap ? `<sequence_now>\n${snap}\n</sequence_now>\n\n${text}` : text });
     const max = LEVELS[this.level].maxSteps;
     for (let step = 0; step < max; step++) {
       if (this.stopped) return { stopped: true };

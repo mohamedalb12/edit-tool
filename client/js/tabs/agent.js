@@ -44,7 +44,8 @@
 
       var typing = null;
       function add(cls, text) {
-        var m = h('div', { class: 'msg ' + cls }, text);
+        var m = h('div', { class: 'msg ' + cls });
+        if (cls === 'ai') UI.wordFx(m, text, { step: 28 }); else m.textContent = text;
         if (typing && typing.parentNode === chat) chat.insertBefore(m, typing); else chat.appendChild(m); // the typing dots stay last
         chat.scrollTop = chat.scrollHeight; state.log.push({ cls: cls, text: text }); return m;
       }
@@ -52,7 +53,7 @@
         if (on && !typing) { typing = h('div', { class: 'msg typing', 'aria-label': 'بيشتغل' }, h('i'), h('i'), h('i')); chat.appendChild(typing); chat.scrollTop = chat.scrollHeight; }
         if (!on && typing) { typing.remove(); typing = null; }
       }
-      state.log.forEach(function (l) { chat.appendChild(h('div', { class: 'msg ' + l.cls }, l.text)); });
+      state.log.forEach(function (l) { var m = h('div', { class: 'msg ' + l.cls }); if (l.cls === 'ai') UI.wordFx(m, l.text, { step: 10 }); else m.textContent = l.text; chat.appendChild(m); });
 
       function picker() { UI.empty(pickerWrap).appendChild(UI.modelPicker(level === 'max' ? 'agent_max' : 'agent_strong')); }
       function renderStyle() { UI.empty(styleWrap); if (!S.settings.style) styleWrap.appendChild(styleForm(S, renderStyle)); }
@@ -104,7 +105,7 @@
       }
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(); });
 
-      var suggestions = ['مونتج الفيديو ده كله بذوقي', 'شيل السكتات والتكرار وابدأ بهوك قوي', 'ابني مشهد افتتاحي فيه اسم القناة', 'نزّل كابشن كلمة كلمة', 'حط مؤثرات صوت على اللحظات المهمة'];
+      var suggestions = ['إيه اللي عند رأس التشغيل؟', 'مونتج الفيديو ده كله بذوقي', 'شيل السكتات والتكرار وابدأ بهوك قوي', 'ابني مشهد افتتاحي فيه اسم القناة', 'نزّل كابشن كلمة كلمة', 'حط مؤثرات صوت على اللحظات المهمة'];
 
       view.appendChild(UI.card(null,
         UI.row(h('label', null, 'المستوى'), UI.seg([{ value: 'strong', label: 'قوي' }, { value: 'max', label: 'قوي جدًا' }], level, function (v) {
@@ -112,6 +113,23 @@
         }), h('span', { class: 'spacer' }), UI.btn('محادثة جديدة', function () { state.agent = null; state.log = []; UI.empty(chat); }, 'small')),
         pickerWrap,
         UI.hint('بيشتغل بس على السيكوينس المفتوحة وأدوات الإضافة. أي عملية بتشيل أجزاء بتتعمل على نسخة.')));
+      // what the AI editor can see right now — refreshed while this tab is open
+      var seeTxt = h('span', { class: 'grow' }, 'بيقرا السيكوينس…');
+      var seeBar = h('div', { class: 'seebar', title: 'المونتير الذكي بياخد صورة حية من السيكوينس مع كل رسالة' }, h('span', { class: 'eye' }), seeTxt);
+      function refreshSee() {
+        if (!document.body.contains(seeBar)) { clearInterval(seeTimer); return; }
+        S.seq().then(function (sq) {
+          var clips = sq.video.concat(sq.audio).reduce(function (n, t) { return n + t.clips.length; }, 0);
+          var tr = S.transcript && S.transcript.seqId === sq.id ? ' · تفريغ ' + S.transcript.words.length + ' كلمة' : ' · من غير تفريغ';
+          UI.empty(seeTxt).appendChild(document.createTextNode('شايف: '));
+          seeTxt.appendChild(h('bdi', null, sq.name)); seeTxt.appendChild(document.createTextNode(' · '));
+          seeTxt.appendChild(h('bdi', null, UI.fmtTime(sq.playhead)));
+          seeTxt.appendChild(document.createTextNode(' · ' + clips + ' كليب' + ((sq.markers || []).length ? ' · ' + sq.markers.length + ' ماركر' : '') + tr));
+          seeBar.classList.add('live');
+        }).catch(function () { seeTxt.textContent = 'مفيش سيكوينس مفتوحة'; seeBar.classList.remove('live'); });
+      }
+      view.appendChild(seeBar);
+      var seeTimer = setInterval(refreshSee, 3000); refreshSee();
       view.appendChild(styleWrap);
       view.appendChild(UI.card(null, chat,
         h('div', { class: 'chips' }, suggestions.map(function (s) { return h('button', { class: 'chip', type: 'button', onclick: function () { input.value = s; input.focus(); } }, s); })),

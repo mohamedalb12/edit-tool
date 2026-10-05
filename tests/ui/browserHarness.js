@@ -22,7 +22,7 @@
     models: {}, defaultModel: '', agentLevel: 'strong', dialect: 'egyptian', style: null,
     quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true }, captions: { maxWords: 4, maxDuration: 2.5, singleWord: false }, libraryDirs: ['/lib']
   };
-  var seq = { name: 'Main', id: 's1', fps: 25, width: 1920, height: 1080, duration: 30, playhead: 2,
+  var seq = { name: 'Main', id: 's1', fps: 25, width: 1920, height: 1080, duration: 30, playhead: 2, markers: [{ time: 4, name: 'm' }],
     video: [{ index: 0, name: 'V1', clips: [{ name: 'talk', start: 0, end: 30, inPoint: 0, mediaPath: '/m/talk.mp4' }] }, { index: 1, name: 'V2', clips: [{ name: 'camB', start: 0, end: 30 }] }],
     audio: [{ index: 0, name: 'A1', clips: [{ name: 'talk', start: 0, end: 30 }] }, { index: 1, name: 'A2', clips: [{ name: 'camB', start: 0, end: 30 }] }] };
   var words = 'إزيكم يا جماعة النهارده هنتكلم عن المونتاج السريع'.split(' ').map(function (w, i) { return { text: w, start: i * 0.5, end: i * 0.5 + 0.4 }; });
@@ -65,6 +65,13 @@
     brollPlace: function (o) { return rec('brollPlace', { id: o.item.id, duration: o.duration }, { track: 2 }); },
     askUser: function (q, o) { return S.askUserImpl ? S.askUserImpl(q, o) : Promise.resolve('تمام'); },
     saveStyle: function (st) { settings.style = st; return rec('saveStyle', st, st); },
+    sequenceSnapshot: function () { return rec('sequenceSnapshot', null, 'السيكوينس: "Main" | رأس التشغيل عند 0:02.0'); },
+    testModels: function (o) {
+      var res = [{ feature: 'agent_strong', label: 'المونتير الذكي — قوي', model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 840, tools: true, listed: true },
+        { feature: 'chapters', label: 'فصول يوتيوب', model: 'bad/model', ok: false, ms: 120, tools: null, listed: false, error: 'OpenRouter 404: No endpoints' }];
+      res.forEach(function (r) { if (o && o.onResult) o.onResult(r); });
+      return rec('testModels', null, res);
+    },
     projectState: function () { return rec('projectState', null, { sequence: 'Main' }); },
     llm: {
       chat: function (req) { calls.push({ name: 'llm.chat', args: { model: req.model, n: req.messages.length } }); return Promise.resolve(agentScript.shift() || { content: 'تمام ✓' }); },
