@@ -80,7 +80,7 @@ class TrackItem {
     this.track = track; this.projectItem = projectItem; this._start = start; this._end = end; this._in = inPoint;
     this.name = name || projectItem.name; this.disabled = false; this.selected = false;
     this.mediaType = track.kind === 'audio' ? 'Audio' : 'Video';
-    this.comps = track.kind === 'video' ? [opacityComponent(), motionComponent()] : [];
+    this.comps = track.kind === 'video' ? [opacityComponent(), motionComponent()] : [new Component('Volume', 'Internal Volume Stereo', [new Property('Bypass', false), new Property('Level', 0.17782794)]), new Component('Channel Volume', 'Internal Channel Volume Stereo', [])];
     this.components = collection(() => this.comps);
     this.mgtComp = null;
   }
@@ -104,6 +104,8 @@ class TrackItem {
 class Track {
   constructor(seq, kind, index) { this.seq = seq; this.kind = kind; this.index = index; this.items = []; this.name = (kind === 'video' ? 'V' : 'A') + (index + 1); this.locked = false; this.clips = collection(() => this.items.slice().sort((a, b) => a._start - b._start)); }
   isLocked() { return this.locked; }
+  setMute(v) { this.muted = !!v; }
+  isMuted() { return !!this.muted; }
   add(opts) { const c = new TrackItem(this, opts); this.items.push(c); return c; }
   razor(s) {
     const c = this.items.find(c => c._start + 1e-4 < s && s < c._end - 1e-4);
@@ -137,6 +139,7 @@ class Sequence {
     const self = this;
     this.markers = {
       getFirstMarker() { return self.markerList.slice().sort((a, b) => a.start.seconds - b.start.seconds)[0] || null; },
+      deleteMarker(m) { self.markerList = self.markerList.filter(x => x !== m); },
       getNextMarker(m) { const l = self.markerList.slice().sort((a, b) => a.start.seconds - b.start.seconds); return l[l.indexOf(m) + 1] || null; },
       createMarker(s) { const m = { start: T(s), name: '', comments: '', end: T(s), color: null, setColorByIndex(i) { this.color = i; } }; self.markerList.push(m); return m; }, get numMarkers() { return self.markerList.length; } };
     this.projectItem = new ProjectItem({ name, isSeq: true, parent: project.root }); project.root.kids.push(this.projectItem);
@@ -177,11 +180,17 @@ function createPremiere() {
     name: 'Premiere Pro (mock)', version: '25.0',
     enableQE() {},
     project: {
+      path: '',
       get rootItem() { return project.root; },
       get activeSequence() { return project.activeSeq; },
       set activeSequence(s) { project.activeSeq = s; },
       sequences: collection(() => project.seqs, 'numSequences'),
       importFiles(paths, suppress, bin) { paths.forEach(p => project.importOne(p, bin || project.root)); return true; },
+      createNewSequenceFromClips(name, items, bin) {
+        const s = new Sequence(project, name, { video: 3, audio: 3, fps: 25, width: items[0].width || 1080, height: items[0].height || 1920 });
+        project.seqs.push(s); s.v[0].add({ projectItem: items[0], start: 0, end: items[0].duration || 10 }); s.a[0].add({ projectItem: items[0], start: 0, end: items[0].duration || 10 });
+        return s;
+      },
       openSequence(id) { project.activeSeq = project.seqs.find(s => s.sequenceID === id); return !!project.activeSeq; }
     }
   };

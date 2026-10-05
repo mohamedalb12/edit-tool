@@ -294,3 +294,192 @@ test('Liquid Glass: reads the footage under the playhead, renders, places the la
   assert.equal(jobs[3].params.text, 'محمد'); assert.equal(jobs[3].params.animIn, 'pop'); assert.equal(jobs[3].src.start, 1);
   assert.equal(res.track, 4, 'V2–V4 are busy at 1–4s → a new track on top'); 
 });
+
+test('AI vision: the agent asks to look, gets real frames from the timeline as images, then answers', async () => {
+  const vid = path.join(require('../helpers').TMP, 'vis.mp4');
+  require('child_process').execFileSync(require('../helpers').FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-t', '2', '-i', 'color=c=red:s=320x180:r=25', '-f', 'lavfi', '-t', '2', '-i', 'color=c=blue:s=320x180:r=25', '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-pix_fmt', 'yuv420p', vid]);
+  const requests = [];
+  const script = [
+    { tool_calls: [{ id: 'v1', type: 'function', function: { name: 'look_at_frames', arguments: '{"times":[1,3]}' } }] },
+    { content: 'أول لقطة حمرا والتانية زرقا.' }
+  ];
+  const fetchImpl = async (url, opts) => { requests.push(JSON.parse(opts.body)); const st = script[requests.length - 1]; return mockResponse({ choices: [{ message: { content: st.content || null, tool_calls: st.tool_calls } }] }); };
+  const { S, h, seq } = world({ fetchImpl });
+  seq.v[0].add({ projectItem: h.pr.project.importOne(vid, h.pr.project.root), start: 10, end: 14, inPoint: 0 });
+  const agent = new EditFastAgent({ llm: S.llm, model: 'vision-model', services: S, style: {} });
+  const out = await agent.send('اللقطات لونها إيه؟');
+  assert.match(out.text, /حمرا/);
+  const second = requests[1].messages;
+  const tool = second.find(m => m.role === 'tool');
+  assert.match(tool.content, /"frames":0|"frames":2/);
+  // times 1 and 3 are before the clip (it starts at 10) → nothing; ask again inside the clip
+  const frames = await S.lookAtFrames({ times: [11, 13] });
+  assert.equal(frames.length, 2); assert.equal(frames[0].clip, 'vis.mp4');
+  const shots = await S.shots();
+  assert.ok(shots.includes(10) && shots.some(t => Math.abs(t - 12) < 0.1), JSON.stringify(shots));
+  const snap = await S.sequenceSnapshot();
+  assert.match(snap, /تغيير لقطات/);
+  // inside the clip → images are attached as a user message right after the tool result
+  requests.length = 0; script.splice(0, 2, { tool_calls: [{ id: 'v2', type: 'function', function: { name: 'look_at_frames', arguments: '{"times":[11,13]}' } }] }, { content: 'تمام' });
+  await agent.send('بص تاني');
+  const msgs = requests[1].messages, last = msgs[msgs.length - 1];
+  assert.equal(last.role, 'user');
+  assert.equal(last.content.filter(c => c.type === 'image_url').length, 2);
+  assert.match(last.content[0].text, /11\.0s/);
+});
+
+test('history + undo: placed clips, markers and cut copies are recorded and undone', async () => {
+  const f = makeAudio('hist.wav', [{ tone: 300, dur: 2 }, { silence: 1.2 }, { tone: 300, dur: 2 }]);
+  const { S, h, seq } = world({ clipFile: f, clipLen: 5.2 });
+  const orig = h.pr.project.activeSeq;
+  await S.op('B-Roll', () => S.host('placeFile', { path: '/c/b.mp4', time: 1, kind: 'video', duration: 2 }));
+  await S.addMarkers([{ time: 3, name: 'هنا' }]);
+  assert.equal(S.history.length, 2);
+  let r = await S.undoLast();
+  assert.equal(r.undone, 1); assert.equal(seq.markerList.length, 0);
+  r = await S.undoLast();
+  assert.equal(r.group, 'B-Roll'); assert.equal(seq.v[1].items.length, 0, 'placed clip removed');
+  await S.quickCut({ sensitivity: 5 });
+  assert.notEqual(h.pr.project.activeSeq, orig);
+  r = await S.undoLast();
+  assert.equal(h.pr.project.activeSeq, orig, 'back on the original sequence');
+  assert.match((await S.undoLast()).message, /مفيش/);
+  // something that can't be undone through the API is reported, not hidden
+  await S.applyMotion({ preset: 'pulse', time: 1 });
+  r = await S.undoLast();
+  assert.deepEqual(r.manual, ['applyKeyframes']); assert.match(r.message, /Ctrl\+Z/);
+});
+
+test('one-click auto edit: runs the approved steps in order, AI picks the hook, everything undoes in one go', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'النهارده هنتكلم عن المونتاج النهارده هنتكلم عن المونتاج السريع والنتيجة هتبهرك';
+  const f = makeAudio('auto.wav', [{ tone: 300, dur: 3 }, { silence: 1.2 }, { tone: 300, dur: 3 }]);
+  const fetchImpl = async (url, opts) => {
+    const b = JSON.parse(opts.body), sys = b.messages[0].content;
+    if (/أقوى جملة/.test(sys)) return mockResponse({ choices: [{ message: { content: '{"start":3.2,"end":4.4,"reason":"وعد بنتيجة"}' } }] });
+    if (/المؤثرات/.test(sys)) return mockResponse({ choices: [{ message: { content: '{"effects":[{"time":1,"type":"motion","preset":"punch-in"}]}' } }] });
+    return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
+  };
+  const { S, h } = world({ clipFile: f, clipLen: 7.2, fetchImpl });
+  const orig = h.pr.project.activeSeq;
+  const steps = S.autoEditSteps();
+  assert.ok(steps.find(s => s.id === 'hook' && s.ai));
+  const run = steps.map(s => ({ ...s, on: ['transcribe', 'repeats', 'silences', 'hook', 'zooms', 'captions'].includes(s.id) }));
+  const events = [];
+  const res = await S.runAutoEdit(run, e => events.push(e.id + ':' + e.status));
+  assert.deepEqual(Object.keys(res).filter(k => res[k].ok), ['transcribe', 'repeats', 'silences', 'hook', 'zooms', 'captions'], JSON.stringify(res));
+  assert.ok(events.indexOf('transcribe:ok') < events.indexOf('hook:run'));
+  assert.ok(events.includes('broll:skip'));
+  assert.match(h.pr.project.activeSeq.name, /هوك/);
+  assert.ok(S.history.every(e => e.group === 'مونتاج تلقائي'));
+  const u = await S.undoLast();
+  assert.equal(u.group, 'مونتاج تلقائي');
+  assert.equal(h.pr.project.activeSeq, orig, 'the whole auto edit is undone back to the original sequence');
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('reels + shorts: reframe every V1 clip into a new vertical sequence; AI picks shorts and builds them', async () => {
+  process.env.FAKE_WHISPER_WORDS = Array.from({ length: 40 }, (_, i) => 'كلمة' + i).join(' ');
+  const src = path.join(require('../helpers').TMP, 'wide2.mp4');
+  require('child_process').execFileSync(require('../helpers').FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=20:r=25', '-f', 'lavfi', '-i', 'sine=f=300:d=20', '-shortest', '-pix_fmt', 'yuv420p', src]);
+  const fetchImpl = async (url, opts) => {
+    const sys = JSON.parse(opts.body).messages[0].content;
+    if (/شورتس/.test(sys)) return mockResponse({ choices: [{ message: { content: JSON.stringify({ shorts: [{ start: 2, end: 14, title: 'أقوى لحظة', score: 9 }, { start: 3, end: 10, title: 'متداخل', score: 7 }, { start: 0, end: 1, title: 'قصير', score: 8 }] }) } }] });
+    return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
+  };
+  const { S, h, seq } = world({ fetchImpl });
+  const item = h.pr.project.importOne(src, h.pr.project.root);
+  seq.v[0].add({ projectItem: item, start: 0, end: 8, inPoint: 0 }); seq.v[0].add({ projectItem: item, start: 8, end: 16, inPoint: 10 });
+  seq.a[0].add({ projectItem: item, start: 0, end: 16, inPoint: 0 });
+  const jobs = [];
+  S.analyzeFacesImpl = async job => { jobs.push(job); return Array.from({ length: Math.round(job.duration * 3) }, (_, i) => ({ t: i / 3, faces: [{ cx: 0.7, cy: 0.4, w: 0.1, h: 0.2, score: 0.9 }] })); };
+  const prog = [];
+  const r = await S.makeReels({ ratio: '9:16', onProgress: p => prog.push(p) });
+  assert.equal(jobs.length, 2); assert.equal(jobs[1].start, 10); assert.equal(jobs[0].srcW, 640);
+  assert.match(r.name, /ريلز 9:16/); assert.equal(r.clips, 2);
+  const reels = h.pr.project.activeSeq;
+  assert.equal(reels.v[0].items.length, 2); assert.equal(reels.v[0].items.slice().sort((a, b) => a._start - b._start)[1]._start, 8);
+  assert.ok(reels.v[0].items.every(c => /reel-[0-9a-f]+\.mp4$/.test(c.projectItem.mediaPath)));
+  assert.ok(prog.length && prog[prog.length - 1] === 1);
+  // shorts
+  h.pr.project.activeSeq = seq;
+  const shorts = await S.findShorts({ count: 3 });
+  assert.deepEqual(shorts.map(s => s.title), ['أقوى لحظة'], 'overlapping and too-short picks dropped');
+  const made = await S.makeShort(shorts[0], { reframe: false, captions: false });
+  assert.match(made.sequence, /Short - أقوى لحظة/); assert.equal(made.length, 12);
+  const sh = h.pr.project.activeSeq;
+  const total = sh.v[0].items.reduce((a, c) => a + c._end - c._start, 0);
+  assert.ok(Math.abs(total - 12) < 0.1, 'only the chosen 12s remain: ' + total);
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('animated captions + translation: cards rendered with word timings, placed above the video, undone together; SRT translated', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'أهلا بيكم في حلقة جديدة عن المونتاج السريع جدا';
+  const f = makeAudio('capv.wav', [{ tone: 250, dur: 5 }]);
+  const fetchImpl = async (url, opts) => {
+    const b = JSON.parse(opts.body); const sys = b.messages[0].content;
+    if (/Translate each subtitle/.test(sys)) { const lines = JSON.parse(b.messages[1].content); return mockResponse({ choices: [{ message: { content: JSON.stringify({ lines: lines.map(l => 'EN: ' + l.length) }) } }] }); }
+    return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
+  };
+  const { S, seq } = world({ clipFile: f, clipLen: 5, fetchImpl });
+  seq.v[1].add({ projectItem: seq.v[0].items[0].projectItem, start: 0, end: 1 });
+  const jobs = [];
+  S.renderCaptionsImpl = async job => { jobs.push(job); return job.cues.map((c, i) => { const file = path.join(job.outDir, `cap-${job.hash}-${i}.mov`); fs.writeFileSync(file, 'x'); return { file, start: c.start, end: c.end }; }); };
+  const r = await S.addAnimatedCaptions({ style: { style: 'karaoke' } });
+  assert.equal(jobs[0].style.style, 'karaoke'); assert.equal(jobs[0].width, 1920);
+  assert.ok(jobs[0].cues.every(c => Array.isArray(c.words) && c.words.length && c.words[0].start >= c.start - 1e-6), 'word timings kept for sync');
+  assert.equal(r.clips, jobs[0].cues.length);
+  const capTrack = seq.v.findIndex(t => t.items.some(c => /cap-/.test(c.projectItem.mediaPath)));
+  assert.ok(capTrack >= 2, 'above the topmost used track (V2)');
+  assert.ok(S.history.every(e => e.group === 'كابشن متحرك'));
+  const u = await S.undoLast();
+  assert.equal(u.undone, r.clips); assert.ok(!seq.v.some(t => t.items.some(c => /cap-/.test(c.projectItem.mediaPath))), 'all caption cards removed');
+  const tr = await S.translateCaptions({ lang: 'English' });
+  assert.match(fs.readFileSync(tr.file, 'utf8'), /EN: \d+/); assert.equal(seq.captionTracks.length, 1);
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('audio: clean voice onto a new track (original muted), duck the music under speech, undo restores', async () => {
+  const voice = makeAudio('voice.wav', [{ tone: 220, dur: 2 }, { silence: 2 }, { tone: 220, dur: 2 }]);
+  const music = makeAudio('music-bed.wav', [{ tone: 440, dur: 6, amp: 0.2 }]);
+  const { S, h, seq } = world();
+  const v = h.pr.project.importOne(voice, h.pr.project.root), m = h.pr.project.importOne(music, h.pr.project.root);
+  seq.a[0].add({ projectItem: v, start: 0, end: 6 }); seq.a[1].add({ projectItem: m, start: 0, end: 6 });
+  const g = await S.audioTracksGuess();
+  assert.deepEqual([g.voice, g.music], [0, 1], 'music track recognised by name');
+  const c = await S.cleanAudio({ strength: 'light' });
+  assert.equal(c.clips, 1); assert.equal(seq.a[0].muted, true);
+  assert.ok(seq.a[2].items.some(x => /clean-[0-9a-f]+\.wav$/.test(x.projectItem.mediaPath)), 'clean copy on A3');
+  await S.undoLast();
+  assert.equal(seq.a[0].muted, false); assert.equal(seq.a[2].items.length, 0);
+  const d = await S.duckMusic({ duckDb: -12 });
+  assert.equal(d.speech, 2); assert.ok(d.keys >= 6);
+  const lvl = seq.a[1].items[0].comps[0].props[1];
+  const db = v => 20 * Math.log10(v) + 15;
+  const ducked = lvl.keys.filter(k => Math.abs(db(k.v) + 12) < 0.2);
+  assert.ok(ducked.length >= 4, 'ducked to -12 dB under both sentences');
+  assert.ok(ducked.some(k => k.t >= 0 && k.t <= 2.2) && ducked.some(k => k.t >= 3.8 && k.t <= 6.1), 'keys line up with the speech: ' + lvl.keys.map(k => k.t + ':' + db(k.v).toFixed(0)).join(' '));
+  assert.ok(lvl.keys.some(k => Math.abs(db(k.v)) < 0.2), 'back to 0 dB in the gap');
+});
+
+test('thumbnails: candidates prefer sharp well-lit frames over blurry/dark ones; AI ideas get the images; PNG saved next to the project', async () => {
+  const H = require('../helpers');
+  const vid = path.join(H.TMP, 'thumbsrc.mp4');
+  // 0-3s dark, 3-6s very blurry, 6-9s sharp detailed
+  require('child_process').execFileSync(H.FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=3:r=25', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=3:r=25', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=3:r=25',
+    '-filter_complex', '[0:v]eq=brightness=-0.75[a];[1:v]gblur=sigma=25[b];[a][b][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]', '-pix_fmt', 'yuv420p', vid]);
+  const reqs = [];
+  const fetchImpl = async (url, opts) => { reqs.push(JSON.parse(opts.body)); return mockResponse({ choices: [{ message: { content: JSON.stringify({ titles: [{ text: 'السر اللي محدش قالهولك', highlight: 'السر' }], best: 0 }) } }] }); };
+  const { S, h, seq, calls } = world({ fetchImpl });
+  seq.v[0].add({ projectItem: h.pr.project.importOne(vid, h.pr.project.root), start: 0, end: 9 });
+  const c = await S.thumbnailCandidates({ count: 3, samples: 12 });
+  assert.ok(c[0].time >= 6, 'best frame comes from the sharp part: ' + c.map(x => x.time + ':' + x.score.toFixed(2)).join(' '));
+  assert.ok(c.every(x => fs.existsSync(x.image)));
+  const ideas = await S.thumbnailIdeas({ candidates: c });
+  assert.equal(ideas.titles[0].highlight, 'السر');
+  assert.equal(reqs[0].messages[1].content.filter(p => p.type === 'image_url').length, c.length);
+  h.pr.app.project.path = path.join(H.TMP, 'proj', 'My Video.prproj');
+  fs.mkdirSync(path.dirname(h.pr.app.project.path), { recursive: true });
+  const file = await S.saveThumbnail(Buffer.from('PNGDATA').toString('base64'), 'السر اللي محدش قالهولك');
+  assert.match(file, /EditFast Thumbnails/); assert.equal(fs.readFileSync(file, 'utf8'), 'PNGDATA');
+  assert.ok(calls.includes('importFiles'));
+});

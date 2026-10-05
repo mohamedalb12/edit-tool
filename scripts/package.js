@@ -6,7 +6,7 @@ const zlib = require('zlib');
 
 const ROOT = path.join(__dirname, '..');
 const pkg = require('../package.json');
-const INCLUDE = ['CSXS', 'client', 'core', 'host', 'assets', 'scripts/install-windows.bat', 'scripts/install-windows.ps1', 'scripts/install-mac.command', 'README.md', '.debug'];
+const INCLUDE = ['CSXS', 'client', 'core', 'host', 'assets', 'remotion/src', 'remotion/public', 'remotion/package.json', 'remotion/package-lock.json', 'remotion/render.mjs', 'remotion/.gitignore', 'scripts/install-windows.bat', 'scripts/install-windows.ps1', 'scripts/install-mac.command', 'README.md', '.debug'];
 
 const CRC = new Int32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c; });
 function crc32(buf) { let c = -1; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ -1) >>> 0; }

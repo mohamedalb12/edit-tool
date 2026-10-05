@@ -2,7 +2,7 @@
 // الكابشن: تقسيم الكلمات لكروت وتحويلها لـ SRT.
 const { srtTime } = require('./util');
 
-function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false, maxGap = 0.7, minDuration = 0.25 } = {}) {
+function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false, maxGap = 0.7, minDuration = 0.25, keepWords = false } = {}) {
   const limit = singleWord ? 1 : Math.max(1, maxWords | 0);
   const cues = [];
   let cur = null;
@@ -20,7 +20,7 @@ function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false,
     c.text = c.words.map(w => String(w.text).trim()).join(' ');
     if (c.end - c.start < minDuration) c.end = c.start + minDuration;
     if (next && c.end > next.start) c.end = Math.max(c.start + 0.05, next.start);
-    delete c.words;
+    if (keepWords) c.words = c.words.map(w => ({ text: String(w.text).trim(), start: w.start, end: w.end })); else delete c.words;
   }
   return cues;
 }

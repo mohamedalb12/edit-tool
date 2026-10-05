@@ -642,6 +642,96 @@ EFAPI.makeHook = function (a) {
   return { length: len, sequence: cloneInfo ? cloneInfo.name : seq.name };
 };
 
+/* ---------------- history / undo helpers ---------------- */
+EFAPI.activeSequenceId = function () { var s = app.project.activeSequence; return { id: s ? s.sequenceID : null, name: s ? s.name : null }; };
+
+EFAPI.openSequence = function (a) {
+  var i, s;
+  for (i = 0; i < app.project.sequences.numSequences; i++) {
+    s = app.project.sequences[i];
+    if (s.sequenceID === a.id) { app.project.openSequence(s.sequenceID); return { name: s.name }; }
+  }
+  throw new Error('sequence not found');
+};
+
+/** Remove the clip we placed (matched by track + start + media path), no ripple. */
+EFAPI.removeClip = function (a) {
+  var seq = EF.seq(), tracks = EF.tracks(seq, a.kind || 'video'), tr, i, c, norm = String(a.path || '').replace(/\\/g, '/').toLowerCase();
+  if (a.track >= tracks.numTracks) return { removed: 0 };
+  tr = tracks[a.track];
+  for (i = tr.clips.numItems - 1; i >= 0; i--) {
+    c = tr.clips[i];
+    if (Math.abs(EF.sec(c.start) - a.start) < 0.02 && (!norm || String(EF.mediaPath(c.projectItem)).replace(/\\/g, '/').toLowerCase() === norm)) { c.remove(false, false); return { removed: 1 }; }
+  }
+  return { removed: 0 };
+};
+
+EFAPI.removeMarkers = function (a) {
+  var seq = EF.seq(), list = EF.markerList(seq), n = 0, i, j, m, want;
+  for (j = 0; j < a.markers.length; j++) {
+    want = a.markers[j];
+    m = seq.markers.getFirstMarker();
+    while (m) {
+      if (Math.abs(EF.sec(m.start) - want.time) < 0.02 && (!want.name || m.name === want.name)) { seq.markers.deleteMarker(m); n++; break; }
+      m = seq.markers.getNextMarker(m);
+    }
+  }
+  return { removed: n, before: list.length };
+};
+
+/* ---------------- audio ---------------- */
+EFAPI.muteTrack = function (a) {
+  var seq = EF.seq(), tr = seq.audioTracks[a.track];
+  if (!tr) throw new Error('no audio track ' + a.track);
+  tr.setMute(a.mute ? 1 : 0);
+  return { track: a.track, mute: !!a.mute };
+};
+
+// Premiere's Volume › Level value ↔ dB (0 dB = 0.1778…)
+EF.levelToDb = function (v) { return 20 * Math.log(Math.max(v, 1e-6)) / Math.LN10 + 15; };
+EF.dbToLevel = function (db) { return Math.pow(10, (db - 15) / 20); };
+
+/** a: { track, clipStart, keys:[{t (timeline s), db (relative to the clip's current level)}] } */
+EFAPI.setVolumeKeys = function (a) {
+  var seq = EF.seq(), tr = seq.audioTracks[a.track], clip = null, i, j, comp = null, p = null;
+  for (i = 0; i < tr.clips.numItems; i++) if (Math.abs(EF.sec(tr.clips[i].start) - a.clipStart) < 0.02) clip = tr.clips[i];
+  if (!clip) throw new Error('no audio clip at ' + a.clipStart);
+  for (i = 0; i < clip.components.numItems; i++) {
+    comp = clip.components[i];
+    if (comp.displayName === 'Volume' || comp.matchName === 'Internal Volume Stereo' || comp.matchName === 'Internal Volume Mono') {
+      for (j = 0; j < comp.properties.numItems; j++) if (comp.properties[j].displayName === 'Level') { p = comp.properties[j]; break; }
+      if (!p && comp.properties.numItems > 1) p = comp.properties[1];
+      if (p) break;
+    }
+  }
+  if (!p) throw new Error('Volume › Level not found');
+  var baseDb = EF.levelToDb(p.isTimeVarying() ? p.getValueAtKey(p.getKeys()[0]) : p.getValue());
+  var off = EF.sec(clip.inPoint) - EF.sec(clip.start), kt;
+  if (!p.isTimeVarying()) p.setTimeVarying(true, true);
+  for (i = 0; i < a.keys.length; i++) {
+    kt = a.keys[i].t + off;
+    p.addKey(kt);
+    p.setValueAtKey(kt, EF.dbToLevel(baseDb + a.keys[i].db), true);
+  }
+  return { keys: a.keys.length, baseDb: Math.round(baseDb * 10) / 10 };
+};
+
+EFAPI.projectPath = function () { return { path: app.project.path || '' }; };
+EFAPI.importFiles = function (a) { var i, n = 0; for (i = 0; i < a.paths.length; i++) { EF.importFile(a.paths[i], a.bin || 'EditFast'); n++; } return { imported: n }; };
+
+/* ---------------- reels ---------------- */
+/** New sequence from rendered files (its size comes from the first file, e.g. 1080×1920). a: {name, items:[{path,time}], bin} */
+EFAPI.createSequenceFromClips = function (a) {
+  var bin = EF.ensureBin(a.bin || 'EditFast'), items = [], i, seq;
+  for (i = 0; i < a.items.length; i++) items.push(EF.importFile(a.items[i].path, a.bin || 'EditFast'));
+  seq = app.project.createNewSequenceFromClips(a.name, [items[0]], bin);
+  if (!seq) throw new Error('createNewSequenceFromClips failed');
+  app.project.openSequence(seq.sequenceID);
+  seq = app.project.activeSequence;
+  for (i = 1; i < items.length; i++) seq.videoTracks[0].overwriteClip(items[i], a.items[i].time);
+  return { name: seq.name, id: seq.sequenceID, clips: items.length };
+};
+
 /* ---------------- dispatcher ---------------- */
 function ef_call(name, jsonArgs) {
   try {

@@ -75,6 +75,7 @@ class OpenRouter {
     return (data.data || []).map(m => ({
       id: m.id, name: m.name || m.id, context: m.context_length,
       tools: Array.isArray(m.supported_parameters) ? m.supported_parameters.includes('tools') : undefined,
+      vision: m.architecture && Array.isArray(m.architecture.input_modalities) ? m.architecture.input_modalities.includes('image') : undefined,
       price: m.pricing ? { in: +m.pricing.prompt * 1e6, out: +m.pricing.completion * 1e6 } : null
     }));
   }

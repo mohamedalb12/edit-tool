@@ -5,7 +5,7 @@ $dest = Join-Path $env:APPDATA 'Adobe\CEP\extensions\EditFast'
 Write-Host "==> نسخ الإضافة إلى $dest"
 if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-foreach ($d in 'CSXS','client','core','host','assets','bin') { if (Test-Path (Join-Path $src $d)) { Copy-Item (Join-Path $src $d) $dest -Recurse -Force } }
+foreach ($d in 'CSXS','client','core','host','assets','bin','remotion') { if (Test-Path (Join-Path $src $d)) { Copy-Item (Join-Path $src $d) $dest -Recurse -Force } }
 Copy-Item (Join-Path $src 'README.md') $dest -ErrorAction SilentlyContinue
 
 Write-Host "==> تفعيل الإضافات الغير موقّعة (PlayerDebugMode)"
@@ -30,6 +30,13 @@ if (-not (Test-Path (Join-Path $bin 'whisper-cli.exe'))) {
     Write-Host '   اتثبت ✓'
   } catch { Write-Warning 'مقدرتش أنزّل whisper.cpp — نزّله من https://github.com/ggml-org/whisper.cpp/releases وحط whisper-cli.exe في الإعدادات' }
 }
+Write-Host "==> Node.js + محرك المشاهد Pro (Remotion)"
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User') }
+}
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+  Push-Location (Join-Path $dest 'remotion'); try { npm install --no-audit --no-fund --omit=dev } catch { Write-Warning 'ثبّت المحرك بعدين من تبويب مشاهد Pro' }; Pop-Location
+} else { Write-Warning 'مفيش Node.js — ثبّته من nodejs.org وبعدين ثبّت المحرك من تبويب مشاهد Pro' }
 Write-Host ""
 Write-Host "خلصت ✓  افتح بريمير > Window > Extensions > EditFast"
 Write-Host "أول مرة: من تبويب الإعدادات حط مفتاح OpenRouter وحمّل موديل Whisper."

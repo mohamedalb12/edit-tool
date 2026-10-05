@@ -48,9 +48,9 @@ test('openrouter: clear errors (no key, 401 not retried), json() parses chatty o
 });
 
 test('openrouter: listModels maps ids, tool support, prices', async () => {
-  const f = recorder(() => mockResponse({ data: [{ id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', context_length: 1000000, supported_parameters: ['tools'], pricing: { prompt: '0.000004', completion: '0.00002' } }] }));
+  const f = recorder(() => mockResponse({ data: [{ id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', context_length: 1000000, supported_parameters: ['tools'], architecture: { input_modalities: ['text', 'image'] }, pricing: { prompt: '0.000004', completion: '0.00002' } }] }));
   const ms = await new OpenRouter({ fetchImpl: f }).listModels();
-  assert.deepEqual(ms[0], { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', context: 1000000, tools: true, price: { in: 4, out: 20 } });
+  assert.deepEqual(ms[0], { id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5', context: 1000000, tools: true, vision: true, price: { in: 4, out: 20 } });
 });
 
 test('sfx: Arabic prompt is translated first; ElevenLabs request + local cache', async () => {

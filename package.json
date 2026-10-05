@@ -6,8 +6,9 @@
   "scripts": {
     "test": "node --test \"tests/unit/*.test.js\" \"tests/host/*.test.js\"",
     "test:ui": "node --test \"tests/ui/*.test.js\"",
-    "test:all": "node --test \"tests/**/*.test.js\"",
-    "package": "node scripts/package.js"
+    "test:all": "node --test \"tests/unit/*.test.js\" \"tests/host/*.test.js\" \"tests/ui/*.test.js\" \"tests/remotion/*.test.js\"",
+    "package": "node scripts/package.js",
+    "test:remotion": "node --test \"tests/remotion/*.test.js\""
   },
   "devDependencies": {
     "acorn": "^8.15.0"

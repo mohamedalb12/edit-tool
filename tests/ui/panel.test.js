@@ -44,9 +44,9 @@ async function open(id) { await page.click(`#nav button[data-id="${id}"]`); awai
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 15 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
+test('boots: 20 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'quickcut', 'autofx', 'sfx', 'transcribe', 'multicam', 'organize', 'curves', 'library', 'motion', 'titles', 'glass', 'search', 'broll', 'settings']);
+  assert.deepEqual(ids, ['agent', 'auto', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'organize', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'thumb', 'search', 'broll', 'settings']);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
   assert.deepEqual(errors, []);
@@ -117,13 +117,13 @@ test('مؤثرات صوتية: Arabic → English translate button, generate, hi
 
 test('التفريغ والكابشن: 7 dialects, transcribe, clickable words, captions settings', async () => {
   await open('transcribe'); await clearCalls();
-  assert.equal(await page.locator('#view select option').count(), 7);
-  await page.selectOption('#view select', 'gulf');
+  assert.equal(await page.locator('#view select >> nth=0').locator('option').count(), 7);
+  await page.selectOption('#view select >> nth=0', 'gulf');
   await clickText('فرّغ الكلام');
   await page.waitForSelector('.words span >> text=المونتاج');
   await page.click('.words span >> text=المونتاج');
   await page.check('#view input[type=checkbox]');
-  await clickText('نزّل الكابشن على التايملين');
+  await clickText('نزّل SRT عادي');
   const c = await page.evaluate(() => window.__calls);
   assert.equal(c.find(x => x.name === 'transcribe').args.dialect, 'gulf');
   assert.equal(c.find(x => x.name === 'setPlayhead').args, 3);
@@ -265,7 +265,7 @@ test('text motion: titles/card headings/AI replies reveal word by word, splash l
 
 test('narrow panel (320px): no horizontal overflow on any tab', async () => {
   await page.setViewportSize({ width: 320, height: 700 });
-  for (const id of ['agent', 'quickcut', 'motion', 'titles', 'glass', 'settings', 'curves']) {
+  for (const id of ['agent', 'auto', 'quickcut', 'motion', 'titles', 'glass', 'pro', 'reels', 'audio', 'thumb', 'settings', 'curves']) {
     await open(id);
     const over = await page.evaluate(() => document.getElementById('view').scrollWidth - document.getElementById('view').clientWidth);
     assert.ok(over <= 1, id + ' overflows by ' + over);
@@ -330,4 +330,167 @@ test('Liquid Glass real render: footage → WebGL shader → ProRes 4444 alpha l
   for (let i = 0, j = 0; i < lastOut.length; i += 4, j += 3) { const a = lastOut[i + 3] / 255; for (let c = 0; c < 3; c++) comp[j + c] = Math.round(lastOut[i + c] * a + lastSrc[i + c] * (1 - a)); }
   fs.writeFileSync(path.join(TMP, 'comp.rgb'), comp);
   execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-i', path.join(TMP, 'comp.rgb'), '-frames:v', '1', path.join(SHOTS, '14-liquid-glass-render.png')]);
+});
+
+test('Reels: real offline face detection tracks a moving face, and the vertical output keeps it centred', async () => {
+  const io = require('../../core/glassIO');
+  const reframe = require('../../core/reframe');
+  const face = path.join(__dirname, '..', 'fixtures', 'face.png');
+  const src = path.join(TMP, 'moving-face.mp4');
+  // 1280×720 dark frame; the astronaut (face near the top of the photo) slides from left to right over 4s
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x15151c:s=1280x720:d=4:r=25', '-loop', '1', '-i', face,
+    '-filter_complex', "[1:v]scale=380:380[f];[0:v][f]overlay=x='60+t*200':y=170:shortest=1", '-pix_fmt', 'yuv420p', '-t', '4', src]);
+  await page.evaluate(() => EF.faceTracker.load());
+  const W = 640, H = 360, fps = 3, samples = [];
+  await io.decodeFrames(FFMPEG, { mediaPath: src, duration: 4, width: W, height: H, fps }, async (buf, i) => {
+    const faces = await page.evaluate(async ({ b64, W, H }) => {
+      const bin = atob(b64), u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+      return EF.faceTracker.detect(u, W, H);
+    }, { b64: buf.toString('base64'), W, H });
+    samples.push({ t: i / fps, faces });
+  });
+  const found = samples.filter(s => s.faces.length);
+  assert.ok(found.length >= samples.length * 0.8, `face found in ${found.length}/${samples.length} samples`);
+  const xs = found.map(s => s.faces.sort((a, b) => b.w * b.h - a.w * a.h)[0].cx);
+  assert.ok(xs[xs.length - 1] - xs[0] > 0.35, 'detected face moves right: ' + xs.map(x => x.toFixed(2)).join(','));
+  // plan + render the vertical clip, then look for the face in the OUTPUT: it should stay near the middle
+  const planRes = reframe.plan(samples, { srcW: 1280, srcH: 720 });
+  const out = await reframe.render(FFMPEG, { file: src, duration: 4, srcW: 1280, srcH: 720, planRes, out: path.join(TMP, 'face-reel.mp4') });
+  const RW = 360, RH = 640, centred = [];
+  await io.decodeFrames(FFMPEG, { mediaPath: out, start: 0.5, duration: 3.4, width: RW, height: RH, fps: 2 }, async (buf) => {
+    const f = await page.evaluate(async ({ b64, W, H }) => {
+      const bin = atob(b64), u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+      return EF.faceTracker.detect(u, W, H);
+    }, { b64: buf.toString('base64'), W: RW, H: RH });
+    if (f.length) centred.push(f[0].cx);
+  });
+  assert.ok(centred.length >= 4, 'face visible in the reel');
+  assert.ok(centred.every(x => x > 0.2 && x < 0.8), 'face stays inside the vertical frame: ' + centred.map(x => x.toFixed(2)).join(','));
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-ss', '2', '-i', src, '-ss', '2', '-i', out, '-filter_complex', '[0:v]scale=-2:480[a];[1:v]scale=-2:480[b];[a][b]hstack', '-frames:v', '1', path.join(SHOTS, '18-reels-face-tracking.png')]);
+});
+
+test('animated captions: 8 word-synced styles draw correctly (Arabic RTL), active word changes the picture', async () => {
+  const shots = await page.evaluate(() => {
+    const W = 640, H = 360, cue = { start: 0, end: 2.4, words: [{ text: 'المونتاج', start: 0, end: 0.6 }, { text: 'بقى', start: 0.6, end: 1.0 }, { text: 'أسرع', start: 1.0, end: 1.6 }, { text: 'بكتير', start: 1.6, end: 2.3 }] };
+    const res = {};
+    for (const s of EFCaptions.STYLES) {
+      const c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+      const sig = t => { EFCaptions.draw(ctx, cue, t, { style: s.id, position: 'center', size: 0.11 }, W, H); const d = ctx.getImageData(0, 0, W, H).data; let n = 0, sum = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 20) { n++; sum += d[i - 3] + d[i - 2] * 3 + d[i - 1] * 7; } return { n, sum }; };
+      const a = sig(0.3), b = sig(1.3), out = sig(3);
+      const bg = document.createElement('canvas'); bg.width = W; bg.height = H; const g = bg.getContext('2d');
+      const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#2b2540'); gr.addColorStop(1, '#5b3b86'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      EFCaptions.draw(ctx, cue, 1.3, { style: s.id, position: 'center', size: 0.11 }, W, H); g.drawImage(c, 0, 0);
+      g.fillStyle = 'rgba(255,255,255,.7)'; g.font = '700 22px sans-serif'; g.fillText(s.id, 14, 30);
+      res[s.id] = { a, b, out, png: bg.toDataURL('image/png').split(',')[1] };
+    }
+    return res;
+  });
+  for (const [id, r] of Object.entries(shots)) {
+    assert.ok(r.b.n > 1500, id + ' draws text');
+    assert.equal(r.out.n, 0, id + ' clears after the cue');
+    assert.notEqual(r.a.sum, r.b.sum, id + ' active word changes the picture');
+    fs.writeFileSync(path.join(TMP, `cap-${id}.png`), Buffer.from(r.png, 'base64'));
+  }
+  const ids = Object.keys(shots);
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', ...ids.flatMap(id => ['-i', path.join(TMP, `cap-${id}.png`)]), '-filter_complex', ids.map((_, i) => `[${i}:v]`).join('') + `xstack=inputs=${ids.length}:layout=0_0|w0_0|0_h0|w0_h0|0_h0+h0|w0_h0+h0|0_h0+h0+h0|w0_h0+h0+h0`, path.join(SHOTS, '19-caption-styles.png')]);
+});
+
+test('thumbnail styles render over a real photo (Arabic title, highlight word, readability gradient)', async () => {
+  const pngs = await page.evaluate(async () => {
+    const img = new Image(); img.src = '/tests/fixtures/face.png'; await img.decode();
+    if (document.fonts) await document.fonts.ready;
+    const out = [];
+    for (const [i, st] of EFThumb.STYLES.entries()) {
+      const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+      EFThumb.draw(c.getContext('2d'), img, { title: 'السر اللي محدش قالهولك', highlight: 'السر', style: st.id, side: i % 2 ? 'right' : 'left', emoji: i === 0 ? '😱' : '' }, 640, 360);
+      out.push(c.toDataURL('image/png').split(',')[1]);
+    }
+    return out;
+  });
+  pngs.forEach((b, i) => fs.writeFileSync(path.join(TMP, `th-${i}.png`), Buffer.from(b, 'base64')));
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', ...pngs.flatMap((_, i) => ['-i', path.join(TMP, `th-${i}.png`)]), '-filter_complex', '[0][1][2][3]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0', path.join(SHOTS, '20-thumbnails.png')]);
+  assert.ok(fs.statSync(path.join(SHOTS, '20-thumbnails.png')).size > 50000);
+});
+
+test('مشاهد Pro: AI director designs, elements are editable, gallery adds, preview + render', async () => {
+  await open('pro'); await clearCalls();
+  assert.ok(await page.isVisible('text=محرك Remotion جاهز'));
+  assert.equal(await page.locator('.tile[data-type]').count(), 12);
+  await page.fill('#view textarea', 'افتتاحية لقناة مونتاج');
+  await clickText('صمّم المشهد بالذكاء الاصطناعي');
+  await page.waitForSelector('text=عنوان حركي');
+  await page.locator('.tile[data-type="statCounter"]').click();
+  await clickText('معاينة');
+  await clickText('ارندر وحطه على التايملين');
+  const c = await page.evaluate(() => window.__calls);
+  assert.equal(c.find(x => x.name === 'designProScene').args.brief, 'افتتاحية لقناة مونتاج');
+  const rendered = c.filter(x => x.name === 'renderProScene');
+  assert.deepEqual(rendered.map(r => [r.args.preview, r.args.elements]), [[true, 3], [false, 3]]);
+  await shot('21-pro-tab');
+});
+
+test('مونتاج تلقائي: plan checklist, untick a step, run shows status, history + undo', async () => {
+  await open('auto'); await clearCalls();
+  assert.equal(await page.locator('.step').count(), 4);
+  await page.locator('.step', { hasText: 'هوك' }).locator('input[type=checkbox]').uncheck();
+  await clickText('ابدأ المونتاج');
+  await page.waitForSelector('.step.ok');
+  const run = await page.evaluate(() => window.__calls.find(c => c.name === 'runAutoEdit').args);
+  assert.deepEqual(run, ['transcribe', 'silences']);
+  assert.equal(await page.locator('.step.skip').count(), 2);
+  assert.ok(await page.isVisible('text=مونتاج تلقائي'));
+  await clickText('رجّع آخر عملية');
+  assert.ok((await calls()).includes('undoLast'));
+  await shot('22-auto-edit');
+});
+
+test('ريلز وشورتس: reframe to 9:16, AI finds shorts and builds one', async () => {
+  await open('reels'); await clearCalls();
+  await page.locator('.seg button', { hasText: '4:5 بوست' }).click();
+  await clickText('حوّل السيكوينس لريلز');
+  await clickText('دوّر على أقوى المقاطع');
+  await page.waitForSelector('text=أقوى لحظة');
+  await page.locator('.short button', { hasText: 'اعمل الشورت' }).click(); await page.waitForTimeout(200);
+  const c = await page.evaluate(() => window.__calls);
+  assert.equal(c.find(x => x.name === 'makeReels').args.ratio, '4:5');
+  assert.deepEqual(c.find(x => x.name === 'makeShort').args, { title: 'أقوى لحظة', reframe: true, captions: true });
+});
+
+test('الصوت: clean voice (strength/loudness) and duck music', async () => {
+  await open('audio'); await clearCalls();
+  await page.waitForFunction(() => document.querySelectorAll('#view select option').length >= 4);
+  await page.locator('.seg button', { hasText: 'قوي' }).click();
+  await page.locator('.seg button', { hasText: 'يوتيوب -14' }).click();
+  await clickText('نضّف الصوت');
+  await clickText('وطّي الموسيقى تحت الكلام');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'cleanAudio').args, { track: 0, strength: 'strong', loudness: -14 });
+  assert.deepEqual([c.find(x => x.name === 'duckMusic').args.voiceTrack, c.find(x => x.name === 'duckMusic').args.musicTrack], [0, 1]);
+});
+
+test('ثامبنيل: best frames, AI titles, live preview, save PNG', async () => {
+  await open('thumb'); await clearCalls();
+  await clickText('لاقي أحلى فريمات');
+  await page.waitForSelector('.tile.on');
+  await clickText('اقترح عناوين (AI)');
+  await page.locator('.chip', { hasText: 'السر اللي محدش قالهولك' }).click();
+  await page.waitForTimeout(400);
+  const lit = await page.evaluate(() => { const c = document.querySelector('canvas.thumb-stage'); const d = c.getContext('2d').getImageData(0, 0, 1280, 720).data; let n = 0; for (let i = 0; i < d.length; i += 64) if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] < 120) n++; return n; });
+  assert.ok(lit > 50, 'yellow highlight word painted: ' + lit);
+  await clickText('احفظ الثامبنيل PNG');
+  const c = await page.evaluate(() => window.__calls.find(x => x.name === 'saveThumbnail').args);
+  assert.ok(c.bytes > 10000); assert.equal(c.name, 'السر اللي محدش قالهولك');
+  await shot('23-thumbnail-tab');
+});
+
+test('كابشن متحرك from the transcription tab: style pick, position, render + translate', async () => {
+  await open('transcribe'); await clearCalls();
+  assert.equal(await page.locator('.cap-grid .tile').count(), 8);
+  await page.locator('.cap-grid .tile[data-style="karaoke"]').click();
+  await page.locator('.seg button', { hasText: 'فوق' }).click();
+  await clickText('نزّل كابشن متحرك');
+  await clickText('ترجم الكابشن');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'addAnimatedCaptions').args, { style: 'karaoke', position: 'top' });
+  assert.equal(c.find(x => x.name === 'translateCaptions').args.lang, 'English');
 });

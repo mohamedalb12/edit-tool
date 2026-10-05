@@ -23,6 +23,7 @@ const autoFx = require('./autoEffects');
 const { OpenRouter, modelFor } = require('./openrouter');
 const { hash } = require('./util');
 const { nodeFetch } = require('./http');
+const vision = require('./vision');
 
 class Services {
   /**
@@ -30,16 +31,130 @@ class Services {
    * renderScene(spec, outPath) → Promise<path>   (canvas renderer living in the panel)
    * askUser(question, options) → Promise<string>
    */
-  constructor({ host, renderScene, renderGlass, askUser, fetchImpl, log } = {}) {
-    this.host = host;
+  constructor({ host, renderScene, renderGlass, analyzeFaces, renderCaptions, askUser, fetchImpl, log } = {}) {
+    // every call that changes the timeline goes through here so it lands in the history (and can be undone)
+    this.hostRaw = host;
+    this.history = [];
+    this.host = (name, args) => this.recordedHost(name, args);
     this.renderSceneImpl = renderScene;
     this.renderGlassImpl = renderGlass;
+    this.analyzeFacesImpl = analyzeFaces;
+    this.renderCaptionsImpl = renderCaptions;
     this.askUserImpl = askUser;
     this.fetch = fetchImpl || nodeFetch; // Node HTTP: no CORS problems inside Premiere
     this.log = log || (() => {});
     this.reload();
     this.transcript = null; // { seqId, words (timeline time), dialect }
     this.brollCache = new Map();
+  }
+
+  /* ---------- السجل والتراجع ---------- */
+  /** Group the timeline changes of one user-level action under a label. */
+  async op(label, fn) {
+    const prev = this._opLabel; this._opLabel = this._opLabel || label;
+    try { return await fn(); } finally { this._opLabel = prev; }
+  }
+
+  async recordedHost(name, args) {
+    const SEQ_OPS = { removeRanges: 1, multicamApply: 1, makeHook: 1 };
+    const willClone = SEQ_OPS[name] && args && args.clone !== false && (name !== 'removeRanges' || args.clone);
+    let before = null;
+    if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
+    const r = await this.hostRaw(name, args);
+    const LABELS = { placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
+    if (!LABELS[name]) return r;
+    const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
+    if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
+    else if (name === 'addMarkers') e.undo = { kind: 'removeMarkers', args: { markers: args.markers.map(m => ({ time: m.time, name: m.name })) } };
+    else if (willClone && before && before.id) e.undo = { kind: 'openSequence', args: { id: before.id }, note: `رجوع لـ "${before.name}"` };
+    else if (name === 'muteTrack') e.undo = { kind: 'muteTrack', args: { track: args.track, mute: !args.mute } };
+    this.history.push(e);
+    if (this.onHistory) this.onHistory(this.history);
+    return r;
+  }
+
+  /** Undo the last action (all its recorded steps). Returns what could / couldn't be undone. */
+  async undoLast() {
+    if (!this.history.length) return { undone: 0, message: 'مفيش حاجة أرجعها' };
+    const last = this.history[this.history.length - 1];
+    const group = []; while (this.history.length && this.history[this.history.length - 1].group === last.group && this.history[this.history.length - 1].at >= last.at - 10 * 60000) group.push(this.history.pop());
+    let undone = 0; const manual = [];
+    // a sequence switch undoes everything that happened inside the copy → do it last, skip the rest
+    const seqUndo = group.filter(e => e.undo && e.undo.kind === 'openSequence').pop();
+    for (const e of group) {
+      if (seqUndo && e !== seqUndo) { undone++; continue; }
+      if (!e.undo) { manual.push(e.op); continue; }
+      try { await this.hostRaw(e.undo.kind, e.undo.args); undone++; } catch (err) { manual.push(e.op); }
+    }
+    if (this.onHistory) this.onHistory(this.history);
+    return { undone, group: last.group, manual: Array.from(new Set(manual)), message: manual.length ? 'جزء اترجع؛ الباقي (' + Array.from(new Set(manual)).join('، ') + ') رجّعه بـ Ctrl+Z في بريمير' : 'اترجع ✓' };
+  }
+
+  /* ---------- المونتاج التلقائي بضغطة ---------- */
+  autoEditSteps() {
+    const has = k => typeof this[k] === 'function';
+    return [
+      { id: 'transcribe', label: 'تفريغ الكلام', on: true },
+      { id: 'repeats', label: 'شيل التكرار وإعادات التيك', on: true },
+      { id: 'silences', label: 'شيل السكتات', on: true },
+      { id: 'hook', label: 'هوك قوي في الأول (الذكاء الاصطناعي يختار)', on: true, ai: true },
+      { id: 'cleanAudio', label: 'تنضيف الصوت', on: has('cleanAudio') },
+      { id: 'zooms', label: 'زووم وحركة على اللحظات المهمة', on: true, ai: true },
+      { id: 'broll', label: 'B-Roll على الكلام', on: !!(this.settings.keys.pexels || this.settings.keys.pixabay), ai: true },
+      { id: 'sfx', label: 'مؤثرات صوتية على الكلمة', on: !!this.settings.keys.elevenlabs, ai: true },
+      { id: 'duck', label: 'توطية الموسيقى تحت الكلام', on: has('duckMusic') },
+      { id: 'captions', label: 'كابشن متحرك', on: true },
+      { id: 'chapters', label: 'فصول يوتيوب (ماركرز)', on: false, ai: true }
+    ].filter(s => s.id !== 'cleanAudio' || has('cleanAudio')).filter(s => s.id !== 'duck' || has('duckMusic'));
+  }
+
+  async pickHook() {
+    const t = await this.ensureTranscript();
+    const sents = transcribeMod.sentences(t.words);
+    const res = await this.llm.json({ model: this.model('agent_strong'), system: 'أنت مونتير يوتيوب. اختار أقوى جملة أو جملتين متتاليتين (من 3 لـ 8 ثواني) تشد المشاهد من أول ثانية: سؤال، مفاجأة، نتيجة، رقم. رجّع {"start":ثواني,"end":ثواني,"reason":"..."}', user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n') });
+    const start = +res.start, end = +res.end;
+    if (!(end > start) || end - start > 12) throw new Error('الموديل اختار هوك مش منطقي');
+    return { start, end, reason: res.reason };
+  }
+
+  async brollMoments(max = 4) {
+    const t = await this.ensureTranscript();
+    const sents = transcribeMod.sentences(t.words);
+    const res = await this.llm.json({ model: this.model('broll'), system: `اختار لحد ${max} لحظات في الفيديو B-Roll هيخدم فيها الكلام (حاجة ملموسة بتتوصف). لكل لحظة اكتب query إنجليزي قصير لموقع فيديوهات ستوك. رجّع {"moments":[{"time":ثواني,"duration":3,"query":"..."}]}`, user: sents.map(x => `[${x.start.toFixed(1)}] ${x.text}`).join('\n') });
+    return (res.moments || []).filter(m => isFinite(m.time) && m.query).slice(0, max);
+  }
+
+  /**
+   * Run the approved plan step by step. onStep({id, status: 'run'|'ok'|'skip'|'fail', detail})
+   */
+  async runAutoEdit(steps, onStep) {
+    const say = (id, status, detail) => onStep && onStep({ id, status, detail });
+    const results = {};
+    return this.op('مونتاج تلقائي', async () => {
+      for (const st of steps) {
+        if (!st.on) { say(st.id, 'skip'); continue; }
+        say(st.id, 'run');
+        try {
+          let d;
+          switch (st.id) {
+            case 'transcribe': d = (await this.transcribe({})).words.length + ' كلمة'; break;
+            case 'repeats': { const r = await this.removeRepeats(); d = (r.found || 0) + ' تكرار'; break; }
+            case 'silences': { const r = await this.quickCut({}); d = (r.removedSeconds || 0) + ' ثانية'; break; }
+            case 'hook': { const h = await this.pickHook(); await this.makeHook(h); d = `${h.start.toFixed(1)}–${h.end.toFixed(1)}s`; break; }
+            case 'cleanAudio': { const r = await this.cleanAudio({}); d = r.clips + ' كليب'; break; }
+            case 'zooms': { const list = (await this.autoEffectsSuggest({ density: 'medium' })).filter(e => e.type === 'motion'); const r = await this.autoEffectsApply(list); d = r.applied + ' حركة'; break; }
+            case 'broll': { const ms = await this.brollMoments(); let n = 0; for (const m of ms) { try { const r = await this.brollSearch({ q: m.query, type: 'video' }); if (r.results[0]) { await this.brollPlace({ item: r.results[0], time: m.time, duration: m.duration || 3 }); n++; } } catch (_) {} } d = n + ' لقطة'; break; }
+            case 'sfx': { const list = (await this.autoEffectsSuggest({ density: 'medium' })).filter(e => e.type === 'sfx'); const r = await this.autoEffectsApply(list); d = r.applied + ' مؤثر'; break; }
+            case 'duck': { const r = await this.duckMusic({}); d = r.keys + ' نقطة'; break; }
+            case 'captions': { const r = this.addAnimatedCaptions ? await this.addAnimatedCaptions({}) : await this.addCaptions({}); d = (r.cues || r.clips || 0) + ' كارت'; break; }
+            case 'chapters': { const r = await this.chapters({ addMarkers: true }); d = r.chapters.length + ' فصل'; break; }
+            default: d = '';
+          }
+          results[st.id] = { ok: true, detail: d }; say(st.id, 'ok', d);
+        } catch (e) { results[st.id] = { ok: false, error: e.message }; say(st.id, 'fail', e.message); }
+      }
+      return results;
+    });
   }
 
   reload() {
@@ -93,6 +208,7 @@ class Services {
     s.audio.forEach(t => track(t, 'audio'));
     L.push(`تحت رأس التشغيل: ${under.length ? under.join('، ') : 'مفيش'}`);
     if (sel.length) L.push(`المختار: ${sel.join('، ')}`);
+    if (this._shotCache && this._shotCache.size) { const sh = await this.shots().catch(() => []); if (sh.length > 1) L.push(`تغيير لقطات (${sh.length}): ` + sh.slice(0, 40).map(T).join(' | ')); }
     if (s.markers && s.markers.length) L.push(`ماركرز (${s.markers.length}): ` + s.markers.slice(0, 40).map(m => `${T(m.time)} ${m.name || ''}`.trim()).join(' | '));
     const have = this.transcript && this.transcript.seqId === s.id;
     if (!have) L.push('التفريغ: لسه مفيش تفريغ للسيكوينس دي (استخدم transcribe لو محتاج تعرف الكلام).');
@@ -113,17 +229,58 @@ class Services {
     return L.join('\n');
   }
 
+  /* ---------- عين المونتير ---------- */
+  /** topmost picture at timeline time t → { file, srcTime } */
+  pictureAt(seq, t) {
+    for (let i = seq.video.length - 1; i >= 0; i--) {
+      const c = seq.video[i].clips.find(c => c.start <= t + 1e-3 && t < c.end - 1e-3 && !c.disabled && c.mediaPath);
+      if (c) return { file: c.mediaPath, srcTime: c.inPoint + (t - c.start), clip: c.name, track: i };
+    }
+    return null;
+  }
+
+  /** JPEG frames of the sequence at timeline times (default: evenly spread / shot starts). */
+  async lookAtFrames({ times, count = 6, width = 512 } = {}) {
+    const s = await this.seq();
+    let ts = Array.isArray(times) && times.length ? times.slice(0, 12) : null;
+    if (!ts) {
+      const shots = await this.shots().catch(() => []);
+      ts = shots.length >= 2 ? shots.slice(0, count).map(x => x + 0.4) : Array.from({ length: count }, (_, i) => (s.duration * (i + 0.5)) / count);
+    }
+    const frames = [];
+    for (const t of ts) {
+      const p = this.pictureAt(s, t);
+      if (!p) continue;
+      try { frames.push({ time: +t.toFixed(2), clip: p.clip, b64: await vision.frameJpeg(this.ffmpeg(), p.file, p.srcTime, { width }) }); } catch (_) {}
+    }
+    return frames;
+  }
+
+  /** Shot changes on the timeline (offline scene detection, cached per clip). */
+  async shots() {
+    const s = await this.seq();
+    this._shotCache = this._shotCache || new Map();
+    const out = [];
+    for (const tr of s.video) for (const c of tr.clips) {
+      if (!c.mediaPath || c.disabled || /[\\/](glass|pro|scene)-[0-9a-f]+\.(mov|mp4)$/i.test(c.mediaPath)) continue;
+      const key = `${c.mediaPath}|${c.inPoint}|${c.end - c.start}`;
+      if (!this._shotCache.has(key)) this._shotCache.set(key, await vision.detectShots(this.ffmpeg(), c.mediaPath, { start: c.inPoint, duration: c.end - c.start }).catch(() => []));
+      out.push(c.start, ...this._shotCache.get(key).map(t => c.start + (t - c.inPoint)));
+    }
+    return Array.from(new Set(out.map(t => +t.toFixed(2)))).sort((a, b) => a - b);
+  }
+
   /** Check every AI feature's model on OpenRouter: answers? (and for the editor: can it call tools?) */
   async testModels({ features, onResult } = {}) {
     const { FEATURES } = require('./openrouter');
     const list = (features || FEATURES.map(f => f.id)).map(id => FEATURES.find(f => f.id === id)).filter(Boolean);
-    let catalog = null;
-    try { catalog = new Set((await this.llm.listModels()).map(m => m.id)); } catch (_) {}
+    let catalog = null, info = new Map();
+    try { const ms = await this.llm.listModels(); ms.forEach(m => info.set(m.id, m)); catalog = new Set(ms.map(m => m.id)); } catch (_) {}
     const tool = { type: 'function', function: { name: 'set_playhead', description: 'Move the playhead', parameters: { type: 'object', properties: { time: { type: 'number' } }, required: ['time'] } } };
     const out = [];
     for (const f of list) {
       const model = this.model(f.id), t0 = Date.now();
-      const r = { feature: f.id, label: f.label, model, ok: false, ms: 0, tools: null, listed: catalog ? catalog.has(model) : null };
+      const r = { feature: f.id, label: f.label, model, ok: false, ms: 0, tools: null, listed: catalog ? catalog.has(model) : null, vision: info.has(model) ? info.get(model).vision : null };
       try {
         if (f.tools) {
           const m = await this.llm.chat({ model, maxTokens: 300, tools: [tool], messages: [{ role: 'system', content: 'You are a video editor assistant. Use the tool.' }, { role: 'user', content: 'Move the playhead to 12 seconds.' }] });
@@ -216,6 +373,43 @@ class Services {
     fs.writeFileSync(file, '\ufeff' + captions.toSRT(cues), 'utf8');
     await this.host('createCaptions', { srtPath: file, start: 0 });
     return { cues: cues.length, file };
+  }
+
+  /** Animated, word-synced captions rendered as transparent clips on a track above the video. */
+  async addAnimatedCaptions({ style, onProgress, ...opts } = {}) {
+    if (!this.renderCaptionsImpl) return this.addCaptions(opts);
+    const t = await this.ensureTranscript();
+    const s = await this.seq();
+    const st = { ...(this.settings.captionStyle || {}), ...(style || {}) };
+    if (this.settings.style) { st.accent = st.accent || this.settings.style.accent; st.box = st.box || this.settings.style.primary; }
+    const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)), keepWords: true };
+    if (st.style === 'bold' && !opts.maxWords) c.maxWords = Math.min(c.maxWords || 4, 3);
+    const cues = captions.buildCues(t.words, c);
+    if (!cues.length) throw new Error('مفيش كلام اتفرّغ');
+    const key = hash(JSON.stringify({ cues, st, w: s.width, h: s.height, fps: s.fps }));
+    const clips = await this.renderCaptionsImpl({ cues, width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: st, outDir: config.cacheDir('captions'), ffmpeg: this.ffmpeg(), hash: key, onProgress });
+    const top = s.video.reduce((m, tr, i) => (tr.clips.length ? i : m), 0);
+    await this.op('كابشن متحرك', async () => {
+      for (const cl of clips) await this.host('placeFile', { path: cl.file, time: cl.start, kind: 'video', track: -1, minTrack: top + 1, duration: +(cl.end - cl.start).toFixed(3), bin: 'EditFast/Captions' });
+    });
+    return { cues: cues.length, clips: clips.length, style: st.style || 'bold' };
+  }
+
+  /** Translate the captions (timing kept) and add them as another caption track. */
+  async translateCaptions({ lang = 'English', place = true } = {}) {
+    const t = await this.ensureTranscript();
+    const cues = captions.buildCues(t.words, this.settings.captions);
+    const out = [];
+    for (let i = 0; i < cues.length; i += 60) {
+      const part = cues.slice(i, i + 60);
+      const res = await this.llm.json({ model: this.model('spellfix'), system: `Translate each subtitle line to ${lang}. Keep it short and natural for subtitles, keep the meaning, keep the order. Return {"lines":[...]} with exactly the same number of lines.`, user: JSON.stringify(part.map(c => c.text)) });
+      const lines = Array.isArray(res.lines) && res.lines.length === part.length ? res.lines : part.map(c => c.text);
+      part.forEach((c, j) => out.push({ ...c, text: String(lines[j] || c.text) }));
+    }
+    const file = path.join(config.cacheDir('captions'), `captions-${lang.toLowerCase().replace(/[^a-z]+/g, '-')}-${hash(JSON.stringify(out))}.srt`);
+    fs.writeFileSync(file, '\ufeff' + captions.toSRT(out), 'utf8');
+    if (place) await this.host('createCaptions', { srtPath: file, start: 0 });
+    return { cues: out.length, file, lang };
   }
 
   async exportSrt(dir, opts = {}) {
@@ -339,6 +533,203 @@ class Services {
     if (!fs.existsSync(out)) await this.renderGlassImpl({ src, width, height, fps, params: P, out, ffmpeg: this.ffmpeg(), onProgress });
     const placed = await this.host('placeFile', { path: out, time: g.t, kind: 'video', track: -1, minTrack: g.track + 1, duration: P.duration, bin: 'EditFast/Liquid Glass' });
     return { ...placed, file: out, source: g.clip ? g.clip.name : null, duration: P.duration };
+  }
+
+  /* ---------- مشاهد Pro (Remotion) ---------- */
+  proEngine() {
+    const pro = require('./proScene');
+    const info = pro.engineInfo();
+    const node = ff.findBinary('node', this.settings.paths.node);
+    return { ...info, node, npm: ff.findBinary(['npm'], this.settings.paths.npm, node ? [path.dirname(node)] : []) };
+  }
+
+  /** npm install inside remotion/ (one time, online) */
+  async installProEngine(onLine) {
+    const e = this.proEngine();
+    if (!e.npm) throw new Error('مش لاقي npm — ثبّت Node.js (المثبّت بيعمله) وجرب تاني.');
+    await ff.run(e.npm, ['install', '--no-audit', '--no-fund', '--omit=dev'], { spawn: { cwd: e.root, shell: process.platform === 'win32' }, onStderr: onLine, onStdout: d => onLine && onLine(String(d)) });
+    return this.proEngine();
+  }
+
+  async designProScene({ brief, duration, transparent = false }) {
+    if (!brief || !String(brief).trim()) throw new Error('اكتب وصف المشهد');
+    const pro = require('./proScene');
+    const s = await this.seq().catch(() => ({ width: 1920, height: 1080, fps: 30 }));
+    const raw = await pro.direct(this.llm, this.model('scene'), brief, { style: this.settings.style, duration, transparent });
+    return pro.normalize(raw, { width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: this.settings.style });
+  }
+
+  async renderProScene({ spec, time, preview = false, onProgress }) {
+    const pro = require('./proScene');
+    const s = await this.seq().catch(() => null);
+    const full = pro.normalize(spec, { width: s ? s.width : 1920, height: s ? s.height : 1080, fps: s ? Math.round(s.fps) || 30 : 30, style: this.settings.style });
+    const e = this.proEngine();
+    const transparent = full.background.type === 'transparent';
+    const ext = preview ? 'png' : (transparent ? 'mov' : 'mp4');
+    const out = path.join(config.cacheDir('pro'), `pro-${hash(JSON.stringify(full) + (preview ? '|still' : ''))}.${ext}`);
+    if (!fs.existsSync(out)) {
+      const spec2 = preview ? { ...full, width: Math.round(full.width / 2), height: Math.round(full.height / 2) } : full;
+      await pro.render({ node: e.node, spec: spec2, out, still: preview, browserExecutable: this.settings.paths.chrome || undefined, onProgress });
+    }
+    if (preview || !s) return { file: out, spec: full };
+    let minTrack = 1;
+    if (transparent) { const g = await this.glassSource(time); minTrack = g.track + 1; }
+    const placed = await this.host('placeFile', { path: out, time: time ?? s.playhead, kind: 'video', track: -1, minTrack, duration: full.duration, bin: 'EditFast/Pro Scenes' });
+    return { ...placed, file: out, spec: full };
+  }
+
+  /* ---------- ريلز وشورتس ---------- */
+  async reframeClip({ clip, ratio = '9:16', onProgress }) {
+    if (!this.analyzeFacesImpl) throw new Error('تتبّع الوش مش متاح هنا');
+    const reframe = require('./reframe');
+    const info = await ff.probe(ff.requireTool(this.tools.ffprobe, 'ffprobe'), clip.mediaPath);
+    const duration = clip.end - clip.start;
+    const out = path.join(config.cacheDir('reels'), `reel-${hash(clip.mediaPath + '|' + clip.inPoint + '|' + duration + '|' + ratio)}.mp4`);
+    if (fs.existsSync(out)) return out;
+    const samples = await this.analyzeFacesImpl({ ffmpeg: this.ffmpeg(), file: clip.mediaPath, start: clip.inPoint, duration, srcW: info.width, srcH: info.height, fps: 3, onProgress: p => onProgress && onProgress(p * 0.7) });
+    const shots = (await vision.detectShots(this.ffmpeg(), clip.mediaPath, { start: clip.inPoint, duration }).catch(() => [])).map(t => t - clip.inPoint);
+    const planRes = reframe.plan(samples, { srcW: info.width, srcH: info.height, ratio, shots });
+    await reframe.render(this.ffmpeg(), { file: clip.mediaPath, start: clip.inPoint, duration, srcW: info.width, srcH: info.height, planRes, ratio, out });
+    onProgress && onProgress(1);
+    return out;
+  }
+
+  /** Reframe every clip on V1 and build a new vertical sequence from them (same timing). */
+  async makeReels({ ratio = '9:16', onProgress } = {}) {
+    const s = await this.seq();
+    const clips = (s.video[0] ? s.video[0].clips : []).filter(c => c.mediaPath && !c.disabled);
+    if (!clips.length) throw new Error('مفيش كليبات على V1');
+    const t0 = clips[0].start, items = [];
+    for (let i = 0; i < clips.length; i++) {
+      const file = await this.reframeClip({ clip: clips[i], ratio, onProgress: p => onProgress && onProgress((i + p) / clips.length, clips[i].name) });
+      items.push({ path: file, time: +(clips[i].start - t0).toFixed(3) });
+    }
+    return this.op('ريلز', () => this.host('createSequenceFromClips', { name: `${s.name} - ريلز ${ratio}`, items, bin: 'EditFast/Reels' }));
+  }
+
+  async findShorts({ count = 3, min = 20, max = 60 } = {}) {
+    const t = await this.ensureTranscript();
+    const sents = transcribeMod.sentences(t.words);
+    const res = await this.llm.json({ model: this.model('agent_strong'), system: `أنت صانع شورتس/ريلز محترف. من التفريغ ده اختار أقوى ${count} مقاطع منفصلة، كل مقطع من ${min} لـ ${max} ثانية، بيبدأ بهوك وبيخلص بفكرة كاملة. رجّع {"shorts":[{"start":ثواني,"end":ثواني,"title":"عنوان جذاب قصير","score":1-10,"reason":"ليه"}]}`, user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n'), maxTokens: 3000 });
+    const out = [];
+    for (const sh of (res.shorts || []).sort((a, b) => (b.score || 0) - (a.score || 0))) {
+      const a = +sh.start, b = +sh.end;
+      if (!(b > a) || b - a < min * 0.6 || b - a > max * 1.3) continue;
+      if (out.some(o => a < o.end && b > o.start)) continue;
+      out.push({ start: a, end: b, title: String(sh.title || 'Short').slice(0, 60), score: +sh.score || 0, reason: sh.reason || '' });
+    }
+    return out.slice(0, count);
+  }
+
+  async makeShort({ start, end, title = 'Short' }, { reframe = true, captions = true, ratio = '9:16', onProgress } = {}) {
+    const s = await this.seq();
+    return this.op('شورت: ' + title, async () => {
+      const ranges = []; if (start > 0.05) ranges.push({ start: 0, end: start }); if (end < s.duration - 0.05) ranges.push({ start: end, end: s.duration });
+      const r = await this.host('removeRanges', { ranges, clone: true, cloneName: `Short - ${title}`, crossfadeFrames: 0 });
+      this.transcript = null;
+      let reel = null;
+      if (reframe) reel = await this.makeReels({ ratio, onProgress });
+      if (captions) { try { if (this.addAnimatedCaptions) await this.addAnimatedCaptions({}); else await this.addCaptions({}); } catch (e) { this.log('captions: ' + e.message); } }
+      return { sequence: reel ? reel.name : r.sequence, length: +(end - start).toFixed(1) };
+    });
+  }
+
+  /* ---------- الصوت ---------- */
+  /** voice track = the audio track with the most speech-like clips (default A1); music = another track with long clips */
+  async audioTracksGuess() {
+    const s = await this.seq();
+    const used = s.audio.filter(t => t.clips.length);
+    const isMusic = t => t.clips.some(c => /music|song|bgm|موسيقى|اغنية|أغنية/i.test(c.name + ' ' + c.mediaPath));
+    const voice = used.find(t => !isMusic(t)) || used[0];
+    const music = used.find(t => t !== voice && isMusic(t)) || used.find(t => t !== voice);
+    return { voice: voice ? voice.index : 0, music: music ? music.index : -1, seq: s };
+  }
+
+  async cleanAudio({ track, strength = 'medium', loudness = -16, onProgress } = {}) {
+    const audio = require('./audioTools');
+    const g = await this.audioTracksGuess();
+    const ti = track ?? g.voice, tr = g.seq.audio[ti];
+    if (!tr || !tr.clips.length) throw new Error('مفيش صوت على التراك ده');
+    const clips = tr.clips.filter(c => c.mediaPath && !c.disabled);
+    const files = [];
+    for (const [i, c] of clips.entries()) {
+      const out = path.join(config.cacheDir('audio'), `clean-${hash(c.mediaPath + '|' + c.inPoint + '|' + (c.end - c.start) + '|' + strength + '|' + loudness)}.wav`);
+      if (!fs.existsSync(out)) await audio.cleanFile(this.ffmpeg(), { file: c.mediaPath, start: c.inPoint, duration: c.end - c.start, out, strength, loudness });
+      files.push({ file: out, start: c.start, end: c.end });
+      onProgress && onProgress((i + 1) / clips.length);
+    }
+    return this.op('تنضيف الصوت', async () => {
+      for (const f of files) await this.host('placeFile', { path: f.file, time: f.start, kind: 'audio', track: -1, minTrack: ti + 1, duration: +(f.end - f.start).toFixed(3), bin: 'EditFast/Audio' });
+      await this.host('muteTrack', { track: ti, mute: true });   // the original stays on the timeline, just muted
+      return { clips: files.length, track: ti, strength };
+    });
+  }
+
+  async duckMusic({ voiceTrack, musicTrack, duckDb = -12, attack = 0.25, release = 0.6 } = {}) {
+    const audio = require('./audioTools');
+    const g = await this.audioTracksGuess();
+    const v = voiceTrack ?? g.voice, m = musicTrack ?? g.music;
+    if (m < 0 || !g.seq.audio[m] || !g.seq.audio[m].clips.length) throw new Error('مش لاقي تراك موسيقى — حط الموسيقى على تراك صوت لوحدها');
+    const speech = await audio.voiceActivity(this.ffmpeg(), g.seq.audio[v].clips.filter(c => c.mediaPath && !c.disabled));
+    let keys = 0;
+    await this.op('توطية الموسيقى', async () => {
+      for (const c of g.seq.audio[m].clips) {
+        const k = audio.duckKeys(speech, c, { duckDb, attack, release });
+        if (!k.length) continue;
+        await this.host('setVolumeKeys', { track: m, clipStart: c.start, keys: k });
+        keys += k.length;
+      }
+    });
+    return { keys, speech: speech.length, voiceTrack: v, musicTrack: m, duckDb };
+  }
+
+  /* ---------- الثامبنيل ---------- */
+  /** Best-looking frames: sample shots + an even spread, score sharpness/exposure/contrast offline. */
+  async thumbnailCandidates({ count = 8, samples = 24 } = {}) {
+    const T = require('./thumbnail');
+    const s = await this.seq();
+    const shots = await this.shots().catch(() => []);
+    const times = Array.from(new Set([...shots.map(t => t + 0.5), ...Array.from({ length: samples }, (_, i) => s.duration * (i + 0.5) / samples)].map(t => +t.toFixed(2)))).filter(t => t < s.duration).sort((a, b) => a - b);
+    const scored = [];
+    for (const t of times) {
+      const p = this.pictureAt(s, t); if (!p) continue;
+      try {
+        const { stdout } = await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, p.srcTime)), '-i', p.file, '-frames:v', '1', '-vf', 'scale=160:90:force_original_aspect_ratio=disable,format=gray', '-f', 'rawvideo', '-']);
+        const st = T.frameStats(new Uint8Array(stdout), 160, 90);
+        scored.push({ time: t, file: p.file, srcTime: p.srcTime, score: T.score(st), stats: st });
+      } catch (_) {}
+    }
+    scored.sort((a, b) => b.score - a.score);
+    const picked = [];
+    for (const c of scored) { if (picked.every(p => Math.abs(p.time - c.time) > s.duration / (count * 2.5))) picked.push(c); if (picked.length >= count) break; }
+    for (const c of picked) {
+      c.image = path.join(config.cacheDir('thumbnails'), `cand-${hash(c.file + '|' + c.srcTime.toFixed(2))}.jpg`);
+      if (!fs.existsSync(c.image)) await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.max(0, c.srcTime)), '-i', c.file, '-frames:v', '1', '-q:v', '2', c.image]);
+    }
+    return picked;
+  }
+
+  /** AI: catchy titles from the transcript (and, if the model can see, which candidate frame is best). */
+  async thumbnailIdeas({ candidates = [] } = {}) {
+    const t = await this.ensureTranscript().catch(() => null);
+    const text = t ? transcribeMod.sentences(t.words).map(x => x.text).join(' ').slice(0, 6000) : '';
+    const msgs = [{ role: 'system', content: 'أنت خبير ثامبنيلز يوتيوب. اقترح 5 عناوين للثامبنيل (2-5 كلمات، قوية وفضولية، بنفس لغة/لهجة الفيديو) ولكل عنوان كلمة واحدة تتلوّن. لو فيه صور، اختار أحلى فريم (فيه وش واضح وتعبير قوي). رجّع JSON: {"titles":[{"text":"...","highlight":"..."}],"best":رقم الصورة من 0}' },
+      { role: 'user', content: [{ type: 'text', text: 'كلام الفيديو: ' + (text || '(مفيش تفريغ)') }].concat(candidates.slice(0, 6).map(c => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + fs.readFileSync(c.image).toString('base64') } }))) }];
+    let m;
+    try { m = await this.llm.chat({ model: this.model('agent_strong'), messages: msgs, maxTokens: 800, jsonMode: true }); }
+    catch (e) { if (candidates.length) { msgs[1].content = msgs[1].content.slice(0, 1); m = await this.llm.chat({ model: this.model('agent_strong'), messages: msgs, maxTokens: 800 }); } else throw e; }
+    const j = require('./util').extractJson(m.content);
+    return { titles: (j.titles || []).filter(x => x && x.text).slice(0, 6), best: Number.isInteger(j.best) ? j.best : 0 };
+  }
+
+  /** Save the rendered PNG (base64) next to the project and import it. */
+  async saveThumbnail(b64, name = 'thumbnail') {
+    let dir = config.cacheDir('thumbnails');
+    try { const p = await this.host('projectPath', {}); if (p && p.path) { dir = path.join(path.dirname(p.path), 'EditFast Thumbnails'); fs.mkdirSync(dir, { recursive: true }); } } catch (_) {}
+    const file = path.join(dir, `${name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40) || 'thumbnail'}-${Date.now()}.png`);
+    fs.writeFileSync(file, Buffer.from(b64, 'base64'));
+    try { await this.host('importFiles', { paths: [file], bin: 'EditFast/Thumbnails' }); } catch (_) {}
+    return file;
   }
 
   /* ---------- المؤثرات الصوتية ---------- */

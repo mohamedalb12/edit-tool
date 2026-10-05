@@ -65,6 +65,31 @@
     brollPlace: function (o) { return rec('brollPlace', { id: o.item.id, duration: o.duration }, { track: 2 }); },
     askUser: function (q, o) { return S.askUserImpl ? S.askUserImpl(q, o) : Promise.resolve('تمام'); },
     saveStyle: function (st) { settings.style = st; return rec('saveStyle', st, st); },
+    history: [],
+    proEngine: function () { return { installed: true, node: '/usr/bin/node', root: '/x/remotion' }; },
+    designProScene: function (o) { return rec('designProScene', o, { width: 1920, height: 1080, fps: 30, duration: 6, theme: {}, background: { type: 'mesh' }, elements: [{ type: 'kineticTitle', from: 0, duration: 3, props: { text: 'أهلا', style: 'rise', highlight: [] } }, { type: 'cta', from: 2.8, duration: 3, position: 'bottom', props: { text: 'اشترك', sub: '' } }] }); },
+    renderProScene: function (o) { return rec('renderProScene', { preview: !!o.preview, elements: o.spec.elements.length, bg: o.spec.background.type }, o.preview ? { file: '/tmp/prev.png', spec: o.spec } : { track: 1, file: '/tmp/pro.mp4', spec: o.spec }); },
+    installProEngine: function () { return rec('installProEngine', null, { installed: true, node: '/usr/bin/node' }); },
+    autoEditSteps: function () { return [{ id: 'transcribe', label: 'تفريغ الكلام', on: true }, { id: 'silences', label: 'شيل السكتات', on: true }, { id: 'hook', label: 'هوك', on: true, ai: true }, { id: 'broll', label: 'B-Roll', on: false, ai: true }]; },
+    runAutoEdit: function (steps, onStep) {
+      calls.push({ name: 'runAutoEdit', args: steps.filter(function (s) { return s.on; }).map(function (s) { return s.id; }) });
+      var res = {};
+      steps.forEach(function (st) { if (!st.on) { onStep({ id: st.id, status: 'skip' }); return; } onStep({ id: st.id, status: 'run' }); onStep({ id: st.id, status: 'ok', detail: 'تمام' }); res[st.id] = { ok: true }; });
+      S.history.push({ id: 1, at: Date.now(), op: 'removeRanges', group: 'مونتاج تلقائي' });
+      return Promise.resolve(res);
+    },
+    undoLast: function () { S.history.pop(); return rec('undoLast', null, { undone: 1, message: 'اترجع ✓', manual: [] }); },
+    makeReels: function (o) { if (o.onProgress) o.onProgress(1, 'talk'); return rec('makeReels', { ratio: o.ratio }, { name: 'Main - ريلز ' + o.ratio }); },
+    findShorts: function (o) { return rec('findShorts', o, [{ start: 12, end: 48, title: 'أقوى لحظة', score: 9, reason: 'هوك قوي' }]); },
+    makeShort: function (sh, o) { return rec('makeShort', { title: sh.title, reframe: o.reframe, captions: o.captions }, { sequence: 'Short - ' + sh.title, length: 36 }); },
+    audioTracksGuess: function () { return Promise.resolve({ voice: 0, music: 1, seq: seq }); },
+    cleanAudio: function (o) { if (o.onProgress) o.onProgress(1); return rec('cleanAudio', { track: o.track, strength: o.strength, loudness: o.loudness }, { clips: 1, track: 0 }); },
+    duckMusic: function (o) { return rec('duckMusic', o, { speech: 4, keys: 16 }); },
+    thumbnailCandidates: function () { return rec('thumbnailCandidates', null, [{ time: 6.5, score: 2.4, image: '/tests/fixtures/face.png' }, { time: 1, score: 1.2, image: '/tests/fixtures/face.png' }]); },
+    thumbnailIdeas: function () { return rec('thumbnailIdeas', null, { titles: [{ text: 'السر اللي محدش قالهولك', highlight: 'السر' }], best: 0 }); },
+    saveThumbnail: function (b64, name) { return rec('saveThumbnail', { bytes: b64.length, name: name }, '/proj/EditFast Thumbnails/x.png'); },
+    addAnimatedCaptions: function (o) { if (o.onProgress) o.onProgress(1); return rec('addAnimatedCaptions', { style: o.style.style, position: o.style.position }, { clips: 5, cues: 5 }); },
+    translateCaptions: function (o) { return rec('translateCaptions', o, { cues: 5, lang: o.lang }); },
     glassFrame: function () { return rec('glassFrame', null, null); },
     liquidGlass: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('liquidGlass', { params: o.params }, { track: 2, source: 'talk', duration: 4 }); },
     sequenceSnapshot: function () { return rec('sequenceSnapshot', null, 'السيكوينس: "Main" | رأس التشغيل عند 0:02.0'); },

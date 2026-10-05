@@ -325,3 +325,26 @@ button.btn.primary, button.btn.primary:hover { background: var(--grad-loop); bac
 canvas.glass-stage { display: block; width: 100%; aspect-ratio: 16/9; }
 .stage-glint { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,.08) 48%, transparent 60%); background-size: 250% 100%; animation: sweep 7s linear infinite; }
 .tile.on { border-color: rgba(192, 132, 252, .9); box-shadow: 0 0 0 1px rgba(192,132,252,.5), 0 12px 30px -12px rgba(192, 38, 211, .9); }
+
+/* Pro scenes */
+.pro-preview img { width: 100%; border-radius: 12px; display: block; box-shadow: 0 16px 40px -18px rgba(0,0,0,.9); animation: pop .5s var(--spring) both; }
+.badge-dot.ok-dot, .badge-dot.err-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.ok-dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); } .err-dot { background: var(--err); box-shadow: 0 0 10px var(--err); }
+
+/* auto edit */
+.steps-list { max-height: none; }
+.step .step-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.18); flex: 0 0 auto; }
+.step.run .step-dot { background: var(--accent); box-shadow: 0 0 0 0 rgba(167,139,250,.7); animation: ping 1s var(--ease) infinite; }
+.step.ok .step-dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.step.fail .step-dot { background: var(--err); box-shadow: 0 0 10px var(--err); }
+.step.skip { opacity: .5; }
+.ai-chip { display: inline-block; margin-inline-start: 6px; font-size: 9.5px; font-weight: 800; padding: 0 6px; border-radius: 6px; background: var(--grad); color: #fff; vertical-align: 1px; }
+.short .score { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; font-weight: 900; background: var(--grad); color: #fff; box-shadow: 0 0 14px rgba(217,70,239,.6); flex: 0 0 auto; }
+.cap-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); margin-bottom: 8px; }
+canvas.thumb-stage { display: block; width: 100%; aspect-ratio: 16/9; }
+/* segmented controls wrap instead of overflowing narrow panels */
+.seg { flex-wrap: wrap; max-width: 100%; }
+.row > * { max-width: 100%; }
+.card h3 { flex-wrap: wrap; row-gap: 0; column-gap: 0; }
+.card h3::before { margin-inline-end: 8px; }
+.card h3.wordfx .w { margin-inline-end: 0.25em; }

@@ -20,6 +20,8 @@
       host: EF.host,
       renderScene: function (spec, out, ffmpeg) { return EF.renderScene(spec, out, ffmpeg); },
       renderGlass: function (job) { return EF.renderGlass(job); },
+      analyzeFaces: function (job) { return EF.analyzeFaces(job); },
+      renderCaptions: function (job) { return EF.renderCaptionClips(job); },
       log: function (m) { console.log('[EditFast]', m); }
     });
     var nav = document.getElementById('nav');

@@ -6,7 +6,7 @@ const os = require('os');
 
 const DEFAULTS = {
   keys: { openrouter: '', elevenlabs: '', pexels: '', pixabay: '' },
-  paths: { ffmpeg: '', ffprobe: '', whisper: '', whisperModel: '', baseMogrt: '' },
+  paths: { ffmpeg: '', ffprobe: '', whisper: '', whisperModel: '', baseMogrt: '', node: '', npm: '', chrome: '' },
   models: {}, // featureId -> OpenRouter model id (override)
   defaultModel: '',
   agentLevel: 'strong',

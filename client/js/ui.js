@@ -20,6 +20,11 @@
     glass: '<path d="M12 2.8s6.4 7 6.4 11.3a6.4 6.4 0 0 1-12.8 0C5.6 9.8 12 2.8 12 2.8z"/><path d="M9.2 14.6a3 3 0 0 0 2.6 2.8"/>',
     search: '<circle cx="11" cy="11" r="7.5"/><path d="M21 21l-4.5-4.5"/>',
     broll: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="9.5" r="1.8"/><path d="M3 16l5-5 4 4 3-3 6 6"/>',
+    pro: '<rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M10 9.5v5l4-2.5z" fill="currentColor"/><path d="M6 2.5l2 2.5M12 2.5v2.5M18 2.5l-2 2.5"/>',
+    auto: '<path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12z"/>',
+    reels: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="10" r="2.6"/><path d="M8.8 16.5a3.6 3.6 0 0 1 6.4 0"/>',
+    audio: '<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><circle cx="4" cy="13" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="15" r="2"/>',
+    thumb: '<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M6 15.5h7M6 12h5"/><path d="M15 9.5l3.5 2-3.5 2z" fill="currentColor"/>',
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'
   };
   UI.icon = function (name) {
@@ -51,8 +56,9 @@
       else el.setAttribute(k, attrs[k] === true ? '' : attrs[k]);
     }
     (function add(list) {
-      for (i = 0; i < list.length; i++) {
-        var c = list[i];
+      // own counter per level: a shared one made nested (and empty) child arrays loop forever
+      for (var j = 0; j < list.length; j++) {
+        var c = list[j];
         if (c === null || c === undefined || c === false) continue;
         if (Array.isArray(c)) { add(c); continue; }
         el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
