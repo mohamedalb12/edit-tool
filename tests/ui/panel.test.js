@@ -42,7 +42,7 @@ const calls = () => page.evaluate(() => window.__calls.map(c => c.name));
 const clearCalls = () => page.evaluate(() => { window.__calls.length = 0; });
 async function open(id) { await page.click(`#nav button[data-id="${id}"]`); await page.waitForTimeout(150); }
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
-async function shot(name) { await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
+async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
 test('boots: 14 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));

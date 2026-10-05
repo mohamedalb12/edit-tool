@@ -22,8 +22,10 @@
       log: function (m) { console.log('[EditFast]', m); }
     });
     var nav = document.getElementById('nav');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-icon]'), function (el) { el.appendChild(UI.icon(el.getAttribute('data-icon'))); });
+    setTimeout(function () { var sp = document.getElementById('splash'); if (sp) { sp.classList.add('hide'); setTimeout(function () { sp.remove(); }, 700); } }, 650);
     EF.tabs.forEach(function (t) {
-      nav.appendChild(h('button', { type: 'button', 'data-id': t.id, title: t.title, onclick: function () { show(t.id); } }, h('span', { class: 'ic' }, t.icon), t.label));
+      nav.appendChild(h('button', { type: 'button', 'data-id': t.id, title: t.title, onclick: function () { show(t.id); } }, h('span', { class: 'ic' }, UI.icon(t.id)), t.label));
     });
     try { var ms = JSON.parse(localStorage.getItem('ef-models') || 'null'); UI.fillModels(ms || EF.node('openrouter').FALLBACK_MODELS); } catch (e) {}
     var first = null; try { first = localStorage.getItem('ef-tab'); } catch (e3) {}

@@ -19,7 +19,7 @@
         KINDS.forEach(function (K) {
           var g = h('div', { class: 'grid' });
           M.PRESETS.filter(function (p) { return p.kind === K.k; }).forEach(function (p) {
-            var box = h('div', { style: { width: '34%', height: '40%', background: 'var(--accent)', borderRadius: '4px', position: 'absolute', left: '33%', top: '30%' } });
+            var box = h('div', { style: { width: '34%', height: '40%', background: 'var(--grad)', borderRadius: '6px', boxShadow: '0 0 18px rgba(217,70,239,.7)', position: 'absolute', left: '33%', top: '30%' } });
             var thumb = h('div', { class: 'thumb', style: { position: 'relative' } }, box);
             var raf = null;
             function play() {

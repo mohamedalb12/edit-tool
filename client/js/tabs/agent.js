@@ -19,7 +19,7 @@
       motion: UI.select([{ value: '1', label: 'هادي' }, { value: '2', label: 'متوسط' }, { value: '3', label: 'قوي' }], String(st.motion || 2)),
       notes: h('textarea', { placeholder: 'أي حاجة تانية عن ستايلك… (مثلاً: بحب الزووم السريع، مش بحب الترانزيشنز الكتير)' }, st.notes || '')
     };
-    return UI.card('🎨 ذوقك (بيتسأل مرة واحدة)',
+    return UI.card('ذوقك (بيتسأل مرة واحدة)',
       UI.hint('المونتير الذكي بيلتزم بالألوان والإيقاع دول في كل فيديو. تقدر تغيّرهم في أي وقت.'),
       UI.row(h('label', null, 'الألوان'), f.primary, 'أساسي', f.accent, 'مميز', f.text, 'نص', f.background, 'خلفية'),
       UI.field('الخط', f.font), UI.field('الإيقاع', f.pace), UI.field('الكابشن', f.captions),
@@ -42,7 +42,16 @@
       var pickerWrap = h('div');
       var styleWrap = h('div');
 
-      function add(cls, text) { var m = h('div', { class: 'msg ' + cls }, text); chat.appendChild(m); chat.scrollTop = chat.scrollHeight; state.log.push({ cls: cls, text: text }); return m; }
+      var typing = null;
+      function add(cls, text) {
+        var m = h('div', { class: 'msg ' + cls }, text);
+        if (typing && typing.parentNode === chat) chat.insertBefore(m, typing); else chat.appendChild(m); // the typing dots stay last
+        chat.scrollTop = chat.scrollHeight; state.log.push({ cls: cls, text: text }); return m;
+      }
+      function setTyping(on) {
+        if (on && !typing) { typing = h('div', { class: 'msg typing', 'aria-label': 'بيشتغل' }, h('i'), h('i'), h('i')); chat.appendChild(typing); chat.scrollTop = chat.scrollHeight; }
+        if (!on && typing) { typing.remove(); typing = null; }
+      }
       state.log.forEach(function (l) { chat.appendChild(h('div', { class: 'msg ' + l.cls }, l.text)); });
 
       function picker() { UI.empty(pickerWrap).appendChild(UI.modelPicker(level === 'max' ? 'agent_max' : 'agent_strong')); }
@@ -50,10 +59,11 @@
 
       function askUser(question, options) {
         return new Promise(function (resolve) {
+          setTyping(false);
           var box = add('ask', question);
           var chips = h('div', { class: 'chips' });
           var other = h('input', { placeholder: 'أو اكتب ردك…', class: 'grow' });
-          function answer(v) { box.appendChild(h('div', { class: 'hint' }, '← ' + v)); chips.remove(); otherRow.remove(); state.log.push({ cls: 'user', text: v }); resolve(v); }
+          function answer(v) { box.appendChild(h('div', { class: 'hint' }, '← ' + v)); chips.remove(); otherRow.remove(); state.log.push({ cls: 'user', text: v }); setTyping(true); resolve(v); }
           (options || []).forEach(function (o) { chips.appendChild(h('button', { class: 'chip', type: 'button', onclick: function () { answer(o); } }, o)); });
           var otherRow = UI.row(other, UI.btn('رد', function () { if (other.value.trim()) answer(other.value.trim()); }, 'small'));
           other.addEventListener('keydown', function (e) { if (e.key === 'Enter' && other.value.trim()) answer(other.value.trim()); });
@@ -89,7 +99,8 @@
         if (!S.settings.keys.openrouter) { UI.toast('حط مفتاح OpenRouter من الإعدادات الأول', true); return; }
         input.value = ''; add('user', text);
         var a = getAgent(); a.model = S.model(level === 'max' ? 'agent_max' : 'agent_strong');
-        UI.safe('المونتير شغّال', function () { return a.send(text); }, send);
+        setTyping(true);
+        UI.safe('المونتير شغّال', function () { return a.send(text); }, send).then(function () { setTyping(false); });
       }
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(); });
 
