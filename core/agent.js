@@ -38,7 +38,7 @@ const TOOLS = [
     style: { type: 'string', enum: captionStyles.STYLES.map(x => x.id) }, position: { type: 'string', enum: ['bottom', 'center', 'top'] },
     anim: { type: 'string', enum: captionStyles.ANIMS.map(x => x.id), description: 'دخول كل كلمة: drop نازلة من فوق، slideStart من الجنب…' },
     ease: { type: 'string', enum: captionStyles.EASES.map(x => x.id), description: 'out = سريع في الأول وبطيء في الآخر' }, anim_speed: { type: 'number', description: 'مدة دخول الكلمة بالثواني (0.1-1.2)' },
-    timing: { type: 'string', enum: ['sync', 'cascade', 'line'] }, word_gap: { type: 'number', description: 'للـ cascade: ثواني بين كل كلمة' }, exit: { type: 'string', enum: captionStyles.EXITS.map(x => x.id) } }),
+    still: { type: 'boolean', description: 'كابشن ثابت من غير أي أنيميشن' }, timing: { type: 'string', enum: ['sync', 'cascade', 'line'] }, word_gap: { type: 'number', description: 'للـ cascade: ثواني بين كل كلمة' }, exit: { type: 'string', enum: captionStyles.EXITS.map(x => x.id) } }),
   fn('translate_captions', 'ترجم الكابشن للغة تانية (بنفس التوقيت) كتراك كابشن جديد.', { lang: { type: 'string', description: 'مثلاً English, French' } }, ['lang']),
   fn('apply_motion', 'طبّق قالب حركة (كي فريمز على Transform) على الكليب اللي عند وقت معين.', {
     preset: { type: 'string', enum: motion.PRESETS.map(p => p.id) }, level: { type: 'number', enum: [1, 2, 3] }, time: { type: 'number' }, track: { type: 'number' } }, ['preset', 'time']),
@@ -50,6 +50,7 @@ const TOOLS = [
   fn('pro_scene', 'مشهد موشن جرافيك احترافي بمحرك Remotion (أقوى بكتير من build_scene): عناوين حركية، أرقام، رسوم، قوائم، لوور ثيرد، لوجو، اشترك، كولاج، كاروسيل ثري دي، نص ثري دي، محادثة، إشعار، متصفح… اكتب brief والمخرج هيصممه (ولو فيه style بيستخدم لقطات من الفيديو).', {
     brief: { type: 'string', description: 'وصف المشهد (المحتوى والإحساس)' }, spec: { type: 'object', description: 'اختياري: مواصفات جاهزة {duration, style, background:{type}, elements:[{type, from, duration, position, props}]}' },
     style: { type: 'string', enum: Object.keys(packs.PACKS) }, duration: { type: 'number' }, overlay: { type: 'boolean', description: 'true = خلفية شفافة فوق الفيديو' }, time: { type: 'number' } }),
+  fn('client_revisions', 'قسّم رسالة تعديلات العميل لمهام (بتتحفظ في تبويب التعديلات) — بعدها نفّذها واحدة واحدة.', { text: { type: 'string' }, client: { type: 'string' } }, ['text']),
   fn('edit_scene', 'عدّل مشهد EditFast موجود على التايملين (المختار أو اللي عند رأس التشغيل): تغيير نص، لون، توقيت، حركة، عنصر زيادة… وبيترندر تاني في نفس مكانه.', { instruction: { type: 'string', description: 'التعديل المطلوب' } }, ['instruction']),
   fn('style_edit', 'مونتاج بالاستايل: المخرج يخطط كذا مشهد بالاستايل المطلوب (' + packs.list().map(p => p.label).join('، ') + ') من كلام الفيديو ولقطاته، وRemotion يرندرها ويحطها على التايملين. طلب واحد للذكاء الاصطناعي لكل المشاهد.', {
     style: { type: 'string', enum: Object.keys(packs.PACKS) }, brief: { type: 'string', description: 'اللي المونتير عايزه (اختياري)' }, count: { type: 'number', description: 'عدد المشاهد 1-8' }, captions: { type: 'boolean', description: 'كابشن متحرك بنفس الاستايل' } }, ['style']),
@@ -162,7 +163,7 @@ class EditFastAgent {
       case 'add_captions': {
         const o = { maxWords: args.max_words, maxDuration: args.max_duration, singleWord: args.single_word };
         if (args.animated === false) return s.addCaptions(o);
-        const st = { style: args.style || (this.style && this.style.captionStyle) || 'bold', position: args.position, anim: args.anim, ease: args.ease, animDur: args.anim_speed, timing: args.timing, wordGap: args.word_gap, exit: args.exit };
+        const st = { style: args.style || (this.style && this.style.captionStyle) || 'bold', position: args.position, still: args.still, anim: args.anim, ease: args.ease, animDur: args.anim_speed, timing: args.timing, wordGap: args.word_gap, exit: args.exit };
         Object.keys(st).forEach(k => st[k] === undefined && delete st[k]);
         return s.addAnimatedCaptions({ ...o, style: st });
       }
@@ -198,6 +199,7 @@ class EditFastAgent {
       case 'find_shorts': return s.findShorts({ count: args.count || 3 });
       case 'make_short': return s.makeShort({ start: args.start, end: args.end, title: args.title || 'Short' }, { reframe: args.reframe !== false, captions: args.captions !== false });
       case 'set_playhead': return s.setPlayhead(args.time);
+      case 'client_revisions': { const r = await s.revisionsSplit({ text: args.text, client: args.client || '' }); return { round: r.round.id, items: r.round.items.map(x => ({ id: x.id, text: x.text, time: x.time, type: x.type, note: x.note })) }; }
       case 'edit_scene': { const r = await s.editSceneAI({ instruction: args.instruction }); return { replaced: r.replaced, track: r.track, start: r.start, layered: r.layered, elements: r.spec.elements.map(e => e.type) }; }
       case 'style_edit': { const r = await s.styleEdit({ style: args.style, brief: args.brief || '', count: args.count || 3, captions: !!args.captions }); return { style: r.label, scenes: r.scenes.map(x => ({ time: x.time, duration: x.duration, overlay: x.overlay, elements: x.elements })) }; }
       case 'add_template': { const r = await s.addTemplate({ id: args.id, values: args.values || {}, time: args.time, duration: args.duration }); return { track: r.track, start: r.start, end: r.end }; }

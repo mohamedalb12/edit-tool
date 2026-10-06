@@ -96,7 +96,7 @@
         gapField,
         UI.field('الخروج', UI.seg(CS.EXITS.map(function (e) { return { value: e.id, label: e.name }; }), st.exit, function (v) { st.exit = v; saveSt(); })),
         UI.field('مدة الخروج', UI.slider(0.08, 0.8, 0.02, st.exitDur, function (v) { return v.toFixed(2) + 's'; }, function (v) { st.exitDur = v; saveSt(); })));
-      drawCurve(); showGap();
+      drawCurve(); showGap(); if (st.still) animCard.style.opacity = '.45';
       var capProg = UI.progress();
       var animBtn = UI.btn('نزّل كابشن متحرك', function () {
         UI.safe('بيرندر الكابشن', function () {
@@ -110,11 +110,12 @@
       });
       view.appendChild(UI.card('كابشن متحرك',
         UI.hint('متزامن مع كل كلمة وبينزل كليبات شفافة فوق الفيديو. الألوان بتاخد من ذوقك.'),
+        UI.row(h('label', { class: 'still-toggle' }, h('input', { type: 'checkbox', checked: !!st.still, onchange: function (e) { st.still = e.target.checked; saveSt(); animCard.style.opacity = st.still ? '.45' : ''; } }), ' كابشن ثابت (من غير أي أنيميشن — بالشكل والألوان بس، وأسرع بكتير)')),
         styleGrid,
         UI.row(h('label', null, 'المكان'), UI.seg([{ value: 'bottom', label: 'تحت' }, { value: 'center', label: 'النص' }, { value: 'top', label: 'فوق' }], st.position, function (v) { st.position = v; saveSt(); })),
         UI.field('الحجم', UI.slider(0.04, 0.12, 0.002, st.size, function (v) { return Math.round(v * 1000) / 10 + '%'; }, function (v) { st.size = v; saveSt(); })),
         UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: st.accent || '#FFD84D', oninput: function (e) { st.accent = e.target.value; saveSt(); } }), 'الكلمة', h('input', { type: 'color', value: st.box || '#7C3AED', oninput: function (e) { st.box = e.target.value; saveSt(); } }), 'البوكس'),
-        capProg, UI.row(animBtn), UI.row(h('label', null, 'ترجمة'), lang, trBtn)));
+        capProg, UI.row(animBtn), UI.row(h('label', null, 'ترجمة'), lang, trBtn), UI.modelPicker('translate')));
       view.appendChild(animCard);
 
       view.appendChild(UI.card('الكابشن (SRT)',

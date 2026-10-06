@@ -18,7 +18,7 @@
   var calls = window.__calls = [];
   function rec(name, args, result) { calls.push({ name: name, args: args }); return Promise.resolve(typeof result === 'function' ? result(args) : result); }
   var settings = {
-    keys: { openrouter: 'sk-or-test', elevenlabs: 'el', pexels: 'px', pixabay: '' }, paths: { ffmpeg: '', whisper: '', whisperModel: '', baseMogrt: '' },
+    keys: { openrouter: 'sk-or-test', elevenlabs: 'sk_el', pexels: 'px', pixabay: '' }, paths: { ffmpeg: '', whisper: '', whisperModel: '', baseMogrt: '' },
     models: {}, defaultModel: '', agentLevel: 'strong', dialect: 'egyptian', style: null,
     quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true }, captions: { maxWords: 4, maxDuration: 2.5, singleWord: false }, libraryDirs: ['/lib']
   };
@@ -88,7 +88,7 @@
     thumbnailCandidates: function () { return rec('thumbnailCandidates', null, [{ time: 6.5, score: 2.4, image: '/tests/fixtures/face.png' }, { time: 1, score: 1.2, image: '/tests/fixtures/face.png' }]); },
     thumbnailIdeas: function () { return rec('thumbnailIdeas', null, { titles: [{ text: 'السر اللي محدش قالهولك', highlight: 'السر' }], best: 0 }); },
     saveThumbnail: function (b64, name) { return rec('saveThumbnail', { bytes: b64.length, name: name }, '/proj/EditFast Thumbnails/x.png'); },
-    addAnimatedCaptions: function (o) { if (o.onProgress) o.onProgress(1); return rec('addAnimatedCaptions', { style: o.style.style, position: o.style.position, anim: o.style.anim, ease: o.style.ease, timing: o.style.timing, animDur: o.style.animDur, wordGap: o.style.wordGap }, { clips: 5, cues: 5 }); },
+    addAnimatedCaptions: function (o) { if (o.onProgress) o.onProgress(1); return rec('addAnimatedCaptions', { style: o.style.style, position: o.style.position, anim: o.style.anim, ease: o.style.ease, timing: o.style.timing, animDur: o.style.animDur, wordGap: o.style.wordGap, still: !!o.style.still }, { clips: 5, cues: 5 }); },
     translateCaptions: function (o) { return rec('translateCaptions', o, { cues: 5, lang: o.lang }); },
     glassFrame: function () { return rec('glassFrame', null, null); },
     liquidGlass: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('liquidGlass', { params: o.params }, { track: 2, source: 'talk', duration: 4 }); },
@@ -101,6 +101,13 @@
     },
     projectState: function () { return rec('projectState', null, { sequence: 'Main' }); },
     // ——— new batch: templates, carousel, icons, sfx pack, downloads, web search, safe zones, relink, styles ———
+    // ——— client revisions ———
+    _rev: { project: '', rounds: [] },
+    revisionsLoad: function () { return rec('revisionsLoad', null, JSON.parse(JSON.stringify(S._rev))); },
+    revisionsSplit: function (o) { var R = load('revisions'); var round = { id: 'round-1', at: Date.now(), client: o.client, raw: o.text, items: R.splitOffline(o.text) }; S._rev.rounds.push(round); return rec('revisionsSplit', { text: o.text, client: o.client }, { round: round, ai: false, warning: '' }); },
+    revisionsToggle: function (o) { var r = S._rev.rounds.find(function (x) { return x.id === o.roundId; }); var it = r.items.find(function (x) { return x.id === o.itemId; }); it.done = !it.done; return rec('revisionsToggle', o, JSON.parse(JSON.stringify(r))); },
+    revisionsMarkers: function (o) { return rec('revisionsMarkers', o, { added: 2 }); },
+    revisionsMessage: function (o) { var r = S._rev.rounds.find(function (x) { return x.id === o.roundId; }); var t = load('revisions').messageOffline(r.items, { name: r.client }); r.message = t; return rec('revisionsMessage', o, { text: t, warning: '' }); },
     // ——— updates + editable scenes ———
     version: function () { return '1.2.0'; },
     checkUpdate: function () { var avail = !!window.__updateAvailable; return rec('checkUpdate', null, { current: '1.2.0', latest: avail ? '1.3.0' : '1.2.0', available: avail, info: avail ? { version: '1.3.0', url: 'https://x/EditFast-1.3.0.zip', notes: 'مشاهد لايرز + تحديث تلقائي' } : null, errors: [] }); },
@@ -119,7 +126,7 @@
     carousel3D: function (o) { if (o.onProgress) o.onProgress(1); return rec('carousel3D', { files: o.files.length, layout: o.layout, speed: o.speed, tilt: o.tilt, background: o.background, preview: !!o.preview, title: o.title }, o.preview ? { file: '/tmp/c.png' } : { track: 1, start: 2, end: 8 }); },
     iconsData: function () { if (!S._icons) { var x = new XMLHttpRequest(); x.open('GET', '/client/vendor/icons/icons.json', false); x.send(); S._icons = JSON.parse(x.responseText); } return S._icons; },
     iconSearch: function (q, cat) { var t = String(q || '').toLowerCase(); return S.iconsData().icons.filter(function (i) { return (!cat || i.cat === cat) && (!t || i.name.toLowerCase().indexOf(t) >= 0 || (i.ar || '').indexOf(t) >= 0); }); },
-    addIcon: function (o) { return rec('addIcon', { id: o.id, anim: o.anim, badge: o.badge, label: o.label }, { track: 2, start: 2 }); },
+    addIcon: function (o) { return rec('addIcon', { id: o.id, anim: o.anim, badge: o.badge, label: o.label, bg: o.bg, count: o.count }, { track: 2, start: 2 }); },
     sfxPackList: function () { return [{ id: 'whoosh', label: 'ووش', tags: 'transition' }, { id: 'impact', label: 'إمباكت', tags: 'hit' }, { id: 'pop', label: 'بوب', tags: 'pop' }]; },
     sfxPackFile: function (id) { return '/tmp/' + id + '.wav'; },
     placeSfx: function (o) { return rec('placeSfx', o, { track: 1 }); },

@@ -31,13 +31,17 @@ const QUALITIES = [
 function parseTime(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v === 'number') return v >= 0 ? v : null;
-  const parts = String(v).trim().split(':').map(Number);
+  const t = String(v).trim();
+  // "1.30" typed as minutes.seconds (two digits after the dot, under 60) → 1:30
+  const ms = /^(\d+)\.(\d{2})$/.exec(t);
+  if (ms && +ms[2] < 60) return +ms[1] * 60 + +ms[2];
+  const parts = t.split(':').map(Number);
   if (parts.some(x => !isFinite(x))) return null;
   return parts.reduce((a, b) => a * 60 + b, 0);
 }
 
 /** yt-dlp arguments (pure — tested without the network). */
-function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name }) {
+function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true }) {
   const args = ['--no-playlist', '--newline', '--no-colors', '--windows-filenames', '--no-mtime', '--progress',
     '--progress-template', 'download:EFPROG %(progress._percent_str)s %(progress._speed_str)s',
     '--no-simulate', '--print', 'after_move:EFFILE %(filepath)s'];
@@ -49,7 +53,7 @@ function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name }) 
     // H.264 + AAC first: Premiere opens it everywhere (AV1/VP9 can fail on older versions)
     args.push('-S', 'vcodec:h264,res,acodec:m4a', '--merge-output-format', 'mp4');
   }
-  const a = parseTime(start), b = parseTime(end);
+  const a = sections ? parseTime(start) : null, b = sections ? parseTime(end) : null;
   if (a !== null || b !== null) {
     args.push('--download-sections', `*${a === null ? 0 : a}-${b === null ? 'inf' : b}`, '--force-keyframes-at-cuts');
   }
@@ -77,6 +81,17 @@ async function info(bin, url) {
   return { id: j.id, title: j.title || j.id, duration: j.duration || null, thumbnail: j.thumbnail || null, uploader: j.uploader || j.channel || '', heights, platform: platformOf(url), extractor: j.extractor_key || j.extractor };
 }
 
+/** Cut [start, end] out of a downloaded file exactly (frame-accurate re-encode). */
+function trim(ffmpeg, file, { start, end, audioOnly, out }) {
+  const a = parseTime(start) || 0, b = parseTime(end);
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(a), '-i', file];
+  if (b !== null && b > a) args.push('-t', String(b - a));
+  if (audioOnly) args.push('-vn', '-c:a', 'libmp3lame', '-q:a', '2');
+  else args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
+  args.push(out);
+  return new Promise((resolve, reject) => execFile(ffmpeg, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, so, se) => (err ? reject(new Error('القص فشل: ' + String(se || err.message).trim().split('\n').pop())) : resolve({ file: out }))));
+}
+
 /** Download with progress → { file }. */
 function download(bin, opts, onProgress) {
   if (!bin) return Promise.reject(new Error('محتاج yt-dlp على الجهاز (المثبّت بيثبّته) أو حدد مكانه من الإعدادات.'));
@@ -100,4 +115,4 @@ function download(bin, opts, onProgress) {
   });
 }
 
-module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download };
+module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim };

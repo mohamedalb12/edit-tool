@@ -5,10 +5,18 @@
     id: 'settings', icon: '⚙️', label: 'الإعدادات', title: 'الإعدادات',
     render: function (view) {
       var S = EF.services, st = S.settings, OR = EF.node('openrouter'), DL = EF.node('downloader');
+      // a quick sanity check per key (the most common mix-up: pasting ElevenLabs' "Key ID" instead of the sk_ key)
+      var KEY_CHECK = {
+        openrouter: function (v) { return /^sk-or-/.test(v) ? '' : 'مفتاح OpenRouter بيبدأ بـ sk-or-'; },
+        elevenlabs: function (v) { return /^sk_/.test(v) ? '' : 'ده شكله الـ Key ID — المفتاح الحقيقي بيبدأ بـ sk_ وبيظهر مرة واحدة لما تعمله'; }
+      };
       function keyInput(k, label, url) {
-        var i = h('input', { type: 'password', value: st.keys[k] || '', class: 'grow ltr', placeholder: label, onchange: function () { var keys = {}; keys[k] = i.value.trim(); S.saveSettings({ keys: keys }); UI.toast('اتحفظ ✓'); } });
+        var warn = h('div', { class: 'hint err key-warn' });
+        function check() { var v = i.value.trim(); warn.textContent = v && KEY_CHECK[k] ? KEY_CHECK[k](v) : ''; }
+        var i = h('input', { type: 'password', value: st.keys[k] || '', class: 'grow ltr', placeholder: label, onchange: function () { var keys = {}; keys[k] = i.value.trim(); S.saveSettings({ keys: keys }); check(); UI.toast(warn.textContent ? '⚠ ' + warn.textContent : 'اتحفظ ✓', !!warn.textContent); } });
         var r = UI.row(h('label', null, label), i, UI.btn('إظهار', function () { i.type = i.type === 'password' ? 'text' : 'password'; }, 'small'), url ? UI.btn('هات مفتاح', function () { EF.openUrl(url); }, 'small') : null);
-        r.classList.add('stack'); return r;
+        r.classList.add('stack'); check();
+        return h('div', null, r, warn);
       }
       function pathInput(k, label, folder) {
         var i = h('input', { value: st.paths[k] || '', class: 'grow ltr', placeholder: 'تلقائي', onchange: function () { var p = {}; p[k] = i.value.trim(); S.saveSettings({ paths: p }); status(); } });
@@ -35,16 +43,16 @@
         }, dlBtn);
       });
 
-      // models
+      // models: one searchable picker per AI feature (+ a general default), test results show next to each
       var modelsBox = h('div');
       function drawModels() {
         UI.empty(modelsBox);
-        var def = h('input', { list: 'ef-models', class: 'grow ltr', value: S.settings.defaultModel || '', placeholder: 'الافتراضي لكل ميزة', onchange: function () { S.saveSettings({ defaultModel: def.value.trim() }); drawModels(); } });
-        modelsBox.appendChild(h('div', { class: 'row stack' }, h('label', null, 'موديل عام'), def));
-        OR.FEATURES.forEach(function (f) { modelsBox.appendChild(h('div', { class: 'row stack' }, h('span', { class: 'hint' }, f.label))); modelsBox.lastChild.appendChild(UI.modelPicker(f.id).lastChild); });
+        modelsBox.appendChild(h('div', { class: 'row stack' }, h('label', null, 'موديل عام لكل الميزات (اختياري)'), UI.modelPicker('__default', { bare: true, onChange: function () { UI.refreshPickers(); } })));
+        OR.FEATURES.forEach(function (f) { modelsBox.appendChild(h('div', { class: 'row stack' }, h('label', null, f.label), UI.modelPicker(f.id, { bare: true }))); });
       }
-      var loadBtn = UI.btn('حمّل قائمة الموديلات من OpenRouter', function () {
-        UI.safe('بيجيب الموديلات', function () { return S.llm.listModels().then(function (ms) { localStorage.setItem('ef-models', JSON.stringify(ms)); UI.fillModels(ms); UI.toast(ms.length + ' موديل ✓'); }); }, loadBtn);
+      var listInfo = h('span', { class: 'hint' }, (EF.modelList || []).length + ' موديل في القائمة');
+      var loadBtn = UI.btn('حدّث قائمة الموديلات', function () {
+        UI.safe('بيجيب الموديلات', function () { return UI.ensureModels(true).then(function (ms) { listInfo.textContent = ms.length + ' موديل في القائمة'; UI.toast(ms.length + ' موديل ✓'); }); }, loadBtn);
       });
       var testBtn = UI.btn('جرّب المفتاح', function () {
         UI.safe('بيجرّب', function () { return S.llm.text({ model: S.model('sfx_translate'), user: 'رد بكلمة واحدة: تمام', maxTokens: 20 }).then(function (t) { UI.toast('شغّال ✓ — ' + t); }); }, testBtn);
@@ -60,6 +68,7 @@
         UI.empty(testBox); testBox.style.display = '';
         UI.safe('بيختبر الموديلات', function () {
           return S.testModels({ onResult: function (r) {
+            EF.modelTests = EF.modelTests || {}; EF.modelTests[r.feature] = r; UI.refreshPickers();
             testBox.appendChild(h('div', { class: 'item mtest ' + (r.ok ? 'pass' : 'fail') },
               h('span', { class: 'badge-dot' }),
               h('div', { class: 'grow' }, h('div', { style: { fontWeight: 700 } }, r.label), h('div', { class: 'hint ltr' }, r.model + (r.listed === false ? '  ⚠ مش موجود في قائمة OpenRouter' : ''))),
@@ -67,7 +76,8 @@
           } }).then(function (all) { var ok = all.filter(function (r) { return r.ok; }).length; UI.toast(ok + ' من ' + all.length + ' موديل شغّالين' + (ok < all.length ? ' — غيّر اللي فشل' : ' ✓'), ok < all.length); });
         }, testAll);
       }, 'primary');
-      view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('اختار الموديل اللي يشغّل كل ميزة. اكتب أي ID من OpenRouter أو حمّل القائمة.'), UI.row(loadBtn, testAll), testBox, modelsBox));
+      view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('دوس على أي خانة تظهرلك كل موديلات OpenRouter (بتدوّر بالاسم، وجنب كل موديل سعره لكل مليون توكن وهل بيستخدم أدوات 🛠 وبيشوف صور 👁). النقطة جنب الخانة بتخضر لما تختبرها.'),
+        UI.row(testAll, loadBtn, listInfo), testBox, modelsBox));
       view.appendChild(UI.card('البرامج المحلية (أوفلاين)', pathInput('ffmpeg', 'ffmpeg'), pathInput('whisper', 'whisper.cpp'), pathInput('whisperModel', 'موديل Whisper'),
         UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), pathInput('node', 'Node.js (للمشاهد Pro)'), pathInput('chrome', 'Chrome للـ Remotion (اختياري)'), pathInput('ytdlp', 'yt-dlp (التحميل من اللينكات)'), stBox));
       // ——— التحديثات ———

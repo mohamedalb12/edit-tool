@@ -25,6 +25,7 @@
     reels: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="10" r="2.6"/><path d="M8.8 16.5a3.6 3.6 0 0 1 6.4 0"/>',
     audio: '<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><circle cx="4" cy="13" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="15" r="2"/>',
     thumb: '<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M6 15.5h7M6 12h5"/><path d="M15 9.5l3.5 2-3.5 2z" fill="currentColor"/>',
+    revisions: '<rect x="5" y="3.5" width="14" height="18" rx="2.5"/><path d="M9 3.5V2.5h6v1"/><path d="M8.5 10.5l1.8 1.8 3.5-3.5M8.5 16.5h7"/>',
     templates: '<rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M17.25 13.5l1.1 2.3 2.4.35-1.75 1.7.4 2.4-2.15-1.15-2.15 1.15.4-2.4-1.75-1.7 2.4-.35z"/>',
     carousel: '<rect x="8" y="5" width="8" height="12" rx="1.6"/><path d="M5.5 7v8M18.5 7v8M3 8.5v5M21 8.5v5"/><path d="M5 20.5c4.5 1.6 9.5 1.6 14 0"/>',
     icons: '<circle cx="7.5" cy="7.5" r="3.5"/><path d="M16.5 3.5l4 7h-8z"/><rect x="4" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14.2l1.1 2.2 2.4.4-1.7 1.7.4 2.4-2.2-1.2-2.2 1.2.4-2.4-1.7-1.7 2.4-.4z"/>',
@@ -188,22 +189,80 @@
   };
   UI.safe = function (label, fn, btn) { return UI.run(label, fn, btn).catch(function () {}); };
 
-  /** مختار الموديل لأي ميزة ذكاء اصطناعي — بيتحفظ في الإعدادات. */
-  UI.modelPicker = function (feature) {
-    var S = EF.services, cur = S.settings.models[feature] || '';
-    var def = S.model(feature);
-    var inp = h('input', { list: 'ef-models', class: 'grow ltr', placeholder: def, value: cur, title: 'أي موديل من OpenRouter' });
-    inp.addEventListener('change', function () {
-      var models = Object.assign({}, S.settings.models); models[feature] = inp.value.trim();
-      if (!models[feature]) delete models[feature];
-      S.saveSettings({ models: models }); UI.toast('اتحفظ الموديل: ' + S.model(feature));
+  /**
+   * مختار الموديل لأي ميزة: قائمة بتدوّر فيها (الـ datalist بتاعة المتصفح مابتظهرش جوه بريمير، فدي معمولة بإيدنا).
+   * feature = id الميزة، أو '__default' للموديل العام.
+   */
+  UI.modelPicker = function (feature, opts) {
+    opts = opts || {};
+    var S = EF.services;
+    function current() { return feature === '__default' ? (S.settings.defaultModel || '') : (S.settings.models[feature] || ''); }
+    function effective() { return feature === '__default' ? (S.settings.defaultModel || '') : S.model(feature); }
+    var inp = h('input', { class: 'grow ltr mp-input', value: effective(), placeholder: feature === '__default' ? 'من غير (كل ميزة بموديلها)' : '', title: 'دوّر بالاسم أو اكتب أي ID من OpenRouter', autocomplete: 'off', spellcheck: false });
+    var tag = h('span', { class: 'mp-tag' });
+    var dot = h('span', { class: 'mp-dot', title: '' });
+    var list = h('div', { class: 'mp-list', style: { display: 'none' } });
+    var wrap = h('div', { class: 'mp' }, h('div', { class: 'mp-row' }, dot, inp, tag), list);
+    function paintTag() {
+      tag.textContent = current() ? 'متغيّر' : 'افتراضي'; tag.className = 'mp-tag' + (current() ? ' on' : '');
+      var t = (EF.modelTests || {})[feature];
+      dot.className = 'mp-dot' + (t ? (t.ok ? ' ok' : ' bad') : ''); dot.title = t ? (t.ok ? 'شغّال ✓ ' + t.ms + 'ms' : (t.error || 'فشل')) : 'لسه ماتجرّبش';
+    }
+    function save(id) {
+      id = String(id || '').trim();
+      if (feature === '__default') S.saveSettings({ defaultModel: id });
+      else { var models = Object.assign({}, S.settings.models); if (id) models[feature] = id; else delete models[feature]; S.saveSettings({ models: models }); }
+      inp.value = effective(); paintTag(); hideList();
+      if (opts.onChange) opts.onChange(id);
+      UI.toast(id ? 'الموديل: ' + id + ' ✓' : 'رجع للافتراضي: ' + (effective() || '—'));
+    }
+    function hideList() { list.style.display = 'none'; }
+    function fmt(p) { return p == null || isNaN(p) ? '' : (p < 0.01 ? 'مجاني' : '$' + (p >= 10 ? Math.round(p) : p.toFixed(2))); }
+    function showList(e) {
+      UI.empty(list);
+      // just opened → show everything; filter only once the user types
+      var q = e && e.type === 'input' ? inp.value.trim().toLowerCase() : '', all = EF.modelList || [];
+      var exact = all.some(function (m) { return m.id === inp.value.trim(); });
+      var hits = all.filter(function (m) { return !q || exact || (m.id + ' ' + (m.name || '')).toLowerCase().indexOf(q) >= 0; }).slice(0, 80);
+      if (!all.length) list.appendChild(h('div', { class: 'mp-empty' }, 'بيجيب قائمة الموديلات…'));
+      else if (!hits.length) list.appendChild(h('div', { class: 'mp-empty' }, 'مفيش موديل بالاسم ده — Enter يحفظه زي ما هو'));
+      hits.forEach(function (m) {
+        list.appendChild(h('div', { class: 'mp-item' + (m.id === effective() ? ' on' : ''), onmousedown: function (e) { e.preventDefault(); save(m.id); } },
+          h('div', { class: 'grow' }, h('div', { class: 'mp-name' }, m.name || m.id), h('div', { class: 'mp-id ltr' }, m.id)),
+          h('div', { class: 'mp-meta ltr' }, (m.tools ? '🛠 ' : '') + (m.vision ? '👁 ' : '') + (m.price ? fmt(m.price.in) + '/' + fmt(m.price.out) : ''))));
+      });
+      if (current()) list.appendChild(h('div', { class: 'mp-item reset', onmousedown: function (e) { e.preventDefault(); save(''); } }, '↺ رجّع الافتراضي'));
+      list.style.display = '';
+    }
+    inp.addEventListener('focus', function () { inp.select(); var re = function () { if (document.activeElement === inp) showList(); }; UI.ensureModels().then(re, re); showList(); });
+    inp.addEventListener('input', showList);
+    inp.addEventListener('blur', function () { setTimeout(function () { hideList(); if (inp.value.trim() !== effective()) inp.value = effective(); }, 150); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { var first = list.querySelector('.mp-item:not(.reset)'); var v = inp.value.trim(); save(first && !(EF.modelList || []).some(function (m) { return m.id === v; }) && v && first.querySelector('.mp-id').textContent.toLowerCase().indexOf(v.toLowerCase()) >= 0 ? first.querySelector('.mp-id').textContent : v); inp.blur(); }
+      if (e.key === 'Escape') { inp.blur(); }
     });
-    return h('div', { class: 'row' }, h('label', null, 'الموديل'), inp);
+    wrap.refresh = function () { inp.value = effective(); paintTag(); };
+    (UI._pickers = UI._pickers || []).push(wrap);
+    paintTag();
+    return opts.bare ? wrap : h('div', { class: 'row' }, h('label', null, 'الموديل'), wrap);
   };
+  UI.refreshPickers = function () { (UI._pickers || []).forEach(function (p) { if (document.body.contains(p)) p.refresh(); }); };
 
   UI.fillModels = function (models) {
-    var dl = document.getElementById('ef-models'); dl.innerHTML = '';
-    models.forEach(function (m) { dl.appendChild(h('option', { value: m.id }, m.name || m.id)); });
+    EF.modelList = models || [];
+    var dl = document.getElementById('ef-models'); if (!dl) return; dl.innerHTML = '';
+    EF.modelList.forEach(function (m) { dl.appendChild(h('option', { value: m.id }, m.name || m.id)); });
+  };
+  /** OpenRouter's model list is public: fetch it once a day (no key needed) */
+  UI.ensureModels = function (force) {
+    var cache = null; try { cache = JSON.parse(localStorage.getItem('ef-models-v2') || 'null'); } catch (e) {}
+    if (!force && cache && cache.at > Date.now() - 86400000 && cache.list && cache.list.length) { if (!EF.modelList || EF.modelList.length < cache.list.length) UI.fillModels(cache.list); return Promise.resolve(cache.list); }
+    if (UI._loadingModels) return UI._loadingModels;
+    UI._loadingModels = EF.services.llm.listModels().then(function (ms) {
+      try { localStorage.setItem('ef-models-v2', JSON.stringify({ at: Date.now(), list: ms })); } catch (e) {}
+      UI.fillModels(ms); UI._loadingModels = null; return ms;
+    }, function (e) { UI._loadingModels = null; if (!EF.modelList || !EF.modelList.length) UI.fillModels(EF.node('openrouter').FALLBACK_MODELS); throw e; });
+    return UI._loadingModels;
   };
 
   UI.empty = function (el) { while (el.firstChild) el.removeChild(el.firstChild); return el; };

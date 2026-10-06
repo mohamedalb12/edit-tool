@@ -6,6 +6,18 @@ const { hash, slug, hasArabic } = require('./util');
 
 const ENDPOINT = 'https://api.elevenlabs.io/v1/sound-generation';
 
+/** ElevenLabs keys start with sk_ — the "Key ID" shown in the list is not the key */
+function checkKey(apiKey) {
+  if (!apiKey) throw new Error('حط مفتاح ElevenLabs من الإعدادات الأول.');
+  if (!/^sk_/.test(String(apiKey).trim())) throw new Error('ده مش مفتاح ElevenLabs — ده الـ Key ID. المفتاح الحقيقي بيبدأ بـ sk_ وبيظهر مرة واحدة بس لما تعمل المفتاح: اعمل مفتاح جديد من elevenlabs.io/app/settings/api-keys وانسخه.');
+}
+function elevenError(status, msg) {
+  if (/api_key_id_used_as_api_key/.test(msg)) return 'ده الـ Key ID مش المفتاح — المفتاح بيبدأ بـ sk_ (اعمل مفتاح جديد وانسخه أول ما يظهر).';
+  if (status === 401 || /invalid_api_key/.test(msg)) return 'مفتاح ElevenLabs غلط — حط مفتاح جديد من الإعدادات.';
+  if (/quota|credits|insufficient/i.test(msg)) return 'رصيد ElevenLabs خلص — اشحن من elevenlabs.io أو استخدم المؤثرات الترند الأوفلاين.';
+  return `ElevenLabs ${status}: ${msg.slice(0, 300)}`;
+}
+
 async function translatePrompt(llm, model, text) {
   if (!hasArabic(text)) return text;
   const out = await llm.text({
@@ -17,7 +29,7 @@ async function translatePrompt(llm, model, text) {
 }
 
 async function generate({ apiKey, text, durationSeconds, promptInfluence = 0.4, outDir, fetchImpl, loop = false }) {
-  if (!apiKey) throw new Error('حط مفتاح ElevenLabs من الإعدادات الأول.');
+  checkKey(apiKey);
   if (!text || !text.trim()) throw new Error('اكتب وصف الصوت.');
   const f = fetchImpl || require('./http').nodeFetch;
   const dur = durationSeconds ? Math.min(30, Math.max(0.5, +durationSeconds)) : null;
@@ -29,7 +41,7 @@ async function generate({ apiKey, text, durationSeconds, promptInfluence = 0.4, 
   const res = await f(ENDPOINT, { method: 'POST', headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' }, body: JSON.stringify(body) });
   if (!res.ok) {
     let msg = ''; try { msg = await res.text(); } catch (_) {}
-    throw new Error(`ElevenLabs ${res.status}: ${msg.slice(0, 300)}`);
+    throw new Error(elevenError(res.status, msg));
   }
   const buf = Buffer.from(await res.arrayBuffer());
   fs.mkdirSync(outDir, { recursive: true });
@@ -40,7 +52,7 @@ async function generate({ apiKey, text, durationSeconds, promptInfluence = 0.4, 
 // موسيقى بالذكاء الاصطناعي (ElevenLabs Music) — مزيكا خلفية على مقاس الفيديو.
 const MUSIC_ENDPOINT = 'https://api.elevenlabs.io/v1/music';
 async function generateMusic({ apiKey, prompt, seconds = 30, instrumental = true, outDir, fetchImpl }) {
-  if (!apiKey) throw new Error('حط مفتاح ElevenLabs من الإعدادات الأول.');
+  checkKey(apiKey);
   if (!prompt || !prompt.trim()) throw new Error('اوصف المزيكا.');
   const f = fetchImpl || require('./http').nodeFetch;
   const ms = Math.round(Math.min(300, Math.max(10, +seconds || 30)) * 1000);
@@ -49,11 +61,11 @@ async function generateMusic({ apiKey, prompt, seconds = 30, instrumental = true
   const body = { prompt, music_length_ms: ms, model_id: 'music_v1' };
   if (instrumental) body.force_instrumental = true;
   const res = await f(MUSIC_ENDPOINT, { method: 'POST', headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' }, body: JSON.stringify(body), timeout: 300000 });
-  if (!res.ok) { let msg = ''; try { msg = await res.text(); } catch (_) {} throw new Error(`ElevenLabs Music ${res.status}: ${msg.slice(0, 300)}`); }
+  if (!res.ok) { let msg = ''; try { msg = await res.text(); } catch (_) {} throw new Error(elevenError(res.status, msg)); }
   const buf = Buffer.from(await res.arrayBuffer());
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(file, buf);
   return { file, cached: false, bytes: buf.length };
 }
 
-module.exports = { translatePrompt, generate, generateMusic, ENDPOINT, MUSIC_ENDPOINT };
+module.exports = { translatePrompt, generate, generateMusic, checkKey, ENDPOINT, MUSIC_ENDPOINT };

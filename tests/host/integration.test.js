@@ -24,7 +24,7 @@ function world({ clipFile, clipLen = 10, fetchImpl, renderScene, settings = {} }
     seq.v[0].add({ projectItem: media, start: 0, end: clipLen, inPoint: 0 });
     seq.a[0].add({ projectItem: media, start: 0, end: clipLen, inPoint: 0 });
   }
-  config.save({ ...config.DEFAULTS, paths: { ...config.DEFAULTS.paths, whisper: FAKE_WHISPER, whisperModel: MODEL }, keys: { openrouter: 'sk-or', elevenlabs: 'el', pexels: 'px', pixabay: '' }, ...settings });
+  config.save({ ...config.DEFAULTS, paths: { ...config.DEFAULTS.paths, whisper: FAKE_WHISPER, whisperModel: MODEL }, keys: { openrouter: 'sk-or', elevenlabs: 'sk_el', pexels: 'px', pixabay: '' }, ...settings });
   const calls = [];
   const S = new Services({
     host: async (name, args) => { calls.push(name); return h.call(name, JSON.parse(JSON.stringify(args))); },
@@ -139,8 +139,10 @@ test('المؤثرات الصوتية + المؤثرات التلقائية + B-
   assert.ok(one.placed.track >= 1);
   const fx = await S.autoEffects({ density: 'high' });
   assert.equal(fx.applied, 2, JSON.stringify(fx));
-  const audioClips = seq.a.flatMap(t => t.items).filter(c => /\.mp3$/.test(c.projectItem.mediaPath));
-  assert.equal(audioClips.length, 2);
+  // the AI picked "dramatic hit": it comes from the offline pack (no ElevenLabs call needed)
+  const audioClips = seq.a.flatMap(t => t.items).map(c => c.projectItem.mediaPath);
+  assert.equal(audioClips.filter(p => /\.mp3$/.test(p)).length, 1);
+  assert.ok(audioClips.some(p => /sfx-pack[\\/](impact|cinematic-hit)\.wav$/.test(p)), audioClips.join());
   const br = await S.brollSearch({ q: 'مدينة بالليل', sources: ['pexels'] });
   assert.equal(br.query, 'city at night'); assert.equal(br.results.length, 1);
   const placed = await S.brollPlace({ id: br.results[0].id, time: 1, duration: 3 });
@@ -258,7 +260,7 @@ test('test every AI model: reply + tool calling for the editor models, catalog c
   const { S } = world({ fetchImpl, settings: { defaultModel: 'good/text', models: { agent_strong: 'good/tools', agent_max: 'good/tools', chapters: 'broken/model' } } });
   const live = [];
   const res = await S.testModels({ onResult: r => live.push(r.feature) });
-  assert.equal(res.length, 8); assert.equal(live.length, 8);
+  assert.equal(res.length, 13); assert.equal(live.length, 13);
   const by = Object.fromEntries(res.map(r => [r.feature, r]));
   assert.equal(by.agent_strong.ok, true); assert.equal(by.agent_strong.tools, true); assert.match(by.agent_strong.reply, /set_playhead/);
   assert.equal(by.sfx_translate.ok, true); assert.equal(by.sfx_translate.tools, null); assert.equal(by.sfx_translate.listed, true);

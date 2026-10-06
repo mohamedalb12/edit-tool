@@ -59,14 +59,16 @@ test('sfx: Arabic prompt is translated first; ElevenLabs request + local cache',
   assert.equal(await sfx.translatePrompt(llm, 'm', 'already english'), 'already english');
   const f = recorder(() => mockResponse(Buffer.from('ID3fake-mp3'), { binary: true }));
   const dir = path.join(TMP, 'sfx');
-  const r = await sfx.generate({ apiKey: 'el-1', text: 'whoosh', durationSeconds: 1.5, outDir: dir, fetchImpl: f });
+  const r = await sfx.generate({ apiKey: 'sk_1', text: 'whoosh', durationSeconds: 1.5, outDir: dir, fetchImpl: f });
   assert.ok(fs.existsSync(r.file) && !r.cached);
   assert.equal(f.calls[0].url, sfx.ENDPOINT);
-  assert.equal(f.calls[0].opts.headers['xi-api-key'], 'el-1');
+  assert.equal(f.calls[0].opts.headers['xi-api-key'], 'sk_1');
   assert.deepEqual(f.calls[0].body, { text: 'whoosh', prompt_influence: 0.4, duration_seconds: 1.5 });
-  const again = await sfx.generate({ apiKey: 'el-1', text: 'whoosh', durationSeconds: 1.5, outDir: dir, fetchImpl: f });
+  const again = await sfx.generate({ apiKey: 'sk_1', text: 'whoosh', durationSeconds: 1.5, outDir: dir, fetchImpl: f });
   assert.ok(again.cached); assert.equal(f.calls.length, 1);
   await assert.rejects(sfx.generate({ text: 'x', outDir: dir }), /ElevenLabs/);
+  await assert.rejects(sfx.generate({ apiKey: '7680bba80141e4112eda7e', text: 'x', outDir: dir, fetchImpl: f }), /Key ID/, 'the Key ID is caught before any request');
+  assert.equal(f.calls.length, 1);
 });
 
 test('b-roll: Pexels + Pixabay normalisation, local folder search, download cache', async () => {

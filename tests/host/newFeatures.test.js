@@ -16,7 +16,7 @@ function world({ fetchImpl, analyzeFaces, renderOverlay, settings = {}, vertical
   const h = loadHost();
   const seq = h.pr.newSequence('Main', vertical ? { fps: 25, width: 1080, height: 1920 } : { fps: 25 });
   if (clip) { const m = h.pr.project.importOne(clip, h.pr.project.root); seq.v[0].add({ projectItem: m, start: 0, end: 8, inPoint: 0 }); }
-  config.save({ ...config.DEFAULTS, keys: { ...config.DEFAULTS.keys, openrouter: 'sk-or', elevenlabs: 'el' }, ...settings });
+  config.save({ ...config.DEFAULTS, keys: { ...config.DEFAULTS.keys, openrouter: 'sk-or', elevenlabs: 'sk_el' }, ...settings });
   const S = new Services({ host: async (n, a) => h.call(n, JSON.parse(JSON.stringify(a))), fetchImpl, analyzeFaces, renderOverlay });
   return { S, h, seq };
 }
@@ -180,7 +180,7 @@ test('templates, 3D carousel, icons and the style editor build the right Remotio
     const spI = renders.pop();
     assert.equal(spI.elements[0].props.mode, 'fill'); assert.match(spI.elements[0].props.color, /^#/); assert.match(spI.elements[0].props.svg, /^<path/);
     assert.equal(ic.start, 4);
-    assert.equal(S.iconSearch('عربية')[0].id, 'l-car'); assert.ok(S.iconSearch('', 'realestate').length >= 20);
+    assert.ok(S.iconSearch('عربية').some(i => i.id === 'l-car')); assert.equal(S.iconSearch('عربية')[0].mode, 'color', 'colour emoji first'); assert.ok(S.iconSearch('', 'realestate').length >= 20);
     // the style editor: one AI request for every scene, frames passed as @refs, scenes placed at their times
     const steps = [];
     const r = await S.styleEdit({ style: 'كولاج', count: 2, onStep: m => steps.push(m) });
@@ -252,4 +252,31 @@ test('editable scenes: layers nested as a sequence, found again on the timeline,
     seq.player = 50;
     await assert.rejects(S.replaceScene({ spec }), /مفيش مشهد/);
   } finally { pro.render = orig; }
+});
+
+test('client revisions through the host: AI split falls back offline on 402, markers on the timeline, reply saved per project', async () => {
+  const fetchImpl = async () => mockResponse({ error: { message: 'This request requires more credits. can only afford 25' } }, { status: 402 });
+  const { S, h, seq } = world({ fetchImpl });
+  h.pr.project.path = path.join(TMP, 'rev-' + Date.now() + '.prproj');
+  const res = await S.revisionsSplit({ text: '- شيل الجزء اللي عند 0:03\n- المزيكا عالية', client: 'منى' });
+  assert.equal(res.ai, false); assert.match(res.warning, /رصيد OpenRouter مش كفاية/);
+  assert.equal(res.round.items.length, 2);
+  const r = await S.revisionsToggle({ roundId: res.round.id, itemId: 'r1' });
+  assert.equal(r.items[0].done, true);
+  assert.deepEqual(await S.revisionsMarkers({ roundId: res.round.id }), { added: 1 });
+  assert.equal(seq.markerList.length, 1); assert.equal(seq.markerList[0].start.seconds, 3);
+  const m = await S.revisionsMessage({ roundId: res.round.id });
+  assert.match(m.text, /منى/); assert.match(m.text, /✅ شيل الجزء/); assert.match(m.text, /⏳ المزيكا عالية/);
+  assert.equal((await S.revisionsLoad()).rounds[0].message, m.text);
+  await assert.rejects(S.revisionsSplit({ text: '  ' }), /الصق رسالة/);
+});
+
+test('SFX without ElevenLabs: a description places a matching sound from the built-in pack', async () => {
+  const { S, seq } = world({ settings: { libraryDirs: [], keys: { ...config.DEFAULTS.keys, openrouter: '', elevenlabs: '' } } });
+  S.libraryItems = () => []; // no personal SFX library on this machine
+  const r = await S.placeBestSfx({ prompt: 'camera shutter', time: 1 });
+  assert.equal(r.source, 'pack'); assert.equal(r.id, 'camera-shutter');
+  const r2 = await S.placeBestSfx({ prompt: 'something unknown', time: 2 });
+  assert.equal(r2.id, 'whoosh');
+  assert.ok(seq.a.reduce((n, t) => n + t.items.length, 0) >= 2, 'both placed on the timeline');
 });

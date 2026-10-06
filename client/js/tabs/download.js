@@ -29,15 +29,48 @@
 
       var analyze = UI.btn('حلّل اللينك', function () {
         if (!o.url.trim()) return UI.toast('حط اللينك الأول', true);
-        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(o.url).then(function (i) { o.info = i; drawInfo(); drawQual(); }); }, analyze);
+        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(o.url).then(function (i) { o.info = i; o.start = ''; o.end = ''; drawInfo(); drawQual(); drawRange(); }); }, analyze);
       });
-      var start = h('input', { class: 'ltr', placeholder: '0:00', value: o.start, style: { width: '80px' }, oninput: function (e) { o.start = e.target.value; } });
-      var end = h('input', { class: 'ltr', placeholder: 'للآخر', value: o.end, style: { width: '80px' }, oninput: function (e) { o.end = e.target.value; } });
+      // range slider over the video's length: drag the start and end handles (or type m:ss)
+      var rangeBox = h('div', { class: 'dl-range' });
+      function mmss(t) { t = Math.max(0, Math.round(t)); var hh = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60; return (hh ? hh + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (x < 10 ? '0' : '') + x; }
+      function drawRange() {
+        UI.empty(rangeBox);
+        var D = o.info && o.info.duration;
+        if (!D) { rangeBox.appendChild(h('div', { class: 'hint' }, 'حلّل اللينك الأول عشان يظهرلك شريط الوقت')); return; }
+        var a = Y.parseTime(o.start), b = Y.parseTime(o.end);
+        if (a === null) a = 0; if (b === null || b > D) b = D;
+        var track = h('div', { class: 'rs-track' }), fill = h('div', { class: 'rs-fill' });
+        var lo = h('input', { type: 'range', min: 0, max: D, step: 1, value: a, class: 'rs-in lo' });
+        var hi = h('input', { type: 'range', min: 0, max: D, step: 1, value: b, class: 'rs-in hi' });
+        var ta = h('input', { class: 'ltr rs-time', value: mmss(a) }), tb = h('input', { class: 'ltr rs-time', value: mmss(b) });
+        var len = h('span', { class: 'hint' });
+        function sync(from) {
+          var x = +lo.value, y = +hi.value;
+          if (x > y - 1) { if (from === 'lo') x = Math.max(0, y - 1); else y = Math.min(D, x + 1); lo.value = x; hi.value = y; }
+          fill.style.left = (x / D * 100) + '%'; fill.style.right = (100 - y / D * 100) + '%';
+          ta.value = mmss(x); tb.value = mmss(y);
+          o.start = x > 0 ? mmss(x) : ''; o.end = y < D ? mmss(y) : '';
+          len.textContent = 'المدة: ' + mmss(y - x) + (x === 0 && y === D ? ' (الفيديو كله)' : '');
+        }
+        lo.addEventListener('input', function () { sync('lo'); }); hi.addEventListener('input', function () { sync('hi'); });
+        ta.addEventListener('change', function () { var v = Y.parseTime(ta.value); if (v !== null) { lo.value = Math.min(v, D); sync('lo'); } });
+        tb.addEventListener('change', function () { var v = Y.parseTime(tb.value); if (v !== null) { hi.value = Math.min(v, D); sync('hi'); } });
+        // minute ticks
+        var ticks = h('div', { class: 'rs-ticks ltr' }), stepM = D > 3600 ? 10 : D > 1200 ? 5 : D > 300 ? 1 : 0.5;
+        for (var m = 0; m * 60 <= D; m += stepM) ticks.appendChild(h('span', { style: { left: (m * 60 / D * 100) + '%' } }, mmss(m * 60)));
+        function nudge(which, d) { return UI.btn((d > 0 ? '+' : '−') + Math.abs(d) + 's', function () { var el = which === 'lo' ? lo : hi; el.value = Math.max(0, Math.min(D, +el.value + d)); sync(which); }, 'small'); }
+        rangeBox.appendChild(h('div', { class: 'rs ltr' }, track, fill, lo, hi));
+        rangeBox.appendChild(ticks);
+        rangeBox.appendChild(h('div', { class: 'row rs-row' }, h('label', null, 'من'), ta, nudge('lo', -1), nudge('lo', 1), h('span', { class: 'spacer' }), h('label', null, 'لحد'), tb, nudge('hi', -1), nudge('hi', 1)));
+        rangeBox.appendChild(h('div', { class: 'row' }, len, h('span', { class: 'spacer' }), UI.btn('الفيديو كله', function () { lo.value = 0; hi.value = D; sync('lo'); }, 'small')));
+        sync('lo');
+      }
       var go = UI.btn('نزّل', function () {
         if (!o.url.trim()) return UI.toast('حط اللينك الأول', true);
         prog.set(0);
         UI.safe('بيحمّل', function () {
-          return S.downloadMedia({ url: o.url, quality: o.quality, start: o.start || undefined, end: o.end || undefined, place: o.place, onProgress: function (p) { prog.set(p); UI.status('تحميل ' + Math.round(p * 100) + '%', 'busy'); } })
+          return S.downloadMedia({ url: o.url, quality: o.quality, start: o.start || undefined, end: o.end || undefined, place: o.place, onProgress: function (p, phase) { prog.set(p); UI.status(phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : 'تحميل ' + Math.round(p * 100) + '%', 'busy'); } })
             .then(function (r) { prog.set(1); UI.toast(r.placed ? 'نزل على التايملين ✓' : 'اتحمّل ✓ ' + r.file.split(/[\\/]/).pop()); });
         }, go);
       }, 'primary');
@@ -46,11 +79,11 @@
         UI.row(UI.btn('صفحة yt-dlp', function () { EF.openUrl('https://github.com/yt-dlp/yt-dlp#installation'); }, 'small'), UI.btn('الإعدادات', function () { EF.show('settings'); }, 'small'))));
       view.appendChild(UI.card(null, UI.row(url, plat), UI.row(analyze), infoBox,
         UI.field('الجودة', qualWrap),
-        UI.row(h('label', null, 'من'), start, h('label', null, 'لحد'), end, h('span', { class: 'hint' }, 'دقيقة:ثانية — فاضي = الفيديو كله')),
+        UI.field('الجزء', rangeBox),
         UI.row(h('label', null, h('input', { type: 'checkbox', checked: o.place, onchange: function (e) { o.place = e.target.checked; } }), ' حطه على التايملين عند رأس التشغيل')),
         prog, UI.row(go),
         UI.hint('بيتحفظ جنب المشروع في فولدر "EditFast Media/Downloads" بصيغة MP4 (H.264) اللي بريمير بيفتحها على طول. نزّل بس المحتوى اللي عندك حق تستخدمه.')));
-      badge(); drawQual(); drawInfo();
+      badge(); drawQual(); drawInfo(); drawRange();
     }
   });
 })();

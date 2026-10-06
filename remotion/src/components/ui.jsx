@@ -114,8 +114,11 @@ export const Browser = ({ th, dur, url = 'editfast.app', title = '', media = [] 
   );
 };
 
-/** Animated icon (Lucide stroke icons draw themselves; brand logos pop in). */
-export const IconAnim = ({ th, dur, svg = '', mode = 'stroke', anim = 'draw', color, size = 1, badge = 'none', label = '', glow = true }) => {
+/**
+ * Animated icon: Lucide stroke icons draw themselves, brand logos & colour emoji pop in.
+ * iPhone-like looks: badge "ios" (squircle app icon with gradient + gloss) and motions jiggle / open / float / notify.
+ */
+export const IconAnim = ({ th, dur, svg = '', mode = 'stroke', viewBox = '0 0 24 24', anim = 'draw', color, size = 1, badge = 'none', bg, label = '', glow = true, count = 3 }) => {
   const frame = useCurrentFrame(); const { fps, height } = useVideoConfig();
   const exit = useExit(dur, 10);
   const s = height * 0.22 * size; const col = color || th.text;
@@ -127,24 +130,36 @@ export const IconAnim = ({ th, dur, svg = '', mode = 'stroke', anim = 'draw', co
   else if (anim === 'pulse') tr = `scale(${(0.4 + 0.6 * sp) * (1 + Math.sin(frame / 5) * 0.06)})`;
   else if (anim === 'shake') tr = `scale(${sp}) rotate(${Math.sin(frame / 2) * 12 * Math.exp(-frame / 30)}deg)`;
   else if (anim === 'slide') tr = `translateY(${(1 - sp) * s * 1.2}px)`;
+  else if (anim === 'jiggle') tr = `scale(${0.5 + 0.5 * sp}) rotate(${Math.sin(frame * 1.35) * 3.2}deg) translateY(${Math.cos(frame * 1.1) * s * 0.012}px)`; // home-screen edit mode
+  else if (anim === 'open') { const o = spring({ frame, fps, config: { damping: 15, stiffness: 170, mass: 0.6 } }); tr = `scale(${0.2 + 0.8 * o})`; } // app launch zoom
+  else if (anim === 'float') tr = `scale(${sp}) translateY(${Math.sin(frame / 14) * s * 0.07}px) rotate(${Math.sin(frame / 22) * 4}deg)`;
+  else if (anim === 'notify') tr = `scale(${sp})`;
   else tr = `scale(${0.85 + 0.15 * sp})`;
-  const isStroke = mode === 'stroke';
-  const drawn = anim === 'draw' ? draw : 1;
-  const markup = isStroke
-    ? svg.replace(/<(path|circle|line|rect|polyline|polygon|ellipse)\b/g, '<$1 pathLength="1"')
-    : svg;
-  const badgeStyle = badge === 'circle' ? { borderRadius: '50%', background: `linear-gradient(135deg, ${th.primary}, ${th.secondary})`, padding: s * 0.22 }
-    : badge === 'square' ? { borderRadius: s * 0.26, background: `linear-gradient(135deg, ${th.primary}, ${th.secondary})`, padding: s * 0.2 }
+  const isStroke = mode === 'stroke', isColor = mode === 'color';
+  const drawn = anim === 'draw' && isStroke ? draw : 1;
+  const markup = isStroke ? svg.replace(/<(path|circle|line|rect|polyline|polygon|ellipse)\b/g, '<$1 pathLength="1"') : svg;
+  const g1 = bg || th.primary, g2 = th.secondary;
+  const glyphCol = badge === 'ios' && !isColor ? '#FFFFFF' : col;
+  const badgeStyle = badge === 'circle' ? { borderRadius: '50%', background: `linear-gradient(135deg, ${g1}, ${g2})`, padding: s * 0.22 }
+    : badge === 'square' ? { borderRadius: s * 0.26, background: `linear-gradient(135deg, ${g1}, ${g2})`, padding: s * 0.2 }
     : badge === 'glass' ? { borderRadius: s * 0.3, background: 'linear-gradient(145deg, rgba(255,255,255,.22), rgba(255,255,255,.05))', border: '1.5px solid rgba(255,255,255,.3)', boxShadow: 'inset 0 1.5px 0 rgba(255,255,255,.5)', backdropFilter: 'blur(20px)', padding: s * 0.2 }
+    : badge === 'ios' ? { borderRadius: s * 0.48, background: `linear-gradient(180deg, color-mix(in srgb, ${g1} 70%, white), ${g1} 55%, color-mix(in srgb, ${g1} 82%, black))`, padding: s * 0.24, boxShadow: `0 ${s * 0.08}px ${s * 0.22}px rgba(0,0,0,.35), inset 0 ${s * 0.02}px 0 rgba(255,255,255,.35)`, position: 'relative', overflow: 'hidden' }
     : {};
+  const pop = spring({ frame: frame - 14, fps, config: { damping: 9, stiffness: 220 } });
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: s * 0.12, opacity: exit }}>
-      <div style={{ transform: tr, ...badgeStyle, filter: glow ? `drop-shadow(0 0 ${s * 0.12}px ${hexA(th.primary, 0.85)})` : 'none' }}>
-        <svg viewBox="0 0 24 24" width={s} height={s} fill={isStroke ? 'none' : col} stroke={isStroke ? col : 'none'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          style={{ overflow: 'visible', ['--d']: 1 - drawn, opacity: isStroke ? 1 : (anim === 'draw' ? ci(frame, 0, 14, 0, 1) : 1) }}>
-          <style>{isStroke ? '.efi *{stroke-dasharray:1;stroke-dashoffset:var(--d)}' : ''}</style>
-          <g className="efi" dangerouslySetInnerHTML={{ __html: markup }} />
-        </svg>
+      <div style={{ position: 'relative', transform: tr }}>
+        <div style={{ ...badgeStyle, filter: glow && badge !== 'ios' ? `drop-shadow(0 0 ${s * 0.12}px ${hexA(th.primary, 0.85)})` : 'none' }}>
+          {badge === 'ios' ? <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '48%', background: 'linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0))', pointerEvents: 'none' }} /> : null}
+          <svg viewBox={viewBox} width={s} height={s} fill={isColor ? 'none' : isStroke ? 'none' : glyphCol} stroke={isStroke ? glyphCol : 'none'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ overflow: 'visible', position: 'relative', ['--d']: 1 - drawn, opacity: isStroke ? 1 : (anim === 'draw' ? ci(frame, 0, 14, 0, 1) : 1), filter: isColor && badge !== 'ios' && glow ? `drop-shadow(0 ${s * 0.04}px ${s * 0.08}px rgba(0,0,0,.35))` : 'none' }}>
+            <style>{isStroke ? '.efi *{stroke-dasharray:1;stroke-dashoffset:var(--d)}' : ''}</style>
+            <g className="efi" dangerouslySetInnerHTML={{ __html: markup }} />
+          </svg>
+        </div>
+        {anim === 'notify' ? (
+          <div style={{ position: 'absolute', top: -s * 0.12, right: -s * 0.12, minWidth: s * 0.36, height: s * 0.36, padding: `0 ${s * 0.08}px`, borderRadius: s, background: '#FF3B30', color: '#fff', fontFamily: '-apple-system, "SF Pro", Arial', fontWeight: 700, fontSize: s * 0.22, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${pop})`, boxShadow: '0 2px 8px rgba(0,0,0,.35)', border: `${Math.max(1, s * 0.02)}px solid #fff` }}>{count}</div>
+        ) : null}
       </div>
       {label ? <div style={{ fontFamily: th.fontStack, fontWeight: 800, fontSize: s * 0.22, color: th.text, direction: dirOf(label), opacity: ci(frame, 12, 22, 0, 1), transform: `translateY(${ci(frame, 12, 24, 14, 0)}px)` }}>{label}</div> : null}
     </div>

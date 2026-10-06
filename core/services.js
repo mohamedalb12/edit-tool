@@ -114,7 +114,7 @@ class Services {
   async pickHook() {
     const t = await this.ensureTranscript();
     const sents = transcribeMod.sentences(t.words);
-    const res = await this.llm.json({ model: this.model('agent_strong'), system: 'أنت مونتير يوتيوب. اختار أقوى جملة أو جملتين متتاليتين (من 3 لـ 8 ثواني) تشد المشاهد من أول ثانية: سؤال، مفاجأة، نتيجة، رقم. رجّع {"start":ثواني,"end":ثواني,"reason":"..."}', user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n') });
+    const res = await this.llm.json({ model: this.model('hook'), system: 'أنت مونتير يوتيوب. اختار أقوى جملة أو جملتين متتاليتين (من 3 لـ 8 ثواني) تشد المشاهد من أول ثانية: سؤال، مفاجأة، نتيجة، رقم. رجّع {"start":ثواني,"end":ثواني,"reason":"..."}', user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n') });
     const start = +res.start, end = +res.end;
     if (!(end > start) || end - start > 12) throw new Error('الموديل اختار هوك مش منطقي');
     return { start, end, reason: res.reason };
@@ -405,7 +405,7 @@ class Services {
     const out = [];
     for (let i = 0; i < cues.length; i += 60) {
       const part = cues.slice(i, i + 60);
-      const res = await this.llm.json({ model: this.model('spellfix'), system: `Translate each subtitle line to ${lang}. Keep it short and natural for subtitles, keep the meaning, keep the order. Return {"lines":[...]} with exactly the same number of lines.`, user: JSON.stringify(part.map(c => c.text)) });
+      const res = await this.llm.json({ model: this.model('translate'), system: `Translate each subtitle line to ${lang}. Keep it short and natural for subtitles, keep the meaning, keep the order. Return {"lines":[...]} with exactly the same number of lines.`, user: JSON.stringify(part.map(c => c.text)) });
       const lines = Array.isArray(res.lines) && res.lines.length === part.length ? res.lines : part.map(c => c.text);
       part.forEach((c, j) => out.push({ ...c, text: String(lines[j] || c.text) }));
     }
@@ -702,7 +702,7 @@ ${JSON.stringify(lite)}
   async findShorts({ count = 3, min = 20, max = 60 } = {}) {
     const t = await this.ensureTranscript();
     const sents = transcribeMod.sentences(t.words);
-    const res = await this.llm.json({ model: this.model('agent_strong'), system: `أنت صانع شورتس/ريلز محترف. من التفريغ ده اختار أقوى ${count} مقاطع منفصلة، كل مقطع من ${min} لـ ${max} ثانية، بيبدأ بهوك وبيخلص بفكرة كاملة. رجّع {"shorts":[{"start":ثواني,"end":ثواني,"title":"عنوان جذاب قصير","score":1-10,"reason":"ليه"}]}`, user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n'), maxTokens: 3000 });
+    const res = await this.llm.json({ model: this.model('shorts'), system: `أنت صانع شورتس/ريلز محترف. من التفريغ ده اختار أقوى ${count} مقاطع منفصلة، كل مقطع من ${min} لـ ${max} ثانية، بيبدأ بهوك وبيخلص بفكرة كاملة. رجّع {"shorts":[{"start":ثواني,"end":ثواني,"title":"عنوان جذاب قصير","score":1-10,"reason":"ليه"}]}`, user: sents.map(x => `[${x.start.toFixed(1)}-${x.end.toFixed(1)}] ${x.text}`).join('\n'), maxTokens: 3000 });
     const out = [];
     for (const sh of (res.shorts || []).sort((a, b) => (b.score || 0) - (a.score || 0))) {
       const a = +sh.start, b = +sh.end;
@@ -808,8 +808,8 @@ ${JSON.stringify(lite)}
     const msgs = [{ role: 'system', content: 'أنت خبير ثامبنيلز يوتيوب. اقترح 5 عناوين للثامبنيل (2-5 كلمات، قوية وفضولية، بنفس لغة/لهجة الفيديو) ولكل عنوان كلمة واحدة تتلوّن. لو فيه صور، اختار أحلى فريم (فيه وش واضح وتعبير قوي). رجّع JSON: {"titles":[{"text":"...","highlight":"..."}],"best":رقم الصورة من 0}' },
       { role: 'user', content: [{ type: 'text', text: 'كلام الفيديو: ' + (text || '(مفيش تفريغ)') }].concat(candidates.slice(0, 6).map(c => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + fs.readFileSync(c.image).toString('base64') } }))) }];
     let m;
-    try { m = await this.llm.chat({ model: this.model('agent_strong'), messages: msgs, maxTokens: 800, jsonMode: true }); }
-    catch (e) { if (candidates.length) { msgs[1].content = msgs[1].content.slice(0, 1); m = await this.llm.chat({ model: this.model('agent_strong'), messages: msgs, maxTokens: 800 }); } else throw e; }
+    try { m = await this.llm.chat({ model: this.model('thumbnail'), messages: msgs, maxTokens: 800, jsonMode: true }); }
+    catch (e) { if (candidates.length) { msgs[1].content = msgs[1].content.slice(0, 1); m = await this.llm.chat({ model: this.model('thumbnail'), messages: msgs, maxTokens: 800 }); } else throw e; }
     const j = require('./util').extractJson(m.content);
     return { titles: (j.titles || []).filter(x => x && x.text).slice(0, 6), best: Number.isInteger(j.best) ? j.best : 0 };
   }
@@ -847,12 +847,28 @@ ${JSON.stringify(lite)}
     for (const [i, e] of list.entries()) {
       onProgress && onProgress(i / list.length, e);
       try {
-        if (e.type === 'sfx') await this.generateSfx({ prompt: e.prompt, translate: false, duration: e.duration, time: e.time, place: true });
+        if (e.type === 'sfx') await this.placeBestSfx({ prompt: e.prompt, duration: e.duration, time: e.time });
         else await this.applyMotion({ preset: e.preset, level: (this.settings.style && +this.settings.style.motion) || 2, time: e.time });
         done.push(e);
       } catch (err) { failed.push({ ...e, error: err.message }); }
     }
     return { applied: done.length, failed };
+  }
+
+  /**
+   * A sound for a moment: your own library first, then the offline trendy pack, and ElevenLabs only when
+   * nothing local fits (and a key is set) — so auto effects work without any paid key.
+   */
+  async placeBestSfx({ prompt, duration, time }) {
+    const lib = this.libraryItems().filter(x => x.category === 'sfx');
+    if (lib.length) {
+      const hit = library.search(lib, { q: String(prompt || '').split(/\s+/).slice(0, 2).join(' '), category: 'sfx' })[0];
+      if (hit) return { source: 'library', ...(await this.host('placeFile', { path: hit.path, time, kind: 'audio', track: -1, bin: 'EditFast/SFX' })) };
+    }
+    const id = require('./sfxPack').match(prompt);
+    if (id) return { source: 'pack', id, ...(await this.placeSfx({ id, time })) };
+    if (this.settings.keys.elevenlabs) return { source: 'ai', ...(await this.generateSfx({ prompt, translate: false, duration, time, place: true })) };
+    return { source: 'pack', id: 'whoosh', ...(await this.placeSfx({ id: 'whoosh', time })) };
   }
 
   async autoEffects({ density, apply = true } = {}) {
@@ -1081,10 +1097,10 @@ ${JSON.stringify(lite)}
     const d = this.iconsData(), t = String(q).trim().toLowerCase();
     return d.icons.filter(i => (!cat || i.cat === cat) && (!t || i.name.toLowerCase().includes(t) || (i.ar || '').includes(t) || i.id.includes(t)));
   }
-  async addIcon({ id, anim = 'draw', color, size = 1, badge = 'none', label = '', duration = 3, position = 'center', glow = true, time, onProgress } = {}) {
+  async addIcon({ id, anim = 'draw', color, bg, size = 1, badge = 'none', label = '', duration = 3, position = 'center', glow = true, count = 3, time, onProgress } = {}) {
     const icon = this.iconsData().icons.find(i => i.id === id || i.id === 'l-' + id || i.id === 'b-' + id);
     if (!icon) throw new Error('الأيقونة مش موجودة: ' + id);
-    const spec = { duration, background: { type: 'transparent' }, elements: [{ type: 'icon', from: 0, duration, position, props: { svg: icon.svg, mode: icon.mode, anim, color: color || (icon.mode === 'fill' ? icon.color : ''), size, badge, label, glow } }] };
+    const spec = { duration, background: { type: 'transparent' }, elements: [{ type: 'icon', from: 0, duration, position, props: { svg: icon.svg, mode: icon.mode, viewBox: icon.viewBox || '0 0 24 24', anim: icon.mode === 'color' && anim === 'draw' ? 'pop' : anim, color: color || (icon.mode === 'fill' && badge !== 'ios' ? icon.color : ''), bg: bg || (badge === 'ios' && icon.mode === 'fill' ? icon.color : ''), size, badge, label, glow, count } }] };
     return this.renderProScene({ spec, time, onProgress });
   }
 
@@ -1128,8 +1144,21 @@ ${JSON.stringify(lite)}
     if (!pf) throw new Error('اللينك مش صح');
     const dir = await this.projectMediaDir('Downloads');
     let file, type = quality === 'audio' ? 'audio' : 'video';
+    const cut = Y.parseTime(start) !== null || Y.parseTime(end) !== null;
     try {
-      file = (await Y.download(this.ytdlpBin(), { url, quality, start, end, outDir: dir, ffmpeg: this.tools.ffmpeg }, onProgress)).file;
+      try {
+        file = (await Y.download(this.ytdlpBin(), { url, quality, start, end, outDir: dir, ffmpeg: this.tools.ffmpeg }, onProgress)).file;
+      } catch (e1) {
+        // cutting while downloading fails on some sites/ffmpeg builds (e.g. "ffmpeg exited with code 8"):
+        // download the whole thing and cut it exactly here instead
+        if (!cut) throw e1;
+        onProgress && onProgress(0, 'full');
+        const full = (await Y.download(this.ytdlpBin(), { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, sections: false }, onProgress)).file;
+        const a = Y.parseTime(start) || 0, b = Y.parseTime(end);
+        const out = full.replace(/(\.[^.]+)$/, `-${a}-${b === null ? 'end' : b}${quality === 'audio' ? '.mp3' : '.mp4'}`);
+        file = (await Y.trim(this.ffmpeg(), full, { start, end, audioOnly: quality === 'audio', out })).file;
+        try { fs.unlinkSync(full); } catch (_) {}
+      }
     } catch (e) {
       // Pinterest photo pins aren't videos: grab the picture itself
       if (pf.id !== 'pinterest') throw e;
@@ -1266,6 +1295,51 @@ ${JSON.stringify(lite)}
     const r = require('./updater').rollback({ extRoot: this.extRoot(), dataDir: config.dataDir() });
     this.saveSettings({ lastUpdate: { version: r.version, notes: 'رجعت للنسخة ' + r.version, at: Date.now(), seen: false } });
     return r;
+  }
+
+  /* ---------- تعديلات العميل ---------- */
+  async revisionsProject() { try { return (await this.hostRaw('projectPath', {})).path || ''; } catch (_) { return ''; } }
+  async revisionsLoad() { const R = require('./revisions'); return R.load(config.dataDir(), await this.revisionsProject()); }
+  async revisionsSave(data) { const R = require('./revisions'); return R.save(config.dataDir(), await this.revisionsProject(), data); }
+  /** split the client's message into tasks (AI, or offline if there's no key / no credits) → new round */
+  async revisionsSplit({ text, client = '' }) {
+    const R = require('./revisions');
+    if (!text || !String(text).trim()) throw new Error('الصق رسالة التعديلات الأول');
+    let items, ai = false, warning = '';
+    if (this.settings.keys.openrouter) {
+      let duration; try { duration = (await this.seq()).duration; } catch (_) {}
+      try { items = await R.splitAI(this.llm, this.model('revisions'), text, { duration }); ai = true; } catch (e) { warning = e.message; }
+    }
+    if (!items || !items.length) items = R.splitOffline(text);
+    const data = await this.revisionsLoad();
+    data.rounds.push({ id: 'round-' + Date.now(), at: Date.now(), client, raw: text, items });
+    await this.revisionsSave(data);
+    return { round: data.rounds[data.rounds.length - 1], ai, warning };
+  }
+  async revisionsToggle({ roundId, itemId, done }) {
+    const data = await this.revisionsLoad();
+    const r = data.rounds.find(x => x.id === roundId); if (!r) throw new Error('الجولة مش موجودة');
+    const it = r.items.find(x => x.id === itemId); if (it) { it.done = done === undefined ? !it.done : !!done; it.doneAt = it.done ? Date.now() : null; }
+    await this.revisionsSave(data);
+    return r;
+  }
+  async revisionsMarkers({ roundId }) {
+    const data = await this.revisionsLoad(); const r = data.rounds.find(x => x.id === roundId);
+    const marks = (r ? r.items : []).filter(x => x.time != null).map((x, i) => ({ time: x.time, name: `تعديل ${i + 1}`, comment: x.text, color: 'yellow' }));
+    if (!marks.length) throw new Error('مفيش أوقات في التعديلات دي');
+    await this.host('addMarkers', { markers: marks });
+    return { added: marks.length };
+  }
+  /** the message for the client in Egyptian Arabic */
+  async revisionsMessage({ roundId }) {
+    const R = require('./revisions');
+    const data = await this.revisionsLoad(); const r = data.rounds.find(x => x.id === roundId);
+    if (!r) throw new Error('الجولة مش موجودة');
+    let text = null, warning = '';
+    if (this.settings.keys.openrouter) { try { text = await R.messageAI(this.llm, this.model('revisions'), r.items, { name: r.client }); } catch (e) { warning = e.message; } }
+    if (!text) text = R.messageOffline(r.items, { name: r.client });
+    r.message = text; await this.revisionsSave(data);
+    return { text, warning };
   }
 }
 

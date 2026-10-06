@@ -226,6 +226,21 @@ function generate(dir, { ids, onProgress } = {}) {
   return files;
 }
 
+/** best offline sound for a free-text description ("fast whoosh", "ووش سريع", "impact hit") → id or null */
+function match(text) {
+  const words = String(text || '').toLowerCase().split(/[^a-z\u0600-\u06ff0-9]+/).filter(w => w.length > 1);
+  if (!words.length) return null;
+  let best = null, bestScore = 0;
+  for (const [id, s] of Object.entries(SOUNDS)) {
+    const hay = (id.replace(/-/g, ' ') + ' ' + s.tags + ' ' + s.label).toLowerCase();
+    let score = 0;
+    const idw = id.split('-');
+    for (const w of words) if (hay.includes(w)) score += (hay.split(/\s+/).includes(w) ? 2 : 1) + (idw.includes(w) ? 1 : 0); // the sound's own name counts more
+    if (score > bestScore) { best = id; bestScore = score; }
+  }
+  return bestScore >= 2 ? best : null;
+}
+
 function list() { return Object.entries(SOUNDS).map(([id, s]) => ({ id, label: s.label, tags: s.tags })); }
 
-module.exports = { SOUNDS, SR, list, render, generate, wav };
+module.exports = { SOUNDS, SR, list, render, generate, wav, match };

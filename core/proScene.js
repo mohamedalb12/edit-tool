@@ -40,7 +40,7 @@ const CATALOG = {
   searchBar: { label: 'شريط بحث', props: { query: ['string', 'ازاي أمنتج أسرع', 'اللي بيتكتب'], results: ['string[]', [], 'النتايج 0-4'], engine: ['string', 'Search', 'اسم المحرك'] } },
   chat: { label: 'محادثة', props: { messages: ['string[]', [], 'رسايل بالتبادل 2-6'] } },
   browser: { label: 'متصفح', props: { url: ['string', 'editfast.app', 'اللينك'], title: ['string', '', 'عنوان الصفحة'], media: ['media[]', [], 'صورة الصفحة'] } },
-  icon: { label: 'أيقونة متحركة', props: { svg: ['svg', '', 'كود الأيقونة'], mode: ['enum:stroke|fill', 'stroke', 'نوعها'], anim: ['enum:draw|pop|bounce|spin|pulse|shake|slide', 'draw', 'الحركة'], color: ['string', '', 'لون hex'], size: ['number', 1, 'الحجم'], badge: ['enum:none|circle|square|glass', 'none', 'خلفية'], label: ['string', '', 'كلمة تحتها'], glow: ['boolean', true, 'توهج'] } }
+  icon: { label: 'أيقونة متحركة', props: { svg: ['svg', '', 'كود الأيقونة'], mode: ['enum:stroke|fill|color', 'stroke', 'نوعها'], viewBox: ['string', '0 0 24 24', 'viewBox'], anim: ['enum:draw|pop|bounce|spin|pulse|shake|slide|jiggle|open|float|notify', 'draw', 'الحركة'], color: ['string', '', 'لون hex'], bg: ['string', '', 'لون خلفية الأيقونة'], size: ['number', 1, 'الحجم'], badge: ['enum:none|circle|square|glass|ios', 'none', 'خلفية'], label: ['string', '', 'كلمة تحتها'], glow: ['boolean', true, 'توهج'], count: ['number', 3, 'رقم الإشعار'] } }
 };
 
 const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : (typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : d));
@@ -179,7 +179,9 @@ function render({ node, spec, out, still = false, frame, browserExecutable, gl, 
   if (!node) return Promise.reject(new Error('محتاج Node.js على الجهاز عشان المشاهد Pro (المثبّت بيثبّته).'));
   const dir = path.dirname(out || (batch && batch[0].out));
   const job = path.join(dir, `job-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-  fs.writeFileSync(job, JSON.stringify(batch ? { batch, browserExecutable, gl } : { spec, out, still, frame, browserExecutable, gl }));
+  // use most of the CPU for rendering frames in parallel (Remotion's default is half)
+  const concurrency = Math.max(1, Math.min(8, require('os').cpus().length - 1));
+  fs.writeFileSync(job, JSON.stringify(batch ? { batch, browserExecutable, gl, concurrency } : { spec, out, still, frame, browserExecutable, gl, concurrency }));
   return new Promise((resolve, reject) => {
     const child = spawn(node, [info.script, job], { cwd: info.root, windowsHide: true });
     let buf = '', err = '', done = null, failed = null;

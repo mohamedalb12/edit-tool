@@ -32,7 +32,8 @@
     EF.tabs.forEach(function (t) {
       nav.appendChild(h('button', { type: 'button', 'data-id': t.id, title: t.title, onclick: function () { show(t.id); } }, h('span', { class: 'ic' }, UI.icon(t.id)), t.label));
     });
-    try { var ms = JSON.parse(localStorage.getItem('ef-models') || 'null'); UI.fillModels(ms || EF.node('openrouter').FALLBACK_MODELS); } catch (e) {}
+    try { var mc = JSON.parse(localStorage.getItem('ef-models-v2') || 'null'); UI.fillModels(mc && mc.list ? mc.list : EF.node('openrouter').FALLBACK_MODELS); } catch (e) {}
+    setTimeout(function () { UI.ensureModels().catch(function () {}); }, 1500);
     var first = null; try { first = localStorage.getItem('ef-tab'); } catch (e3) {}
     show(first || 'agent');
     if (EF.updates) EF.updates.boot();

@@ -42,7 +42,7 @@
         UI.row(h('label', null, 'مكان النص'), UI.seg([{ value: 'left', label: 'شمال' }, { value: 'center', label: 'تحت' }, { value: 'right', label: 'يمين' }], o.side, function (v) { o.side = v; paint(); })),
         UI.row(h('label', null, 'ألوان'), h('input', { type: 'color', value: o.accent, oninput: function (e) { o.accent = e.target.value; paint(); } }), h('input', { type: 'color', value: o.box, oninput: function (e) { o.box = e.target.value; paint(); } }),
           h('input', { value: o.emoji, placeholder: 'إيموجي 😱', style: { width: '90px' }, oninput: function (e) { o.emoji = e.target.value; paint(); } })),
-        UI.row(save, ideas)));
+        UI.modelPicker('thumbnail'), UI.row(save, ideas)));
       view.appendChild(UI.card('أحلى فريمات (حدة + إضاءة + لقطات)', UI.row(find), grid));
       drawCands(); drawIdeas();
       if (state.cands) useCand(state.sel); else paint();

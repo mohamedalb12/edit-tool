@@ -1,9 +1,9 @@
 'use strict';
 // Builds client/vendor/icons/icons.json from lucide-static (ISC) + simple-icons (CC0).
-// usage: node scripts/build-icons.js <lucide-static package dir> <simple-icons package dir>
+// usage: node scripts/build-icons.js <lucide-static package dir> <simple-icons package dir> [fluent-emoji dir with list.txt + *.svg]
 const fs = require('fs');
 const path = require('path');
-const [lucideDir, simpleDir] = process.argv.slice(2);
+const [lucideDir, simpleDir, fluentDir] = process.argv.slice(2);
 if (!lucideDir || !simpleDir) { console.error('usage: node scripts/build-icons.js <lucide-static> <simple-icons>'); process.exit(1); }
 
 const CATS = [
@@ -53,6 +53,28 @@ for (const [id, label, kind, names] of CATS) {
       out.icons.push({ id: 'l-' + n + (out.icons.some(x => x.id === 'l-' + n) ? '-' + id : ''), cat: id, name: n.replace(/-/g, ' '), ar: AR[n] || '', mode: 'stroke', svg: s });
     }
   }
+}
+// Fluent Emoji (Microsoft, MIT): flat colourful emoji-style icons (like the phone's), full colour
+const EMOJI_CATS = { reactions: 'إيموجي — تفاعل', business: 'إيموجي — بيزنس وفلوس', media: 'إيموجي — مونتاج وتصوير', places: 'إيموجي — أماكن وعربيات وبيوت', food: 'إيموجي — أكل', nature: 'إيموجي — طبيعة' };
+if (fluentDir && fs.existsSync(path.join(fluentDir, 'list.txt'))) {
+  const emo = [];
+  for (const line of fs.readFileSync(path.join(fluentDir, 'list.txt'), 'utf8').split('\n').filter(Boolean)) {
+    const [cat, name, ar] = line.split('|');
+    const slug = name.toLowerCase().replace(/[ -]/g, '_');
+    const f = path.join(fluentDir, slug + '.svg');
+    if (!fs.existsSync(f)) { missing.push(name); continue; }
+    const raw = fs.readFileSync(f, 'utf8');
+    const vb = (/viewBox="([^"]+)"/.exec(raw) || [])[1] || '0 0 32 32';
+    // gradient ids must be unique once many icons sit on one page
+    let inner = raw.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim();
+    inner = inner.replace(/id="([^"]+)"/g, (m, id) => `id="fe-${slug}-${id}"`).replace(/url\(#([^)]+)\)/g, (m, id) => `url(#fe-${slug}-${id})`).replace(/href="#([^"]+)"/g, (m, id) => `href="#fe-${slug}-${id}"`).replace(/\s+/g, ' ');
+    emo.push({ id: 'e-' + slug.replace(/_/g, '-'), cat: 'emoji-' + cat, name, ar, mode: 'color', viewBox: vb, svg: inner });
+  }
+  const cats = Object.entries(EMOJI_CATS).map(([id, label]) => ({ id: 'emoji-' + id, label }));
+  out.categories = [out.categories[0], ...cats, ...out.categories.slice(1)];
+  out.icons = [...out.icons.filter(i => i.cat === 'social'), ...emo, ...out.icons.filter(i => i.cat !== 'social')];
+  out.sources.emoji = 'Fluent Emoji (Microsoft, MIT)';
+  fs.copyFileSync(path.join(fluentDir, 'LICENSE'), path.join(__dirname, '..', 'client', 'vendor', 'icons', 'LICENSE-fluent-emoji.txt'));
 }
 const dest = path.join(__dirname, '..', 'client', 'vendor', 'icons');
 fs.mkdirSync(dest, { recursive: true });

@@ -44,10 +44,10 @@ async function open(id) { await page.click(`#nav button[data-id="${id}"]`); awai
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 27 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
+test('boots: 28 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'auto', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'safezones', 'organize', 'relink', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'templates', 'carousel', 'icons', 'thumb', 'search', 'broll', 'websearch', 'download', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 27);
+  assert.deepEqual(ids, ['agent', 'auto', 'revisions', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'safezones', 'organize', 'relink', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'templates', 'carousel', 'icons', 'thumb', 'search', 'broll', 'websearch', 'download', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 28);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
   assert.deepEqual(errors, []);
@@ -59,10 +59,17 @@ test('EditFast AI: taste form, model picker per level, chat runs tools and asks 
   await clickText('احفظ ذوقي');
   assert.equal(await page.isVisible('text=ذوقك (بيتسأل'), false);
   await clickText('قوي جدًا');
-  const picker = page.locator('input[list="ef-models"]').first();
-  assert.equal(await picker.getAttribute('placeholder'), 'anthropic/claude-sonnet-5.5');
-  await picker.fill('anthropic/claude-opus-5.5'); await picker.dispatchEvent('change');
+  // the picker shows the model that will actually run, and opens a searchable list (no datalist: it doesn't show inside Premiere)
+  const picker = page.locator('.mp-input').first();
+  assert.equal(await picker.inputValue(), 'anthropic/claude-sonnet-5.5');
+  await picker.click();
+  await page.waitForSelector('.mp-list .mp-item');
+  await picker.fill('opus');
+  assert.equal(await page.locator('.mp-list .mp-item:not(.reset)').count(), 1);
+  await page.locator('.mp-list .mp-item', { hasText: 'Claude Opus 5.5' }).dispatchEvent('mousedown');
   assert.equal(await page.evaluate(() => EF.services.settings.models.agent_max), 'anthropic/claude-opus-5.5');
+  assert.equal(await picker.inputValue(), 'anthropic/claude-opus-5.5');
+  assert.equal(await page.locator('.mp-tag.on').first().textContent(), 'متغيّر');
   await page.evaluate(() => EF_TEST.setAgentScript([
     { tool_calls: [{ id: 'a', type: 'function', function: { name: 'get_project_state', arguments: '{}' } }, { id: 'b', type: 'function', function: { name: 'ask_user', arguments: '{"question":"الهوك يبقى قد إيه؟","options":["3 ثواني","5 ثواني"]}' } }] },
     { content: 'تمام، عملت الهوك ٣ ثواني ✓' }]));
@@ -123,7 +130,7 @@ test('التفريغ والكابشن: 7 dialects, transcribe, clickable words, 
   await clickText('فرّغ الكلام');
   await page.waitForSelector('.words span >> text=المونتاج');
   await page.click('.words span >> text=المونتاج');
-  await page.check('#view input[type=checkbox]');
+  await page.locator('.row', { hasText: 'كلمة في الكارت' }).locator('input[type=checkbox]').check();
   await clickText('نزّل SRT عادي');
   const c = await page.evaluate(() => window.__calls);
   assert.equal(c.find(x => x.name === 'transcribe').args.dialect, 'gulf');
@@ -239,19 +246,28 @@ test('B-Roll: search with sources, click places footage', async () => {
   assert.equal(c.find(x => x.name === 'brollPlace').args.id, 'pexels-v-1');
 });
 
-test('الإعدادات: keys, per-feature model panel (every AI feature), load OpenRouter list', async () => {
+test('الإعدادات: keys (with a Key-ID check), a model picker for every AI feature, test results next to each', async () => {
   await open('settings'); await clearCalls();
-  const labels = await page.$$eval('#view .hint', hs => hs.map(h => h.textContent));
-  for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll']) assert.ok(labels.includes(f), f);
-  await clickText('حمّل قائمة الموديلات من OpenRouter');
-  assert.equal(await page.locator('#ef-models option').count(), 2);
+  const labels = await page.$$eval('#view label', hs => hs.map(h => h.textContent));
+  for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll', 'اختيار الهوك (المونتاج التلقائي)', 'أقوى مقاطع الشورتس', 'عناوين الثامبنيل', 'ترجمة الكابشن', 'تعديلات العميل']) assert.ok(labels.includes(f), f);
+  assert.equal(await page.locator('#view .mp-input').count(), 14, 'general default + 13 features');
+  await clickText('حدّث قائمة الموديلات');
+  assert.equal(await page.evaluate(() => EF.modelList.length), 2);
   await clickText('اختبر كل الموديلات');
   assert.equal(await page.locator('.mtest.pass').count(), 1);
   assert.equal(await page.locator('.mtest.fail').count(), 1);
   assert.match(await page.textContent('.mtest.fail'), /404/);
   assert.match(await page.textContent('.mtest.fail'), /مش موجود في قائمة OpenRouter/);
+  assert.equal(await page.locator('.mp-dot.ok').count(), 1); assert.equal(await page.locator('.mp-dot.bad').count(), 1);
   await page.locator('input[type=password]').first().fill('sk-or-NEW'); await page.locator('input[type=password]').first().dispatchEvent('change');
   assert.equal(await page.evaluate(() => EF.services.settings.keys.openrouter), 'sk-or-NEW');
+  // the ElevenLabs "Key ID" mix-up is caught right away
+  const el = page.locator('input[type=password]').nth(1);
+  await el.fill('7680bba80141e4112eda7e49d5c3bb71'); await el.dispatchEvent('change');
+  assert.match(await page.textContent('#view'), /ده شكله الـ Key ID/);
+  await el.fill('sk_real'); await el.dispatchEvent('change');
+  assert.doesNotMatch(await page.textContent('#view'), /ده شكله الـ Key ID/);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await shot('11-settings');
 });
 
@@ -540,19 +556,19 @@ test('كاروسيل 3D: live CSS 3D preview follows the controls, files, render
 test('أيقونات: organised categories, search in Arabic, animated preview, add with animation', async () => {
   await open('icons'); await clearCalls();
   assert.ok(await page.locator('.icon-cell').count() >= 40, 'social logos');
-  await page.locator('.chip', { hasText: 'عربيات' }).click();
+  await page.locator('.chip', { hasText: 'عربيات ومواصلات' }).click();
   assert.ok(await page.locator('.icon-cell').count() >= 25);
   await page.fill('input[placeholder^="دوّر"]', 'بيت');
   assert.ok(await page.locator('.icon-cell').count() >= 1);
   await page.locator('.icon-cell').first().click();
-  assert.ok(await page.isVisible('.icon-preview.a-draw'));
+  assert.equal(await page.locator('.icon-preview.a-pop').count(), 1);
   await page.locator('.seg button', { hasText: 'نطّة' }).click();
   await page.locator('.seg button', { hasText: 'زجاج' }).click();
   assert.ok(await page.isVisible('.icon-preview.a-bounce.b-glass'));
   await page.fill('input[placeholder^="كلمة تحت"]', 'للبيع');
   await clickText('حطها على التايملين');
   const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addIcon').args);
-  assert.equal(a.anim, 'bounce'); assert.equal(a.badge, 'glass'); assert.equal(a.label, 'للبيع'); assert.match(a.id, /^l-/);
+  assert.equal(a.anim, 'bounce'); assert.equal(a.badge, 'glass'); assert.equal(a.label, 'للبيع'); assert.match(a.id, /^[le]-/);
   await page.locator('.chip', { hasText: 'سوشيال ميديا' }).click();
   await shot('26-icons');
 });
@@ -581,7 +597,14 @@ test('تحميل: analyse a link, qualities from the video, start/end, download 
   const quals = await page.locator('.seg button').allTextContents();
   assert.deepEqual(quals, ['أعلى جودة', '1080p', '720p', '480p', 'صوت بس (MP3)'], 'no 4K for a 1080p video');
   await page.locator('.seg button', { hasText: '720p' }).click();
-  await page.fill('input[placeholder="0:00"]', '1:10'); await page.fill('input[placeholder="للآخر"]', '1:40');
+  // the range slider covers the whole video (3:32); type exact times or drag the handles
+  assert.equal(await page.locator('.rs-in').count(), 2);
+  assert.match(await page.textContent('.rs-ticks'), /3:00/);
+  await page.locator('.rs-time').nth(0).fill('1:10'); await page.locator('.rs-time').nth(0).dispatchEvent('change');
+  await page.locator('.rs-time').nth(1).fill('1:40'); await page.locator('.rs-time').nth(1).dispatchEvent('change');
+  assert.match(await page.textContent('.dl-range'), /المدة: 0:30/);
+  await page.locator('.dl-range button', { hasText: '+1s' }).first().click();
+  await page.locator('.dl-range button', { hasText: '−1s' }).first().click();
   await clickText('نزّل');
   const a = await page.evaluate(() => window.__calls.find(x => x.name === 'downloadMedia').args);
   assert.deepEqual(a, { url: 'https://youtu.be/abc', quality: '720', start: '1:10', end: '1:40', place: true });
@@ -753,6 +776,70 @@ test('التحديث التلقائي: banner with notes and a countdown, instal
   await clickText('رجّع النسخة اللي فاتت');
   assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'rollbackUpdate')));
   await page.evaluate(() => { EF.services.settings.autoUpdate = true; EF.updates.busy = false; });
+});
+
+test('كابشن ثابت: no animation at all, full card from the first frame; frameKey only changes when pixels do', async () => {
+  await open('transcribe'); await clearCalls();
+  const still = page.locator('.still-toggle input');
+  await still.check();
+  await clickText('نزّل كابشن متحرك');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addAnimatedCaptions').args);
+  assert.equal(a.still, true);
+  const r = await page.evaluate(() => {
+    const CS = window.EFCaptions, W = 320, H = 180, c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+    const cue = { start: 0, end: 2, words: [{ text: 'كلام', start: 0, end: 1 }, { text: 'ثابت', start: 1, end: 2 }] };
+    const o = { position: 'center', size: 0.15, still: true, anim: 'drop', exit: 'fade' };
+    function px(t, oo) { ctx.clearRect(0, 0, W, H); CS.draw(ctx, cue, t, oo, W, H); return c.toDataURL(); }
+    const k = [0.01, 1, 1.99].map(t => CS.frameKey(cue, t, o));
+    const imgs = [0.01, 1, 1.99].map(t => px(t, o));
+    // animated: same key ⇒ same pixels
+    const oa = { position: 'center', size: 0.15, anim: 'pop' }, ka = CS.frameKey(cue, 0.5, oa), kb = CS.frameKey(cue, 0.5, oa);
+    return { k, same: imgs[0] === imgs[1] && imgs[1] === imgs[2], animSame: ka === kb && px(0.5, oa) === px(0.5, oa), animDiff: CS.frameKey(cue, 0.02, oa) !== CS.frameKey(cue, 0.5, oa) };
+  });
+  assert.ok(r.k[0] === r.k[1] && r.k[1] === r.k[2], 'one frame for the whole cue');
+  assert.ok(r.same, 'identical pixels from start to end');
+  assert.ok(r.animSame && r.animDiff);
+  await still.uncheck();
+});
+
+test('التعديلات: paste the client message → tasks with times → tick done → Egyptian reply to copy', async () => {
+  await open('revisions'); await clearCalls();
+  assert.ok(await page.isVisible('.mp-input'), 'its own model picker');
+  await page.fill('textarea', '- شيل الجزء اللي عند 1:20\n- المزيكا عالية شوية\n- غيّر لون العنوان للأحمر');
+  await page.fill('input[placeholder^="اسم العميل"]', 'أحمد');
+  await clickText('قسّمها لمهام');
+  await page.waitForSelector('.rev-item');
+  assert.equal(await page.locator('.rev-item').count(), 3);
+  assert.equal((await page.locator('.rev-time').first().textContent()).trim(), '1:20');
+  await clearCalls();
+  await page.locator('.rev-time').first().click();
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'setPlayhead' && (x.args === 80 || (x.args && x.args.time === 80) || (Array.isArray(x.args) && x.args[0] === 80)))));
+  await page.locator('.rev-check').nth(0).click(); await page.waitForTimeout(200);
+  await page.locator('.rev-check').nth(1).click(); await page.waitForTimeout(200);
+  assert.equal(await page.locator('.rev-item.done').count(), 2);
+  assert.ok(await page.isVisible('text=المهام — 2 من 3'));
+  await clickText('حط ماركرز على الأوقات');
+  await clickText('اكتب رسالة للعميل');
+  await page.waitForSelector('.rev-msg');
+  const msg = await page.inputValue('.rev-msg');
+  assert.match(msg, /أحمد/); assert.match(msg, /✅ شيل الجزء/); assert.match(msg, /⏳ غيّر لون العنوان/);
+  await clickText('انسخ الرسالة');
+  await shot('37-revisions');
+});
+
+test('أيقونات آيفون: flat colour emoji, iPhone app-icon badge, notification count', async () => {
+  await open('icons'); await clearCalls();
+  await page.locator('.chip', { hasText: 'إيموجي' }).first().click();
+  assert.ok(await page.locator('.icon-cell').count() >= 10, 'emoji category by default');
+  await page.locator('.icon-cell').first().click();
+  assert.equal(await page.locator('.icon-preview.full').count(), 1, 'colour emoji preview');
+  await page.locator('.seg button', { hasText: 'آيفون' }).last().click();
+  await page.locator('.seg button', { hasText: 'إشعار' }).click();
+  assert.equal(await page.locator('.icon-preview.b-ios .ios-dot').count(), 1);
+  await clickText('حطها على التايملين');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addIcon').args);
+  assert.equal(a.badge, 'ios'); assert.equal(a.anim, 'notify'); assert.equal(a.count, 3);
+  await shot('38-icons-ios');
 });
 
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

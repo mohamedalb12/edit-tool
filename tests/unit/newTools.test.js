@@ -207,8 +207,13 @@ test('EditFast Link: finds moved / renamed / re-wrapped media and prefers the sa
 test('icon library: 400+ icons in organised categories, brand logos keep their colours', () => {
   const d = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'client', 'vendor', 'icons', 'icons.json'), 'utf8'));
   assert.ok(d.icons.length >= 400);
-  for (const c of d.categories) assert.ok(d.icons.filter(i => i.cat === c.id).length >= 10, c.id);
-  assert.deepEqual(d.categories.slice(0, 5).map(c => c.id), ['social', 'social-ui', 'editing', 'cars', 'realestate']);
+  for (const c of d.categories) assert.ok(d.icons.filter(i => i.cat === c.id).length >= (/^emoji-/.test(c.id) ? 6 : 10), c.id);
+  assert.deepEqual(d.categories.filter(c => !/^emoji-/.test(c.id)).slice(0, 5).map(c => c.id), ['social', 'social-ui', 'editing', 'cars', 'realestate']);
+  // flat colour emoji (Fluent, MIT): full-colour, gradient ids namespaced so two icons on one page never clash
+  const emoji = d.icons.filter(i => i.mode === 'color');
+  assert.ok(emoji.length >= 100);
+  for (const e of emoji) { assert.match(e.viewBox, /^0 0 \d+ \d+$/); for (const m of e.svg.matchAll(/id="([^"]+)"/g)) assert.ok(m[1].startsWith(e.id), e.id + ' ' + m[1]); }
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'client', 'vendor', 'icons', 'LICENSE-fluent-emoji.txt')));
   const yt = d.icons.find(i => i.id === 'b-youtube');
   assert.equal(yt.mode, 'fill'); assert.match(yt.color, /^#[0-9A-F]{6}$/i); assert.match(yt.svg, /^<path d="/);
   const car = d.icons.find(i => i.id === 'l-car');

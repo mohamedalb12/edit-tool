@@ -25,7 +25,12 @@ const FEATURES = [
   { id: 'spellfix', label: 'التصحيح الإملائي بعد التفريغ', def: 'anthropic/claude-haiku-4.5' },
   { id: 'chapters', label: 'فصول يوتيوب', def: 'anthropic/claude-sonnet-5.5' },
   { id: 'scene', label: 'بناء المشاهد المتحركة', def: 'anthropic/claude-sonnet-5.5' },
-  { id: 'broll', label: 'كلمات بحث الـ B-Roll', def: 'anthropic/claude-haiku-4.5' }
+  { id: 'broll', label: 'كلمات بحث الـ B-Roll', def: 'anthropic/claude-haiku-4.5' },
+  { id: 'hook', label: 'اختيار الهوك (المونتاج التلقائي)', def: 'anthropic/claude-sonnet-5.5' },
+  { id: 'shorts', label: 'أقوى مقاطع الشورتس', def: 'anthropic/claude-sonnet-5.5' },
+  { id: 'thumbnail', label: 'عناوين الثامبنيل', def: 'anthropic/claude-sonnet-5.5', vision: true },
+  { id: 'translate', label: 'ترجمة الكابشن', def: 'anthropic/claude-haiku-4.5' },
+  { id: 'revisions', label: 'تعديلات العميل', def: 'anthropic/claude-sonnet-5.5' }
 ];
 
 /**
@@ -44,6 +49,16 @@ function withCache(model, messages) {
     if (out[i].role === 'user' && typeof out[i].content === 'string' && out[i].content.length > 200) { out[i] = { ...out[i], content: mark(out[i].content) }; break; }
   }
   return out;
+}
+
+/** OpenRouter errors in plain Egyptian Arabic, with what to do */
+function friendly(status, msg) {
+  const afford = /can only afford (\d+)/.exec(msg);
+  if (status === 402) return `رصيد OpenRouter مش كفاية${afford ? ` (المفتاح يقدر يصرف ${afford[1]} توكن بس)` : ''} — اشحن رصيد من openrouter.ai/settings/credits أو زوّد حد المفتاح (Credit limit) من openrouter.ai/settings/keys. [OpenRouter 402]`;
+  if (status === 401) return 'مفتاح OpenRouter غلط أو اتلغى — حط مفتاح جديد من الإعدادات. [OpenRouter 401]';
+  if (status === 404 && /model|endpoint/i.test(msg)) return `الموديل ده مش موجود على OpenRouter — غيّره من الإعدادات (${msg.slice(0, 120)}) [OpenRouter 404]`;
+  if (status === 429) return 'OpenRouter مضغوط دلوقتي أو المفتاح وصل للحد — استنى شوية وجرّب تاني. [OpenRouter 429]';
+  return `OpenRouter ${status}: ${msg}`;
 }
 
 function modelFor(featureId, settings = {}) {
@@ -65,15 +80,22 @@ class OpenRouter {
   }
 
   async request(pathname, body, method = 'POST') {
+    if (body && body._shrunk !== undefined) delete body._shrunk;
     let lastErr;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       try {
-        const res = await this.fetch(BASE + pathname, { method, headers: this.headers(), body: body ? JSON.stringify(body) : undefined });
+        const send = body ? { ...body } : null; if (send) delete send._shrunk;
+        const res = await this.fetch(BASE + pathname, { method, headers: this.headers(), body: send ? JSON.stringify(send) : undefined });
         const text = await res.text();
         let data; try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
         if (res.ok && !data.error) return data;
         const msg = (data.error && (data.error.message || data.error)) || text.slice(0, 300);
-        const err = new Error(`OpenRouter ${res.status}: ${msg}`);
+        // the key can still afford a shorter answer → retry once with fewer max_tokens
+        const afford = /can only afford (\d+)/.exec(String(msg));
+        if (res.status === 402 && afford && body && body.max_tokens && +afford[1] >= 300 && +afford[1] < body.max_tokens && !body._shrunk) {
+          body = { ...body, max_tokens: +afford[1] - 32, _shrunk: true }; attempt--; continue;
+        }
+        const err = new Error(friendly(res.status, String(msg)));
         err.status = res.status;
         if (res.status === 429 || res.status >= 500) { lastErr = err; await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt))); continue; }
         throw err;
@@ -126,4 +148,4 @@ class OpenRouter {
   }
 }
 
-module.exports = { OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, withCache, BASE };
+module.exports = { OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, withCache, friendly, BASE };

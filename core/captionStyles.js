@@ -151,8 +151,10 @@
     if (!cue || !cue.words || !cue.words.length || t < cue.start || t > cue.end + 0.05) return;
     var px = Math.round(o.size * H);
     var lines = layout(ctx, cue.words, o, W, H);
+    // still = plain captions: the whole card shows at once, no highlight, no motion
+    if (o.still) { o.anim = 'none'; o.exit = 'none'; }
     var anim = o.anim && o.anim !== 'none';
-    var cardIn = anim ? 1 : clamp((t - cue.start) / 0.12, 0, 1), cardOut = o.exit && o.exit !== 'none' ? 1 : clamp((cue.end - t) / 0.1, 0, 1);
+    var cardIn = anim || o.still ? 1 : clamp((t - cue.start) / 0.12, 0, 1), cardOut = (o.exit && o.exit !== 'none') || o.still ? 1 : clamp((cue.end - t) / 0.1, 0, 1);
     var cardA = Math.min(cardIn, cardOut);
     var dist = px * o.distance;
     var exitX = o.exit && o.exit !== 'none' ? clamp(1 - (cue.end - t) / Math.max(0.05, o.exitDur), 0, 1) : 0;
@@ -161,9 +163,9 @@
       ctx.direction = ln.rtl ? 'rtl' : 'ltr';
       ln.words.forEach(function (wd) {
         var w = cue.words[wd.i];
-        var active = t >= w.start && t < w.end + 0.02;
-        var spoken = t >= w.start;
-        var k = clamp((t - w.start) / 0.14, 0, 1); // per-word entrance 0..1 (built-in style motion)
+        var active = !o.still && t >= w.start && t < w.end + 0.02;
+        var spoken = o.still || t >= w.start;
+        var k = o.still ? 1 : clamp((t - w.start) / 0.14, 0, 1); // per-word entrance 0..1 (built-in style motion)
         var scale = 1, alpha = cardA, color = o.text, dy = 0, rot = 0;
         ctx.font = fontFor(o, H);
         switch (o.style) {
@@ -198,7 +200,7 @@
         ctx.translate(cx, cy); ctx.rotate((rot + mo.rot) * Math.PI / 180);
         ctx.scale(scale * mo.sx * (ex ? ex.sx : 1), scale * mo.sy * (ex ? ex.sy : 1)); ctx.translate(-wd.w / 2, 0);
         var text = wd.t;
-        if (o.style === 'typewriter') { var chars = Array.from(text); text = chars.slice(0, Math.max(1, Math.ceil(chars.length * clamp((t - w.start) / Math.max(0.08, w.end - w.start), 0, 1)))).join(''); }
+        if (o.style === 'typewriter' && !o.still) { var chars = Array.from(text); text = chars.slice(0, Math.max(1, Math.ceil(chars.length * clamp((t - w.start) / Math.max(0.08, w.end - w.start), 0, 1)))).join(''); }
         if (mo.chars < 1) { var cs = Array.from(text); text = cs.slice(0, Math.max(1, Math.ceil(cs.length * mo.chars))).join(''); }
         if (o.style === 'box' && active) {
           ctx.fillStyle = o.box; ctx.shadowColor = o.box; ctx.shadowBlur = px * 0.5;
@@ -234,5 +236,29 @@
     });
   }
 
-  return { STYLES: STYLES, ANIMS: ANIMS, EASES: EASES, EXITS: EXITS, DEFAULTS: DEFAULTS, opts: opts, layout: layout, draw: draw, ease: ease, wordStart: wordStart };
+  /**
+   * A key that's the same for frames that look the same (nothing moving) → the renderer reuses the last frame
+   * instead of reading the canvas again. null = this frame is mid-animation.
+   */
+  function frameKey(cue, t, o) {
+    o = opts(o);
+    if (!cue || !cue.words || t < cue.start || t > cue.end + 0.05) return 'empty';
+    if (o.still) return 'still';
+    if (o.anim === 'wave' || o.anim === 'glitch' || o.style === 'typewriter') return null;
+    var anim = o.anim && o.anim !== 'none';
+    var cardIn = anim ? 1 : clamp((t - cue.start) / 0.12, 0, 1), cardOut = o.exit && o.exit !== 'none' ? 1 : clamp((cue.end - t) / 0.1, 0, 1);
+    if ((cardIn > 0 && cardIn < 1) || (cardOut > 0 && cardOut < 1)) return null;
+    if (o.exit && o.exit !== 'none' && cue.end - t < o.exitDur) return null;
+    var key = '';
+    for (var i = 0; i < cue.words.length; i++) {
+      var w = cue.words[i], k = (t - w.start) / 0.14;
+      if (k > 0 && k < 1) return null;
+      if (o.style === 'highlighter' && t - w.start > 0 && t - w.start < 0.18) return null;
+      if (anim) { var kk = (t - wordStart(cue, i, o)) / Math.max(0.03, o.animDur); if (kk > 0 && kk < 1) return null; key += kk >= 1 ? 'v' : 'h'; }
+      key += (t >= w.start && t < w.end + 0.02) ? 'A' : t >= w.start ? 's' : '-';
+    }
+    return key + (cardOut === 0 ? 'x' : '');
+  }
+
+  return { frameKey: frameKey, STYLES: STYLES, ANIMS: ANIMS, EASES: EASES, EXITS: EXITS, DEFAULTS: DEFAULTS, opts: opts, layout: layout, draw: draw, ease: ease, wordStart: wordStart };
 });

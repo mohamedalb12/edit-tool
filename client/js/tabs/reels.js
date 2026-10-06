@@ -39,7 +39,7 @@
         UI.hint('الذكاء الاصطناعي بيقرا الكلام ويختار أقوى مقاطع (20-60 ثانية) بتبدأ بهوك وبتخلص بفكرة كاملة.'),
         UI.field('العدد', UI.slider(1, 8, 1, count, function (v) { return v + ' مقاطع'; }, function (v) { count = v; })),
         UI.row(h('label', null, 'تحويل طولي'), h('input', { type: 'checkbox', checked: state.reframe, onchange: function (e) { state.reframe = e.target.checked; } }), h('label', null, 'كابشن'), h('input', { type: 'checkbox', checked: state.captions, onchange: function (e) { state.captions = e.target.checked; } })),
-        UI.modelPicker('agent_strong'), UI.row(find), h('div', { class: 'list' }, shortsBox)));
+        UI.modelPicker('shorts'), UI.row(find), h('div', { class: 'list' }, shortsBox)));
       drawShorts();
     }
   });

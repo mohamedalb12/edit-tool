@@ -38,7 +38,7 @@
       var undo = UI.btn('↶ رجّع آخر عملية', function () {
         UI.safe('بيرجّع', function () { return S.undoLast().then(function (r) { UI.toast(r.message, !!(r.manual && r.manual.length)); drawHist(); }); }, undo);
       });
-      view.appendChild(UI.card('الخطة — راجعها قبل ما تبدأ', UI.hint('كل خطوة تقدر تشيلها. القص بيتعمل على نسخة من السيكوينس، وكل حاجة بتتسجل وتقدر ترجعها.'), list, UI.row(go)));
+      view.appendChild(UI.card('الخطة — راجعها قبل ما تبدأ', UI.hint('كل خطوة تقدر تشيلها. القص بيتعمل على نسخة من السيكوينس، وكل حاجة بتتسجل وتقدر ترجعها.'), list, UI.modelPicker('hook'), UI.row(go)));
       view.appendChild(UI.card('السجل', hist, UI.row(undo)));
       drawSteps(); drawHist();
     }
