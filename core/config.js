@@ -5,8 +5,8 @@ const path = require('path');
 const os = require('os');
 
 const DEFAULTS = {
-  keys: { openrouter: '', elevenlabs: '', pexels: '', pixabay: '' },
-  paths: { ffmpeg: '', ffprobe: '', whisper: '', whisperModel: '', baseMogrt: '', node: '', npm: '', chrome: '' },
+  keys: { openrouter: '', elevenlabs: '', pexels: '', pixabay: '', google: '', googleCx: '' },
+  paths: { ffmpeg: '', ffprobe: '', whisper: '', whisperModel: '', baseMogrt: '', node: '', npm: '', chrome: '', ytdlp: '' },
   models: {}, // featureId -> OpenRouter model id (override)
   defaultModel: '',
   agentLevel: 'strong',
@@ -14,7 +14,8 @@ const DEFAULTS = {
   style: null, // ذوقك — بيتملى مرة واحدة
   quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true },
   captions: { maxWords: 4, maxDuration: 2.5, singleWord: false },
-  libraryDirs: []
+  libraryDirs: [],
+  favorites: {}
 };
 
 function dataDir() {

@@ -4,8 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const pro = require('../../core/proScene');
 
-test('pro scenes: 12 components; AI output is validated (unknown types dropped, props coerced, times clamped, style applied)', () => {
-  assert.equal(Object.keys(pro.CATALOG).length, 12);
+test('pro scenes: 26 components (incl. collage, 3D, UI, icons); AI output is validated (unknown types dropped, props coerced, times clamped, style applied)', () => {
+  assert.equal(Object.keys(pro.CATALOG).length, 26);
   const s = pro.normalize({
     duration: 6, background: { type: 'galaxy' }, theme: { primary: 'red', accent: '#FFAA00' },
     elements: [

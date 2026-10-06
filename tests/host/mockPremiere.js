@@ -67,6 +67,9 @@ class ProjectItem {
   }
   getMediaPath() { return this.mediaPath; }
   isSequence() { return this._isSeq; }
+  isOffline() { return !!this.offline; }
+  canChangeMediaPath() { return !this._isSeq && this.type !== 2; }
+  changeMediaPath(p) { this.mediaPath = p; this.offline = false; return true; }
   createBin(name) { const b = new ProjectItem({ name, type: 2, parent: this }); this.kids.push(b); return b; }
   moveBin(bin) { this.parent.kids = this.parent.kids.filter(k => k !== this); this.parent = bin; bin.kids.push(this); }
   setInPoint(s) { this.inPoint = s; }

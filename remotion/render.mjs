@@ -6,6 +6,7 @@ import { renderMedia, renderStill, selectComposition } from '@remotion/renderer'
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,10 +25,52 @@ async function getBundle() {
   return out;
 }
 
+// Local photos/videos used by a scene (collage, 3D carousel…) are served from a tiny localhost server:
+// only the files listed in the spec are reachable, nothing else on the disk.
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv|avi|mxf)$/i;
+const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska' };
+async function serveMedia(spec) {
+  const files = [];
+  const map = (v) => {
+    if (typeof v !== 'string' || !path.isAbsolute(v) || !fs.existsSync(v)) return null;
+    let i = files.indexOf(v); if (i < 0) { files.push(v); i = files.length - 1; }
+    return { i, kind: VIDEO_EXT.test(v) ? 'video' : 'image' };
+  };
+  const refs = [];
+  for (const el of spec.elements || []) {
+    const p = el.props || {};
+    for (const key of ['media', 'src']) {
+      if (Array.isArray(p[key])) p[key] = p[key].map(v => { const m = map(v); if (m) refs.push(m); return m || v; });
+      else if (p[key]) { const m = map(p[key]); if (m) { refs.push(m); p[key] = m; } }
+    }
+  }
+  if (!files.length) return null;
+  const server = http.createServer((req, res) => {
+    const m = /^\/f\/(\d+)/.exec(req.url || ''); const file = m && files[+m[1]];
+    if (!file) { res.writeHead(404); return res.end(); }
+    const size = fs.statSync(file).size, type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+    const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+    const head = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Access-Control-Allow-Origin': '*' };
+    if (range) {
+      const start = range[1] ? +range[1] : 0, end = range[2] ? Math.min(+range[2], size - 1) : size - 1;
+      res.writeHead(206, { ...head, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+      return fs.createReadStream(file, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { ...head, 'Content-Length': size });
+    fs.createReadStream(file).pipe(res);
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const r of refs) { r.src = `${base}/f/${r.i}${path.extname(files[r.i]).toLowerCase()}`; delete r.i; }
+  return server;
+}
+
+let mediaServer = null;
 try {
   const serveUrl = await getBundle();
+  mediaServer = await serveMedia(job.spec);
   const inputProps = { spec: job.spec };
-  const common = { serveUrl, inputProps, browserExecutable: job.browserExecutable || null, chromiumOptions: { gl: job.gl || 'angle' }, logLevel: job.logLevel || 'error' };
+  const common = { serveUrl, inputProps, browserExecutable: job.browserExecutable || null, chromiumOptions: { gl: job.gl || 'angle' }, logLevel: job.logLevel || 'error', timeoutInMilliseconds: 120000 };
   const composition = await selectComposition({ ...common, id: 'Scene' });
   const transparent = (job.spec.background || {}).type === 'transparent';
   if (job.still) {
@@ -41,6 +84,7 @@ try {
     });
   }
   say({ done: job.out });
+  if (mediaServer) mediaServer.close();
 } catch (e) {
   say({ error: String(e && e.message || e) });
   process.exit(1);

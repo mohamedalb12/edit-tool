@@ -31,7 +31,7 @@ class Services {
    * renderScene(spec, outPath) → Promise<path>   (canvas renderer living in the panel)
    * askUser(question, options) → Promise<string>
    */
-  constructor({ host, renderScene, renderGlass, analyzeFaces, renderCaptions, askUser, fetchImpl, log } = {}) {
+  constructor({ host, renderScene, renderGlass, analyzeFaces, renderCaptions, renderOverlay, askUser, fetchImpl, log } = {}) {
     // every call that changes the timeline goes through here so it lands in the history (and can be undone)
     this.hostRaw = host;
     this.history = [];
@@ -40,6 +40,8 @@ class Services {
     this.renderGlassImpl = renderGlass;
     this.analyzeFacesImpl = analyzeFaces;
     this.renderCaptionsImpl = renderCaptions;
+    this.renderOverlayImpl = renderOverlay;
+    this.webCache = new Map();
     this.askUserImpl = askUser;
     this.fetch = fetchImpl || nodeFetch; // Node HTTP: no CORS problems inside Premiere
     this.log = log || (() => {});
@@ -231,9 +233,9 @@ class Services {
 
   /* ---------- عين المونتير ---------- */
   /** topmost picture at timeline time t → { file, srcTime } */
-  pictureAt(seq, t) {
+  pictureAt(seq, t, skip) {
     for (let i = seq.video.length - 1; i >= 0; i--) {
-      const c = seq.video[i].clips.find(c => c.start <= t + 1e-3 && t < c.end - 1e-3 && !c.disabled && c.mediaPath);
+      const c = seq.video[i].clips.find(c => c.start <= t + 1e-3 && t < c.end - 1e-3 && !c.disabled && c.mediaPath && !(skip && skip.test(c.mediaPath)));
       if (c) return { file: c.mediaPath, srcTime: c.inPoint + (t - c.start), clip: c.name, track: i };
     }
     return null;
@@ -551,17 +553,29 @@ class Services {
     return this.proEngine();
   }
 
-  async designProScene({ brief, duration, transparent = false }) {
+  async designProScene({ brief, duration, transparent = false, style, frames } = {}) {
     if (!brief || !String(brief).trim()) throw new Error('اكتب وصف المشهد');
     const pro = require('./proScene');
+    const packs = require('./stylePacks');
+    const styleId = packs.get(style) ? style : packs.detect(style || brief);
     const s = await this.seq().catch(() => ({ width: 1920, height: 1080, fps: 30 }));
-    const raw = await pro.direct(this.llm, this.model('scene'), brief, { style: this.settings.style, duration, transparent });
-    return pro.normalize(raw, { width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: this.settings.style });
+    // collage / 3D / cinematic scenes look best built from the editor's own shots
+    const wantFrames = frames !== undefined ? frames : ['collage', '3d', 'cinematic'].includes(styleId);
+    const media = wantFrames ? await this.sceneFrames({ count: 6 }).catch(() => []) : [];
+    const raw = await pro.direct(this.llm, this.model('scene'), brief, { style: this.settings.style, duration, transparent, styleId, media });
+    return pro.normalize(raw, { width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: this.settings.style, media: media.map(m => m.file) });
   }
 
   async renderProScene({ spec, time, preview = false, onProgress }) {
     const pro = require('./proScene');
     const s = await this.seq().catch(() => null);
+    // components that show photos (collage, 3D carousel…) but got none: use stills from the editor's own video
+    const PHOTO = ['collage', 'polaroid', 'carousel3D', 'card3D', 'mediaFull'];
+    const wants = (spec.elements || []).filter(e => PHOTO.includes(e.type) && !(e.props && Array.isArray(e.props.media) && e.props.media.length));
+    if (wants.length && s && s.duration) {
+      const frames = (await this.sceneFrames({ count: 6, around: time ?? s.playhead, spread: 30 }).catch(() => [])).map(f => f.file);
+      if (frames.length) spec = { ...spec, elements: spec.elements.map(e => (wants.includes(e) ? { ...e, props: { ...(e.props || {}), media: frames } } : e)) };
+    }
     const full = pro.normalize(spec, { width: s ? s.width : 1920, height: s ? s.height : 1080, fps: s ? Math.round(s.fps) || 30 : 30, style: this.settings.style });
     const e = this.proEngine();
     const transparent = full.background.type === 'transparent';
@@ -866,6 +880,285 @@ class Services {
     const file = await broll.download(it, config.cacheDir('broll'), { fetchImpl: this.fetch });
     const s = await this.seq();
     return this.host('placeFile', { path: file, time: time ?? s.playhead, kind: 'video', track: -1, duration: duration || (it.type === 'photo' ? 4 : Math.min(it.duration || 5, 6)), bin: 'EditFast/B-Roll' });
+  }
+
+  /* ---------- لقطات من السيكونس للمشاهد (كولاج/ثري دي) ---------- */
+  /** JPEG stills from the timeline → [{file, time}] (around the playhead, or spread over the whole sequence). */
+  async sceneFrames({ count = 6, around, spread, width = 1280 } = {}) {
+    const s = await this.seq();
+    if (!s.duration) return [];
+    let from = 0, to = s.duration;
+    if (around !== undefined || spread) { const c = around ?? s.playhead, w = spread || 20; from = Math.max(0, c - w / 2); to = Math.min(s.duration, c + w / 2); }
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const t = from + ((to - from) * (i + 0.5)) / count;
+      // look through our own overlays (pro scenes, glass, captions, guides) to the footage underneath
+      const p = this.pictureAt(s, t, /[\\/](glass|pro|scene|caption|safe)[^\\/]*\.(mov|mp4|png)$/i);
+      if (!p) continue;
+      const file = path.join(config.cacheDir('frames'), `f-${hash(p.file + '|' + p.srcTime.toFixed(2) + '|' + width)}.jpg`);
+      if (!fs.existsSync(file)) {
+        try { fs.writeFileSync(file, Buffer.from(await vision.frameJpeg(this.ffmpeg(), p.file, p.srcTime, { width }), 'base64')); } catch (_) { continue; }
+      }
+      out.push({ file, time: +t.toFixed(2) });
+    }
+    return out;
+  }
+
+  /* ---------- مونتاج بالاستايل (كولاج، ثري دي، نيون…) ---------- */
+  stylePacks() { return require('./stylePacks').list(); }
+
+  /**
+   * The AI plans `count` scenes in the chosen style across the video (one request), Remotion renders them,
+   * and they land on the timeline above the footage.
+   */
+  async styleEdit({ style, brief = '', count = 3, onStep } = {}) {
+    const packs = require('./stylePacks'), pro = require('./proScene');
+    const id = packs.get(style) ? style : packs.detect(style || brief);
+    if (!id) throw new Error('اختار استايل: ' + packs.list().map(p => p.label).join('، '));
+    const pack = packs.get(id);
+    const s = await this.seq();
+    if (!s.duration) throw new Error('السيكونس فاضية');
+    const step = (m, p) => onStep && onStep(m, p);
+    step('بيجهّز لقطات من الفيديو', 0.05);
+    const frames = await this.sceneFrames({ count: Math.min(12, Math.max(6, count * 3)) }).catch(() => []);
+    let said = [];
+    try { said = (await this.transcriptSentences()).slice(0, 80); } catch (_) {}
+    const n = Math.max(1, Math.min(8, Math.round(count)));
+    const user = [
+      `اعمل ${n} مشاهد بالاستايل ده موزّعين على الفيديو (مدته ${s.duration.toFixed(1)} ثانية، ${s.width}x${s.height}).`,
+      brief ? `طلب المونتير: ${brief}` : '',
+      said.length ? 'الكلام بالتوقيت:\n' + said.map(x => `[${x.start}-${x.end}] ${x.text}`).join('\n') : 'مفيش تفريغ — وزّع المشاهد بالتساوي.',
+      pro.mediaText(frames),
+      'رجّع: {"scenes":[{"time":ثانية البداية على التايملين,"overlay":true لو فوق الفيديو بخلفية شفافة أو false لو مشهد كامل بيقطع,"spec":{...مواصفات المشهد زي ما فوق}}]}',
+      'قواعد: المشهد الكامل 2-4 ثواني والـ overlay من 3 لـ 5 ثواني. ماتحطش مشهدين في نفس الوقت. اختار لحظات فيها كلام مهم أو تغيير. استخدم اللقطات القريبة من وقت المشهد.'
+    ].filter(Boolean).join('\n');
+    step('المخرج الذكي بيخطط المشاهد', 0.15);
+    const plan = await this.llm.json({ model: this.model('scene'), system: pro.DIRECTOR_SYSTEM(id), user, maxTokens: 6000 });
+    const scenes = (Array.isArray(plan.scenes) ? plan.scenes : []).slice(0, n).filter(x => x && x.spec);
+    if (!scenes.length) throw new Error('المخرج مارجّعش مشاهد — جرّب تاني أو غيّر الموديل');
+    const placed = [];
+    await this.op('مونتاج بستايل ' + pack.label, async () => {
+      for (let i = 0; i < scenes.length; i++) {
+        const sc = scenes[i];
+        const spec = { ...sc.spec, style: id };
+        if (sc.overlay) spec.background = { type: 'transparent' };
+        const full = pro.normalize(spec, { width: s.width, height: s.height, fps: Math.round(s.fps) || 30, media: frames.map(f => f.file) });
+        const time = Math.max(0, Math.min(s.duration - 0.5, +sc.time || 0));
+        step(`Remotion بيرندر المشهد ${i + 1} من ${scenes.length}`, 0.2 + (0.8 * i) / scenes.length);
+        const r = await this.renderProScene({ spec: full, time, onProgress: p => step(`رندر المشهد ${i + 1}: ${Math.round(p * 100)}%`, 0.2 + (0.8 * (i + p)) / scenes.length) });
+        placed.push({ time, duration: full.duration, overlay: !!sc.overlay, elements: full.elements.map(e => e.type), track: r.track, file: r.file });
+      }
+    });
+    step('خلص', 1);
+    return { style: id, label: pack.label, scenes: placed };
+  }
+
+  /* ---------- مكتبة القوالب ---------- */
+  templatesList() {
+    const T = require('./templates');
+    return { cats: T.CATS, items: T.TEMPLATES.map(t => ({ id: t.id, cat: t.cat, label: t.label, overlay: t.overlay, duration: t.spec.duration, fields: T.fields(t), media: T.mediaNeed(t) })) };
+  }
+
+  async addTemplate({ id, values, time, duration, media, preview = false, onProgress } = {}) {
+    const T = require('./templates');
+    const tpl = T.get(id); if (!tpl) throw new Error('القالب مش موجود: ' + id);
+    let files = Array.isArray(media) ? media : null;
+    const need = T.mediaNeed(tpl);
+    if (need && !files) files = (await this.sceneFrames({ count: need, spread: need > 1 ? 30 : 4 }).catch(() => [])).map(f => f.file);
+    const spec = T.fill(tpl, { values, media: files || [], duration });
+    return this.renderProScene({ spec, time, preview, onProgress });
+  }
+
+  favorites(kind) { return ((this.settings.favorites || {})[kind]) || []; }
+  toggleFavorite(kind, id) {
+    const fav = { ...(this.settings.favorites || {}) }; const list = new Set(fav[kind] || []);
+    if (list.has(id)) list.delete(id); else list.add(id);
+    fav[kind] = Array.from(list); this.saveSettings({ favorites: fav });
+    return fav[kind];
+  }
+
+  /* ---------- كاروسيل ثري دي ---------- */
+  async carousel3D({ files = [], layout = 'ring', speed = 1, direction = 'left', tilt = 10, radius = 1, cardSize = 1, aspect = '4:5', reflection = true, glow = true, rounded = 26, title = '', background = 'studio', duration = 6, time, preview = false, onProgress } = {}) {
+    let media = (files || []).filter(f => f && fs.existsSync(f));
+    if (!media.length) media = (await this.sceneFrames({ count: 8 })).map(f => f.file);
+    if (media.length < 2) throw new Error('محتاج من 2 لـ 10 صور أو فيديوهات');
+    if (media.length > 10) media = media.slice(0, 10);
+    const bg = require('./proScene').BACKGROUNDS.includes(background) ? background : 'studio';
+    const spec = { style: '3d', duration, background: { type: bg }, grain: false, elements: [{ type: 'carousel3D', from: 0, duration, props: { media, layout, speed, direction, tilt, radius, cardSize, aspect, reflection, glow, rounded, title } }] };
+    return this.renderProScene({ spec, time, preview, onProgress });
+  }
+
+  /* ---------- مكتبة الأيقونات ---------- */
+  iconsData() {
+    if (!this._icons) this._icons = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'client', 'vendor', 'icons', 'icons.json'), 'utf8'));
+    return this._icons;
+  }
+  iconSearch(q = '', cat = '') {
+    const d = this.iconsData(), t = String(q).trim().toLowerCase();
+    return d.icons.filter(i => (!cat || i.cat === cat) && (!t || i.name.toLowerCase().includes(t) || (i.ar || '').includes(t) || i.id.includes(t)));
+  }
+  async addIcon({ id, anim = 'draw', color, size = 1, badge = 'none', label = '', duration = 3, position = 'center', glow = true, time, onProgress } = {}) {
+    const icon = this.iconsData().icons.find(i => i.id === id || i.id === 'l-' + id || i.id === 'b-' + id);
+    if (!icon) throw new Error('الأيقونة مش موجودة: ' + id);
+    const spec = { duration, background: { type: 'transparent' }, elements: [{ type: 'icon', from: 0, duration, position, props: { svg: icon.svg, mode: icon.mode, anim, color: color || (icon.mode === 'fill' ? icon.color : ''), size, badge, label, glow } }] };
+    return this.renderProScene({ spec, time, onProgress });
+  }
+
+  /* ---------- مؤثرات ترند (أوفلاين) + مزيكا بالذكاء الاصطناعي ---------- */
+  sfxPackList() { return require('./sfxPack').list(); }
+  sfxPackDir() { return path.join(config.dataDir(), 'sfx-pack'); }
+  async sfxPackInstall(onProgress) {
+    const files = require('./sfxPack').generate(this.sfxPackDir(), { onProgress });
+    const r = await this.libraryAdd([this.sfxPackDir()]).catch(() => null);
+    return { files: files.length, library: r };
+  }
+  sfxPackFile(id) { return require('./sfxPack').generate(this.sfxPackDir(), { ids: [id] })[0].file; }
+  async placeSfx({ id, time }) {
+    const [f] = require('./sfxPack').generate(this.sfxPackDir(), { ids: [id] });
+    const s = await this.seq();
+    return this.host('placeFile', { path: f.file, time: time ?? s.playhead, kind: 'audio', track: -1, bin: 'EditFast/SFX' });
+  }
+  async generateMusic({ prompt, seconds = 30, instrumental = true, translate = true, place = false, time } = {}) {
+    const text = translate && this.settings.keys.openrouter ? await sfx.translatePrompt(this.llm, this.model('sfx_translate'), prompt) : prompt;
+    const r = await sfx.generateMusic({ apiKey: this.settings.keys.elevenlabs, prompt: text, seconds, instrumental, outDir: config.cacheDir('music'), fetchImpl: this.fetch });
+    let placed = null;
+    if (place) { const s = await this.seq(); placed = await this.host('placeFile', { path: r.file, time: time ?? s.playhead, kind: 'audio', track: -1, duration: seconds, bin: 'EditFast/Music' }); }
+    return { ...r, prompt: text, placed };
+  }
+
+  /* ---------- مكان حفظ الملفات اللي بتتحمّل ---------- */
+  async projectMediaDir(name) {
+    let p = '';
+    try { p = (await this.hostRaw('projectPath', {})).path || ''; } catch (_) {}
+    const dir = p ? path.join(path.dirname(p), 'EditFast Media', name) : config.cacheDir(name.toLowerCase());
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /* ---------- تحميل من يوتيوب/إنستجرام/تيك توك ---------- */
+  ytdlpBin() { return ff.findBinary(['yt-dlp', 'yt-dlp_macos'], this.settings.paths.ytdlp); }
+  async downloadInfo(url) { return require('./ytdlp').info(this.ytdlpBin(), url); }
+  async downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
+    const Y = require('./ytdlp'), W = require('./websearch');
+    const pf = Y.platformOf(url);
+    if (!pf) throw new Error('اللينك مش صح');
+    const dir = await this.projectMediaDir('Downloads');
+    let file, type = quality === 'audio' ? 'audio' : 'video';
+    try {
+      file = (await Y.download(this.ytdlpBin(), { url, quality, start, end, outDir: dir, ffmpeg: this.tools.ffmpeg }, onProgress)).file;
+    } catch (e) {
+      // Pinterest photo pins aren't videos: grab the picture itself
+      if (pf.id !== 'pinterest') throw e;
+      const m = await W.pinterestMedia(url, { fetchImpl: this.fetch });
+      file = await W.downloadUrl(m.url, dir, { fetchImpl: this.fetch, name: m.title || 'pinterest' }); type = m.type;
+    }
+    if (/\.(jpe?g|png|webp|gif)$/i.test(file)) type = 'photo';
+    let placed = null;
+    if (place) {
+      const s = await this.seq();
+      const dur = type === 'photo' ? 5 : undefined;
+      placed = await this.host('placeFile', { path: file, time: time ?? s.playhead, kind: type === 'audio' ? 'audio' : 'video', track: -1, duration: dur, bin: 'EditFast/Downloads' });
+    }
+    return { file, type, platform: pf, placed };
+  }
+
+  /* ---------- بحث النت (صور/فيديو/صوت) ---------- */
+  async webSearch({ q, sources, type = 'image' } = {}) {
+    const W = require('./websearch');
+    const k = this.settings.keys;
+    const src = sources || ['openverse', 'commons', ...(k.google && k.googleCx ? ['google'] : []), ...(k.pexels ? ['pexels'] : []), ...(k.pixabay ? ['pixabay'] : [])];
+    const r = await W.search({ q, sources: src, type, keys: { google: k.google, googleCx: k.googleCx }, fetchImpl: this.fetch,
+      brollSearch: async (s, t) => (await broll.search({ sources: [s], q, type: t, keys: k, fetchImpl: this.fetch })).results });
+    r.results.forEach(x => this.webCache.set(x.id, x));
+    return r;
+  }
+  webSearchPage(engine, q) { return require('./websearch').SEARCH_PAGES[engine](q); }
+  async webImport({ id, item, url, place = true, time, duration } = {}) {
+    const W = require('./websearch');
+    let it = item || (id && this.webCache.get(id)) || (url ? { url, type: /\.(mp4|webm|mov)(\?|$)/i.test(url) ? 'video' : /\.(mp3|wav|ogg|flac)(\?|$)/i.test(url) ? 'audio' : 'photo', source: 'url' } : null);
+    if (!it) throw new Error('النتيجة مش موجودة');
+    if (it.source === 'url' && /pinterest\.|pin\.it/i.test(it.url)) { const m = await W.pinterestMedia(it.url, { fetchImpl: this.fetch }); it = { ...it, url: m.url, type: m.type, title: m.title }; }
+    let file;
+    if (it.source === 'pexels' || it.source === 'pixabay') file = await broll.download(it, await this.projectMediaDir('Web'), { fetchImpl: this.fetch });
+    else file = await W.downloadUrl(it.url, await this.projectMediaDir('Web'), { fetchImpl: this.fetch, name: it.title });
+    let placed = null;
+    if (place) {
+      const s = await this.seq();
+      const kind = it.type === 'audio' ? 'audio' : 'video';
+      placed = await this.host('placeFile', { path: file, time: time ?? s.playhead, kind, track: -1, duration: duration || (it.type === 'photo' ? 5 : undefined), bin: 'EditFast/Web' });
+    } else await this.hostRaw('importFiles', { paths: [file], bin: 'EditFast/Web' });
+    return { file, placed, item: it };
+  }
+
+  /* ---------- المناطق الآمنة (ريلز/تيك توك/شورتس) ---------- */
+  async safeZoneCheck({ platform = 'all', addMarkers = false, maxSeconds = 90, onProgress } = {}) {
+    const SZ = require('./safeZones');
+    const s = await this.seq();
+    const vertical = s.height > s.width;
+    const faces = [];
+    if (this.analyzeFacesImpl) {
+      const clips = (s.video[0] ? s.video[0].clips : []).filter(c => c.mediaPath && !c.disabled && !/\.(png|jpe?g)$/i.test(c.mediaPath));
+      let budget = maxSeconds;
+      for (const c of clips) {
+        if (budget <= 0) break;
+        const dur = Math.min(c.end - c.start, budget); budget -= dur;
+        const info = await ff.probe(ff.requireTool(this.tools.ffprobe, 'ffprobe'), c.mediaPath).catch(() => null);
+        if (!info || !info.width) continue;
+        const samples = await this.analyzeFacesImpl({ ffmpeg: this.ffmpeg(), file: c.mediaPath, start: c.inPoint, duration: dur, srcW: info.width, srcH: info.height, fps: 1, onProgress: p => onProgress && onProgress(p) });
+        for (const smp of samples) {
+          const f = (smp.faces || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0];
+          if (f) faces.push({ time: c.start + smp.t, box: SZ.faceToFrame(f, { srcW: info.width, srcH: info.height, seqW: s.width, seqH: s.height }) });
+        }
+      }
+    }
+    const cs = this.settings.captionStyle || {};
+    const cy = typeof cs.y === 'number' ? cs.y : cs.position === 'top' ? 0.16 : cs.position === 'center' ? 0.5 : 0.8;
+    const captionBox = { x: 0.08, y: cy - 0.045, w: 0.84, h: 0.09 };
+    const r = SZ.check({ platform, faces, captionBox });
+    if (addMarkers) {
+      const marks = r.issues.filter(i => i.time !== null).map(i => ({ time: i.time, name: 'Safe zone', comment: i.text, color: 'red' }));
+      if (marks.length) await this.host('addMarkers', { markers: marks });
+    }
+    return { ...r, vertical, faces: faces.length, captionY: cy };
+  }
+
+  /** Put the platform's UI guide (transparent PNG) on the top track — undo removes it. */
+  async safeZoneGuide({ platform = 'tiktok' } = {}) {
+    if (!this.renderOverlayImpl) throw new Error('رسم الدليل مش متاح هنا');
+    const s = await this.seq();
+    const out = path.join(config.cacheDir('guides'), `safe-${platform}-${s.width}x${s.height}.png`);
+    if (!fs.existsSync(out)) await this.renderOverlayImpl({ platform, width: s.width, height: s.height, out });
+    const top = s.video.reduce((m, tr, i) => (tr.clips.length ? i : m), 0);
+    return this.op('دليل المنطقة الآمنة', () => this.host('placeFile', { path: out, time: 0, kind: 'video', track: -1, minTrack: top + 1, duration: Math.max(1, s.duration), bin: 'EditFast/Guides' }));
+  }
+
+  /** Move the animated captions just above the platform's bottom UI. */
+  safeCaptions({ platform = 'all' } = {}) {
+    const y = require('./safeZones').captionY(platform);
+    this.saveSettings({ captionStyle: { ...(this.settings.captionStyle || {}), y } });
+    return { y };
+  }
+
+  /* ---------- EditFast Link: ربط الملفات الناقصة ---------- */
+  async relinkScan({ dirs = [], onProgress } = {}) {
+    const R = require('./relink');
+    const r = await this.hostRaw('listOffline', {});
+    const items = r.items || [];
+    if (!items.length) return { items: [], searched: [], indexed: 0 };
+    let proj = ''; try { proj = (await this.hostRaw('projectPath', {})).path || ''; } catch (_) {}
+    const searched = Array.from(new Set([...dirs, ...R.suggestDirs(items.map(i => i.path), proj)]));
+    const index = R.buildIndex(searched, { onProgress });
+    return { items: R.plan(items, index), searched, indexed: index.count };
+  }
+  async relinkApply(items, onProgress) {
+    let done = 0; const failed = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i], target = it.target || (it.match && it.match.path);
+      if (!target) { onProgress && onProgress((i + 1) / items.length, it.name); continue; }
+      try { await this.hostRaw('relinkMedia', { id: it.id, path: target }); done++; } catch (e) { failed.push({ name: it.name, error: e.message }); }
+      onProgress && onProgress((i + 1) / items.length, it.name);
+    }
+    return { done, failed };
   }
 }
 

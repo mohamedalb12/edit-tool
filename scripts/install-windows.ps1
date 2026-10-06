@@ -11,6 +11,12 @@ Copy-Item (Join-Path $src 'README.md') $dest -ErrorAction SilentlyContinue
 Write-Host "==> تفعيل الإضافات الغير موقّعة (PlayerDebugMode)"
 foreach ($v in 9,10,11,12,13) { New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name 'PlayerDebugMode' -Value '1' }
 
+Write-Host "==> yt-dlp (تحميل الفيديوهات من اللينكات)"
+if (-not (Get-Command yt-dlp -ErrorAction SilentlyContinue)) {
+  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id yt-dlp.yt-dlp -e --accept-source-agreements --accept-package-agreements }
+  else { Write-Warning 'ثبّت yt-dlp من https://github.com/yt-dlp/yt-dlp/releases وحدد مكانه من إعدادات EditFast' }
+}
+
 Write-Host "==> ffmpeg"
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
   if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements }

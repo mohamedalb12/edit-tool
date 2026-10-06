@@ -17,8 +17,9 @@ if command -v brew >/dev/null 2>&1; then
   command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
   command -v whisper-cli >/dev/null 2>&1 || brew install whisper-cpp
   command -v node >/dev/null 2>&1 || brew install node
+  command -v yt-dlp >/dev/null 2>&1 || brew install yt-dlp
 else
-  echo "!! مفيش Homebrew — ثبّته من https://brew.sh وبعدين: brew install ffmpeg whisper-cpp"
+  echo "!! مفيش Homebrew — ثبّته من https://brew.sh وبعدين: brew install ffmpeg whisper-cpp yt-dlp"
 fi
 if command -v npm >/dev/null 2>&1; then
   echo "==> محرك المشاهد Pro (Remotion) — مرة واحدة"

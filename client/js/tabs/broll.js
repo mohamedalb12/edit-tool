@@ -16,7 +16,7 @@
           var thumb = h('div', { class: 'thumb' }, it.thumb ? h('img', { src: EF.fileUrl(it.thumb), loading: 'lazy' }) : h('span', null, '🎞️'));
           var vid = null;
           grid.appendChild(h('div', { class: 'tile', title: (it.author ? '© ' + it.author + ' — ' : '') + 'دوس تحطها عند رأس التشغيل',
-            onmouseenter: function () { if (it.type === 'video' && it.preview) { vid = h('video', { src: EF.fileUrl(it.preview), muted: true, autoplay: true, loop: true }); UI.empty(thumb).appendChild(vid); } },
+            onmouseenter: function () { if (!vid && it.type === 'video' && it.preview) { vid = h('video', { src: EF.fileUrl(it.preview), muted: true, autoplay: true, loop: true }); UI.empty(thumb).appendChild(vid); } },
             onmouseleave: function () { if (vid) { vid.pause(); UI.empty(thumb).appendChild(it.thumb ? h('img', { src: EF.fileUrl(it.thumb) }) : h('span', null, '🎞️')); vid = null; } },
             onclick: function () { UI.safe('بيحمّل ويحط اللقطة', function () { return S.brollPlace({ item: it, duration: dur }).then(function (r) { UI.toast('اتحطت على V' + (r.track + 1) + ' ✓'); }); }); }
           }, h('span', { class: 'badge' }, it.source + (it.duration ? ' · ' + Math.round(it.duration) + 's' : '')), thumb));

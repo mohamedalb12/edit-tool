@@ -84,6 +84,7 @@
           events: {
             onText: function (t) { if (t && t.trim()) state.ui.add('ai', t.trim()); },
             onTool: function (name) { state.ui.pending.push(state.ui.add('tool', toolLabel(name))); },
+            onUsage: function (u) { state.usage = u; if (state.ui.usage) state.ui.usage(u); },
             onToolResult: function (name, r) {
               // tools run in order, so the oldest pending line belongs to this result (an ask_user box may sit in between)
               var line = state.ui.pending.shift(); if (!line) return;
@@ -105,13 +106,23 @@
       }
       input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) go(); });
 
-      var suggestions = ['إيه اللي عند رأس التشغيل؟', 'مونتج الفيديو ده كله بذوقي', 'شيل السكتات والتكرار وابدأ بهوك قوي', 'ابني مشهد افتتاحي فيه اسم القناة', 'نزّل كابشن كلمة كلمة', 'حط مؤثرات صوت على اللحظات المهمة'];
+      // token meter: how much this conversation used and how much came back from the prompt cache (≈10% price)
+      var usageTxt = h('span', { class: 'hint ltr' }, '');
+      var usageRow = h('div', { class: 'row usage', title: 'الكاش بيوفّر: الجزء المتكرر من المحادثة بيتقري من الكاش بسعر أقل بكتير' }, h('label', null, 'التوكنز'), usageTxt);
+      function k(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+      state.ui.usage = function (u) {
+        if (!document.body.contains(usageTxt)) return;
+        usageTxt.textContent = k(u.prompt) + ' in · ' + k(u.completion) + ' out' + (u.cached ? ' · ' + Math.round((u.cached / Math.max(1, u.prompt)) * 100) + '% من الكاش' : '') + (u.cost ? ' · $' + u.cost.toFixed(3) : '');
+      };
+      if (state.usage) state.ui.usage(state.usage); else usageTxt.textContent = '—';
+
+      var suggestions = ['إيه اللي عند رأس التشغيل؟', 'مونتج الفيديو ده كله بذوقي', 'مونتجه بستايل كولاج آرت', 'اعمل 3 مشاهد ثري دي من لقطات الفيديو', 'شيل السكتات والتكرار وابدأ بهوك قوي', 'ابني مشهد افتتاحي فيه اسم القناة', 'نزّل كابشن كلمة كلمة', 'حط مؤثرات صوت على اللحظات المهمة'];
 
       view.appendChild(UI.card(null,
         UI.row(h('label', null, 'المستوى'), UI.seg([{ value: 'strong', label: 'قوي' }, { value: 'max', label: 'قوي جدًا' }], level, function (v) {
           level = state.level = v; S.saveSettings({ agentLevel: v }); picker();
         }), h('span', { class: 'spacer' }), UI.btn('محادثة جديدة', function () { state.agent = null; state.log = []; UI.empty(chat); }, 'small')),
-        pickerWrap,
+        pickerWrap, usageRow,
         UI.hint('بيشتغل بس على السيكوينس المفتوحة وأدوات الإضافة. أي عملية بتشيل أجزاء بتتعمل على نسخة.')));
       // what the AI editor can see right now — refreshed while this tab is open
       var seeTxt = h('span', { class: 'grow' }, 'بيقرا السيكوينس…');

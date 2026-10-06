@@ -50,6 +50,11 @@
     var r = window.cep.fs.showOpenDialogEx(false, false, title || 'اختار ملف', '', types || []);
     return r && r.data && r.data[0] || null;
   };
+  EF.pickFiles = function (title, types) {
+    if (EF.test && EF.test.pickFiles) return EF.test.pickFiles();
+    var r = window.cep.fs.showOpenDialogEx(true, false, title || 'اختار ملفات', '', types || []);
+    return (r && r.data) || [];
+  };
   EF.openUrl = function (url) {
     if (EF.isCEP && window.cep && window.cep.util) window.cep.util.openURLInDefaultBrowser(url); else window.open(url, '_blank');
   };

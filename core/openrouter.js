@@ -28,6 +28,24 @@ const FEATURES = [
   { id: 'broll', label: 'كلمات بحث الـ B-Roll', def: 'anthropic/claude-haiku-4.5' }
 ];
 
+/**
+ * Prompt caching: the system prompt + tool list (and the conversation so far) are identical on every step of the
+ * agent loop. Anthropic models need explicit cache breakpoints; OpenAI/Gemini/DeepSeek cache automatically.
+ * Cached input costs ~10% of normal input, so long editing sessions get much cheaper.
+ */
+function withCache(model, messages) {
+  if (!/^anthropic\//.test(String(model || ''))) return messages;
+  const mark = text => [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
+  const out = messages.map(m => m);
+  const sys = out.findIndex(m => m.role === 'system' && typeof m.content === 'string');
+  if (sys >= 0) out[sys] = { ...out[sys], content: mark(out[sys].content) };
+  // the newest user message: everything before it (incl. earlier tool rounds) is re-read from cache on the next step
+  for (let i = out.length - 1; i > sys; i--) {
+    if (out[i].role === 'user' && typeof out[i].content === 'string' && out[i].content.length > 200) { out[i] = { ...out[i], content: mark(out[i].content) }; break; }
+  }
+  return out;
+}
+
 function modelFor(featureId, settings = {}) {
   const f = FEATURES.find(x => x.id === featureId);
   return (settings.models && settings.models[featureId]) || settings.defaultModel || (f && f.def) || FALLBACK_MODELS[0].id;
@@ -81,8 +99,8 @@ class OpenRouter {
   }
 
   /** OpenAI-style chat completion. Returns the assistant message object. */
-  async chat({ model, messages, tools, temperature, maxTokens = 4096, jsonMode = false }) {
-    const body = { model, messages, max_tokens: maxTokens };
+  async chat({ model, messages, tools, temperature, maxTokens = 4096, jsonMode = false, cache = true }) {
+    const body = { model, messages: cache ? withCache(model, messages) : messages, max_tokens: maxTokens, usage: { include: true } };
     if (temperature !== undefined) body.temperature = temperature;
     if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
     if (jsonMode) body.response_format = { type: 'json_object' };
@@ -108,4 +126,4 @@ class OpenRouter {
   }
 }
 
-module.exports = { OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, BASE };
+module.exports = { OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, withCache, BASE };

@@ -4,6 +4,8 @@
 const { TMP, makeAudio, makeClicks, mockResponse } = require('../helpers');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// prompt caching sends Anthropic system/user text as content parts
+const txt = c => (Array.isArray(c) ? c.map(p => p.text || '').join('') : c);
 const fs = require('fs');
 const path = require('path');
 const config = require('../../core/config');
@@ -122,7 +124,7 @@ test('المؤثرات الصوتية + المؤثرات التلقائية + B-
   const fetchImpl = async (url, opts = {}) => {
     if (url.includes('openrouter')) {
       const body = JSON.parse(opts.body);
-      const sys = body.messages[0].content;
+      const sys = txt(body.messages[0].content);
       if (/مؤثر|المؤثرات/.test(sys)) return mockResponse({ choices: [{ message: { content: JSON.stringify({ effects: [{ time: 0.8, type: 'sfx', prompt: 'dramatic hit', reason: 'مفاجأة' }, { time: 1.6, type: 'motion', preset: 'punch-in' }] }) } }] });
       return mockResponse({ choices: [{ message: { content: 'city at night' } }] });
     }
@@ -185,8 +187,8 @@ test('EditFast AI agent: OpenRouter tool loop, asks taste once, stays in scope, 
   const out = await agent.send('اعمل مشهد افتتاحي باسم القناة وشيل السكتات');
   assert.equal(out.text, 'خلصت: شلت السكتات وبنيت المشهد الافتتاحي.');
   assert.equal(requests[0].model, 'anthropic/claude-opus-5.5');
-  assert.match(requests[0].messages[0].content, /شغلتك الوحيدة/);
-  assert.match(requests[0].messages[0].content, /اسأله مرة واحدة/);
+  assert.match(txt(requests[0].messages[0].content), /شغلتك الوحيدة/);
+  assert.match(txt(requests[0].messages[0].content), /اسأله مرة واحدة/);
   assert.ok(requests[0].tools.length >= 20);
   assert.deepEqual(events.filter(e => e.startsWith('ok:') || e.startsWith('fail:')), ['ok:get_project_state', 'ok:ask_user', 'ok:save_style', 'ok:remove_silences', 'ok:build_scene', 'fail:apply_motion']);
   const toolMsg = requests[1].messages.find(m => m.role === 'tool' && m.tool_call_id === 'c2');
@@ -196,7 +198,7 @@ test('EditFast AI agent: OpenRouter tool loop, asks taste once, stays in scope, 
   assert.ok(h.pr.project.activeSeq.v.some(t => t.items.some(c => /scene-/.test(c.projectItem.mediaPath))));
   // a new agent now has the saved taste in its system prompt and won't ask again
   const a2 = new EditFastAgent({ llm: S.llm, model: 'x', services: S, style: config.load().style });
-  assert.match(a2.messages[0].content, /ذوق المونتير محفوظ/);
+  assert.match(txt(a2.messages[0].content), /ذوق المونتير محفوظ/);
 });
 
 test('AI sees the sequence: live snapshot (clips, playhead, selection, markers, effects, transcript near playhead)', async () => {
@@ -235,11 +237,11 @@ test('AI answers questions about the sequence straight from the snapshot without
   const agent = new EditFastAgent({ llm: S.llm, model: 'm', services: S, style: { primary: '#fff' } });
   const out = await agent.send('هو قال السعر كام؟');
   assert.match(out.text, /ميتين/);
-  const user = requests[0].messages.find(m => m.role === 'user').content;
+  const user = txt(requests[0].messages.find(m => m.role === 'user').content);
   assert.match(user, /^<sequence_now>/);
   assert.match(user, /السعر النهارده ميتين جنيه بس/);
   assert.match(user, /هو قال السعر كام؟$/);
-  assert.match(requests[0].messages[0].content, /جاوب منها على طول/);
+  assert.match(txt(requests[0].messages[0].content), /جاوب منها على طول/);
   assert.deepEqual(calls.filter(c => !['sequenceInfo'].includes(c)), [], 'no editing calls');
   delete process.env.FAKE_WHISPER_WORDS;
 });
@@ -354,7 +356,7 @@ test('one-click auto edit: runs the approved steps in order, AI picks the hook, 
   process.env.FAKE_WHISPER_WORDS = 'النهارده هنتكلم عن المونتاج النهارده هنتكلم عن المونتاج السريع والنتيجة هتبهرك';
   const f = makeAudio('auto.wav', [{ tone: 300, dur: 3 }, { silence: 1.2 }, { tone: 300, dur: 3 }]);
   const fetchImpl = async (url, opts) => {
-    const b = JSON.parse(opts.body), sys = b.messages[0].content;
+    const b = JSON.parse(opts.body), sys = txt(b.messages[0].content);
     if (/أقوى جملة/.test(sys)) return mockResponse({ choices: [{ message: { content: '{"start":3.2,"end":4.4,"reason":"وعد بنتيجة"}' } }] });
     if (/المؤثرات/.test(sys)) return mockResponse({ choices: [{ message: { content: '{"effects":[{"time":1,"type":"motion","preset":"punch-in"}]}' } }] });
     return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
@@ -382,7 +384,7 @@ test('reels + shorts: reframe every V1 clip into a new vertical sequence; AI pic
   const src = path.join(require('../helpers').TMP, 'wide2.mp4');
   require('child_process').execFileSync(require('../helpers').FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=20:r=25', '-f', 'lavfi', '-i', 'sine=f=300:d=20', '-shortest', '-pix_fmt', 'yuv420p', src]);
   const fetchImpl = async (url, opts) => {
-    const sys = JSON.parse(opts.body).messages[0].content;
+    const sys = txt(JSON.parse(opts.body).messages[0].content);
     if (/شورتس/.test(sys)) return mockResponse({ choices: [{ message: { content: JSON.stringify({ shorts: [{ start: 2, end: 14, title: 'أقوى لحظة', score: 9 }, { start: 3, end: 10, title: 'متداخل', score: 7 }, { start: 0, end: 1, title: 'قصير', score: 8 }] }) } }] });
     return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
   };
@@ -416,7 +418,7 @@ test('animated captions + translation: cards rendered with word timings, placed 
   process.env.FAKE_WHISPER_WORDS = 'أهلا بيكم في حلقة جديدة عن المونتاج السريع جدا';
   const f = makeAudio('capv.wav', [{ tone: 250, dur: 5 }]);
   const fetchImpl = async (url, opts) => {
-    const b = JSON.parse(opts.body); const sys = b.messages[0].content;
+    const b = JSON.parse(opts.body); const sys = txt(b.messages[0].content);
     if (/Translate each subtitle/.test(sys)) { const lines = JSON.parse(b.messages[1].content); return mockResponse({ choices: [{ message: { content: JSON.stringify({ lines: lines.map(l => 'EN: ' + l.length) }) } }] }); }
     return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
   };

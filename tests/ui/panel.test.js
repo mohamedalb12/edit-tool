@@ -44,9 +44,10 @@ async function open(id) { await page.click(`#nav button[data-id="${id}"]`); awai
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 20 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
+test('boots: 27 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'auto', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'organize', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'thumb', 'search', 'broll', 'settings']);
+  assert.deepEqual(ids, ['agent', 'auto', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'safezones', 'organize', 'relink', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'templates', 'carousel', 'icons', 'thumb', 'search', 'broll', 'websearch', 'download', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 27);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
   assert.deepEqual(errors, []);
@@ -265,7 +266,7 @@ test('text motion: titles/card headings/AI replies reveal word by word, splash l
 
 test('narrow panel (320px): no horizontal overflow on any tab', async () => {
   await page.setViewportSize({ width: 320, height: 700 });
-  for (const id of ['agent', 'auto', 'quickcut', 'motion', 'titles', 'glass', 'pro', 'reels', 'audio', 'thumb', 'settings', 'curves']) {
+  for (const id of ['agent', 'auto', 'quickcut', 'motion', 'titles', 'glass', 'pro', 'reels', 'audio', 'thumb', 'settings', 'curves', 'templates', 'carousel', 'icons', 'sfx', 'download', 'websearch', 'safezones', 'relink']) {
     await open(id);
     const over = await page.evaluate(() => document.getElementById('view').scrollWidth - document.getElementById('view').clientWidth);
     assert.ok(over <= 1, id + ' overflows by ' + over);
@@ -415,7 +416,7 @@ test('thumbnail styles render over a real photo (Arabic title, highlight word, r
 test('مشاهد Pro: AI director designs, elements are editable, gallery adds, preview + render', async () => {
   await open('pro'); await clearCalls();
   assert.ok(await page.isVisible('text=محرك Remotion جاهز'));
-  assert.equal(await page.locator('.tile[data-type]').count(), 12);
+  assert.equal(await page.locator('.tile[data-type]').count(), 25, 'every component but the icon (that one comes from the icon library)');
   await page.fill('#view textarea', 'افتتاحية لقناة مونتاج');
   await clickText('صمّم المشهد بالذكاء الاصطناعي');
   await page.waitForSelector('text=عنوان حركي');
@@ -494,3 +495,184 @@ test('كابشن متحرك from the transcription tab: style pick, position, re
   assert.deepEqual(c.find(x => x.name === 'addAnimatedCaptions').args, { style: 'karaoke', position: 'top' });
   assert.equal(c.find(x => x.name === 'translateCaptions').args.lang, 'English');
 });
+
+test('القوالب: animated previews on hover, favourites, edit texts, add to the timeline', async () => {
+  await open('templates'); await clearCalls();
+  assert.ok(await page.locator('.tpl-grid .tile').count() >= 30);
+  const tile = page.locator('.tpl-grid .tile[data-id="t-cube"]');
+  await tile.hover();
+  assert.equal(await tile.locator('video').getAttribute('src'), '../assets/templates/t-cube.mp4');
+  await tile.locator('.star').click();
+  await page.locator('.seg button', { hasText: 'المفضلة' }).click();
+  assert.equal(await page.locator('.tpl-grid .tile').count(), 1);
+  await page.locator('.tpl-grid .tile').first().click();
+  await page.locator('.tpl-editor input.grow').nth(0).fill('الشغل بقى');
+  await clickText('حطه على التايملين');
+  const c = await page.evaluate(() => window.__calls.find(x => x.name === 'addTemplate').args);
+  assert.equal(c.id, 't-cube'); assert.equal(c.values['0.prefix'], 'الشغل بقى'); assert.equal(c.preview, false);
+  await page.locator('.seg button', { hasText: 'الكل' }).first().click();
+  await page.locator('.seg button', { hasText: 'كولاج' }).click();
+  assert.equal(await page.locator('.tpl-grid .tile').count(), 3);
+  await shot('24-templates');
+});
+
+test('كاروسيل 3D: live CSS 3D preview follows the controls, files, render as one clip', async () => {
+  await open('carousel'); await clearCalls();
+  assert.equal(await page.locator('.c3d-card').count(), 6, 'placeholder cards before files are chosen');
+  await clickText('ضيف صور/فيديوهات');
+  assert.equal(await page.locator('.c3d-card').count(), 3);
+  const t1 = await page.locator('.c3d-ring').evaluate(e => e.style.transform);
+  await page.waitForTimeout(300);
+  assert.notEqual(await page.locator('.c3d-ring').evaluate(e => e.style.transform), t1, 'it spins');
+  await page.locator('.seg button', { hasText: 'كوفر فلو' }).click();
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('.c3d-card').first().evaluate(e => e.style.transform), /translate3d/);
+  await page.locator('.seg button', { hasText: 'شفاف' }).click();
+  await page.fill('input[placeholder^="عنوان تحت"]', 'أحسن لقطات');
+  await clickText('ارندر وحطه');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'carousel3D').args);
+  assert.deepEqual(a, { files: 3, layout: 'coverflow', speed: 1, tilt: 10, background: 'transparent', preview: false, title: 'أحسن لقطات' });
+  await page.locator('.seg button', { hasText: 'دايري' }).click();
+  await shot('25-carousel-3d');
+});
+
+test('أيقونات: organised categories, search in Arabic, animated preview, add with animation', async () => {
+  await open('icons'); await clearCalls();
+  assert.ok(await page.locator('.icon-cell').count() >= 40, 'social logos');
+  await page.locator('.chip', { hasText: 'عربيات' }).click();
+  assert.ok(await page.locator('.icon-cell').count() >= 25);
+  await page.fill('input[placeholder^="دوّر"]', 'بيت');
+  assert.ok(await page.locator('.icon-cell').count() >= 1);
+  await page.locator('.icon-cell').first().click();
+  assert.ok(await page.isVisible('.icon-preview.a-draw'));
+  await page.locator('.seg button', { hasText: 'نطّة' }).click();
+  await page.locator('.seg button', { hasText: 'زجاج' }).click();
+  assert.ok(await page.isVisible('.icon-preview.a-bounce.b-glass'));
+  await page.fill('input[placeholder^="كلمة تحت"]', 'للبيع');
+  await clickText('حطها على التايملين');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addIcon').args);
+  assert.equal(a.anim, 'bounce'); assert.equal(a.badge, 'glass'); assert.equal(a.label, 'للبيع'); assert.match(a.id, /^l-/);
+  await page.locator('.chip', { hasText: 'سوشيال ميديا' }).click();
+  await shot('26-icons');
+});
+
+test('مؤثرات ترند + مزيكا AI: offline pack places on click, music generation', async () => {
+  await open('sfx'); await clearCalls();
+  assert.equal(await page.locator('.sfx-item').count(), 3);
+  await page.locator('.sfx-item', { hasText: 'إمباكت' }).click();
+  await page.waitForTimeout(200);
+  await clickText('ضيف الباقة لمكتبتي');
+  await page.fill('textarea[placeholder^="اوصف المزيكا"]', 'لو فاي هادية');
+  await clickText('ولّد المزيكا');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'placeSfx').args, { id: 'impact' });
+  assert.ok(c.find(x => x.name === 'sfxPackInstall'));
+  assert.deepEqual(c.find(x => x.name === 'generateMusic').args, { prompt: 'لو فاي هادية', seconds: 30, instrumental: true });
+  assert.equal(await page.locator('audio[controls]').count(), 1);
+});
+
+test('تحميل: analyse a link, qualities from the video, start/end, download onto the timeline', async () => {
+  await open('download'); await clearCalls();
+  await page.fill('input[placeholder^="https://"]', 'https://youtu.be/abc');
+  assert.equal(await page.locator('.chip', { hasText: 'يوتيوب' }).count(), 1);
+  await clickText('حلّل اللينك');
+  await page.waitForSelector('.dl-info');
+  const quals = await page.locator('.seg button').allTextContents();
+  assert.deepEqual(quals, ['أعلى جودة', '1080p', '720p', '480p', 'صوت بس (MP3)'], 'no 4K for a 1080p video');
+  await page.locator('.seg button', { hasText: '720p' }).click();
+  await page.fill('input[placeholder="0:00"]', '1:10'); await page.fill('input[placeholder="للآخر"]', '1:40');
+  await clickText('نزّل');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'downloadMedia').args);
+  assert.deepEqual(a, { url: 'https://youtu.be/abc', quality: '720', start: '1:10', end: '1:40', place: true });
+  await shot('27-download');
+});
+
+test('بحث النت: sources, organised results (source + shape filters), place or import, Pinterest link', async () => {
+  await open('websearch'); await clearCalls();
+  await page.fill('input[placeholder^="دوّر على صورة"]', 'برج القاهرة');
+  await clickText('دوّر');
+  await page.waitForSelector('.grid .tile');
+  assert.equal(await page.locator('.grid .tile').count(), 2);
+  assert.match(await page.textContent('#view'), /Google \(no key\)/);
+  await page.locator('.chip', { hasText: 'طولي' }).click();
+  assert.equal(await page.locator('.grid .tile').count(), 1);
+  await page.locator('.chip', { hasText: 'كل الأشكال' }).click();
+  await page.locator('.chip', { hasText: 'Openverse' }).click();
+  await page.locator('.grid .tile').first().click();
+  await clickText('حطها على التايملين');
+  await clickText('ضيفها للمشروع بس');
+  await page.fill('input[placeholder^="الصق لينك"]', 'https://pin.it/abc');
+  await clickText('نزّل اللينك');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'webSearch').args, { q: 'برج القاهرة', type: 'image', sources: ['openverse', 'commons', 'pexels'] });
+  assert.deepEqual(c.filter(x => x.name === 'webImport').map(x => x.args), [{ id: 'openverse-1', url: undefined, place: true }, { id: 'openverse-1', url: undefined, place: false }, { id: null, url: 'https://pin.it/abc', place: true }]);
+  await shot('28-web-search');
+});
+
+test('منطقة آمنة: phone preview with the platform UI, check, markers, safe captions, guide layer', async () => {
+  await open('safezones'); await clearCalls();
+  assert.match(await page.textContent('#view'), /السيكوينس دي أفقية/);
+  const red = await page.locator('canvas.sz-canvas').evaluate(c => { const d = c.getContext('2d').getImageData(c.width / 2, c.height - 8, 1, 1).data; return d[0] > d[1] + 30; });
+  assert.ok(red, 'bottom of the frame is tinted as unsafe');
+  await page.locator('.seg button', { hasText: 'ريلز' }).click();
+  await clickText('افحص الفيديو');
+  await page.waitForSelector('.list .item');
+  assert.equal(await page.locator('.list .item').count(), 2);
+  await clickText('انقل الكابشن للمكان الآمن');
+  await clickText('حط ماركرز على المشاكل');
+  await clickText('حط الدليل على التايملين');
+  await page.locator('.list .item.click').first().click();
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.filter(x => x.name === 'safeZoneCheck').map(x => x.args), [{ platform: 'reels' }, { platform: 'reels', addMarkers: true }]);
+  assert.deepEqual(c.find(x => x.name === 'safeCaptions').args, { platform: 'reels' });
+  assert.deepEqual(c.find(x => x.name === 'safeZoneGuide').args, { platform: 'reels' });
+  assert.equal(c.find(x => x.name === 'setPlayhead').args, 4);
+  await page.evaluate(() => { document.getElementById('view').scrollTop = 120; });
+  await shot('29-safe-zones');
+});
+
+test('ربط الملفات: scan, found vs missing, pick by hand, relink one by one', async () => {
+  await open('relink'); await clearCalls();
+  await clickText('ضيف فولدر');
+  await clickText('دوّر على الملفات الناقصة');
+  await page.waitForSelector('.relink-list .item');
+  assert.equal(await page.locator('.relink-list .item').count(), 2);
+  assert.equal(await page.locator('.rl-st.found').count(), 1); assert.equal(await page.locator('.rl-st.missing').count(), 1);
+  await page.locator('.relink-list .item').nth(1).locator('button', { hasText: 'اختار' }).click();
+  await clickText('اربط المختار');
+  await page.waitForSelector('.rl-st.done');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'relinkScan').args, { dirs: ['/picked/folder'] });
+  assert.deepEqual(c.filter(x => x.name === 'relinkApply').map(x => x.args), [['n1'], ['n2']], 'one by one');
+  assert.equal(await page.locator('.rl-st.done').count(), 2);
+  await shot('30-relink');
+});
+
+test('مشاهد Pro: style packs (collage, 3D…) for one scene and for the whole video', async () => {
+  await open('pro'); await clearCalls();
+  assert.ok(await page.locator('.style-chip').count() >= 17, 'style edit chips + director chips');
+  await page.locator('.style-chips').first().locator('.style-chip[data-style="3d"]').click();
+  await page.fill('input[placeholder^="عايز إيه بالظبط"]', 'ركّز على الأرقام');
+  await clickText('مونتج الفيديو بالاستايل ده');
+  await page.waitForFunction(() => /مشاهد ثري دي نزلت/.test(document.getElementById('view').textContent));
+  await page.locator('.style-chips').nth(1).locator('.style-chip[data-style="collage"]').click();
+  await page.fill('textarea', 'افتتاحية رحلة');
+  await clickText('صمّم المشهد بالذكاء الاصطناعي');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'styleEdit').args, { style: '3d', count: 3, brief: 'ركّز على الأرقام' });
+  assert.equal(c.find(x => x.name === 'designProScene').args.style, 'collage');
+  assert.ok(await page.locator('.tile[data-type="carousel3D"]').count() === 1 && await page.locator('.tile[data-type="icon"]').count() === 0);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('31-style-edit');
+});
+
+test('agent token meter shows usage and the prompt-cache share', async () => {
+  await open('agent');
+  await page.evaluate(() => { EF_TEST.setAgentScript([{ content: 'تمام', usage: { prompt_tokens: 12000, completion_tokens: 300, prompt_tokens_details: { cached_tokens: 9000 }, cost: 0.0123 } }]); });
+  await page.fill('textarea', 'سؤال');
+  await clickText('ابعت');
+  await page.waitForFunction(() => /75% من الكاش/.test(document.querySelector('.row.usage').textContent));
+  assert.match(await page.textContent('.row.usage'), /12\.0k in · 300 out · 75% من الكاش · \$0\.012/);
+});
+
+test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

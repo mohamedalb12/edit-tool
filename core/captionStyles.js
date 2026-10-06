@@ -39,7 +39,7 @@
       if (lines[L].length && lw[L] + gap + ww > maxW) { lines.push([]); lw.push(0); L++; }
       lines[L].push({ i: i, t: t, w: ww }); lw[L] += (lines[L].length > 1 ? gap : 0) + ww;
     });
-    var lineH = px * 1.32, baseY = o.position === 'top' ? H * 0.16 : o.position === 'center' ? H * 0.5 - (lines.length - 1) * lineH / 2 : H * 0.82 - (lines.length - 1) * lineH;
+    var lineH = px * 1.32, baseY = typeof o.y === 'number' ? H * o.y - (lines.length - 1) * lineH / 2 : o.position === 'top' ? H * 0.16 : o.position === 'center' ? H * 0.5 - (lines.length - 1) * lineH / 2 : H * 0.82 - (lines.length - 1) * lineH;
     return lines.map(function (ln, li) {
       var x = rtl ? (W + lw[li]) / 2 : (W - lw[li]) / 2, out = [];
       ln.forEach(function (wd) {

@@ -53,7 +53,8 @@
       view.appendChild(UI.card('المفاتيح', UI.hint('بتتحفظ على جهازك بس (~/.editfast). كل الذكاء الاصطناعي بيعدّي من OpenRouter بمفتاحك.'),
         keyInput('openrouter', 'OpenRouter', 'https://openrouter.ai/keys'), UI.row(testBtn),
         keyInput('elevenlabs', 'ElevenLabs (SFX)', 'https://elevenlabs.io/app/settings/api-keys'),
-        keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/')));
+        keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/'),
+        keyInput('google', 'Google Custom Search (بحث الصور)', 'https://developers.google.com/custom-search/v1/introduction'), keyInput('googleCx', 'Google Search Engine ID (cx)', 'https://programmablesearchengine.google.com/')));
       var testBox = h('div', { class: 'list', style: { display: 'none' } });
       var testAll = UI.btn('اختبر كل الموديلات', function () {
         UI.empty(testBox); testBox.style.display = '';
@@ -68,7 +69,7 @@
       }, 'primary');
       view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('اختار الموديل اللي يشغّل كل ميزة. اكتب أي ID من OpenRouter أو حمّل القائمة.'), UI.row(loadBtn, testAll), testBox, modelsBox));
       view.appendChild(UI.card('البرامج المحلية (أوفلاين)', pathInput('ffmpeg', 'ffmpeg'), pathInput('whisper', 'whisper.cpp'), pathInput('whisperModel', 'موديل Whisper'),
-        UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), pathInput('node', 'Node.js (للمشاهد Pro)'), pathInput('chrome', 'Chrome للـ Remotion (اختياري)'), stBox));
+        UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), pathInput('node', 'Node.js (للمشاهد Pro)'), pathInput('chrome', 'Chrome للـ Remotion (اختياري)'), pathInput('ytdlp', 'yt-dlp (التحميل من اللينكات)'), stBox));
       drawModels(); status();
     }
   });

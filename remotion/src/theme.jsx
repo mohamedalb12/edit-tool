@@ -1,5 +1,5 @@
 import React from 'react';
-import { staticFile, spring, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { staticFile, spring, interpolate, useCurrentFrame, useVideoConfig, Img, OffthreadVideo, random } from 'remotion';
 
 export const FONT = 'EFCairo';
 export const fontFaceCss = `
@@ -79,3 +79,18 @@ export const GradText = ({ th, children, style, colors }) => (
 
 /** Split text into words (keeps Arabic letters joined) */
 export function words(text) { return String(text || '').split(/\s+/).filter(Boolean); }
+
+/** A photo or video from the editor's disk (served by render.mjs), or a soft placeholder. */
+export const Media = ({ item, style, fit = 'cover', startFrom = 0, th }) => {
+  const box = { width: '100%', height: '100%', objectFit: fit, display: 'block', ...style };
+  if (item && item.src && item.kind === 'video') return <OffthreadVideo src={item.src} muted startFrom={startFrom} style={box} />;
+  if (item && item.src) return <Img src={item.src} style={box} />;
+  const label = typeof item === 'string' ? item : '';
+  const t = th || DEFAULT_THEME;
+  return (
+    <div style={{ ...box, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(135deg, ${t.primary}, ${t.secondary || '#EC4899'} 60%, ${t.accent})`, color: '#fff', fontFamily: t.fontStack || FONT, fontWeight: 900, fontSize: 48, textAlign: 'center', direction: dirOf(label) }}>{label}</div>
+  );
+};
+
+/** Deterministic pseudo-random in [a,b) */
+export function rnd(seed, a = 0, b = 1) { return a + random(String(seed)) * (b - a); }

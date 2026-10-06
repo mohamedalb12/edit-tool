@@ -716,6 +716,29 @@ EFAPI.setVolumeKeys = function (a) {
   return { keys: a.keys.length, baseDb: Math.round(baseDb * 10) / 10 };
 };
 
+/* EditFast Link: project items whose media is offline (missing on disk) */
+EFAPI.listOffline = function () {
+  var all = EF.walk(app.project.rootItem, '', []), out = [], i, it, off;
+  for (i = 0; i < all.length; i++) {
+    if (all[i].isBin) continue;
+    it = all[i].item; off = false;
+    try { off = it.isOffline(); } catch (e) { off = false; }
+    if (!off) continue;
+    try { if (it.isSequence()) continue; } catch (e2) {}
+    out.push({ id: it.nodeId, name: it.name, path: EF.mediaPath(it), bin: all[i].bin });
+  }
+  return { items: out };
+};
+
+EFAPI.relinkMedia = function (a) {
+  var it = EF.findByNodeId(a.id);
+  if (!it) throw new Error('item not found: ' + a.id);
+  try { if (it.canChangeMediaPath && !it.canChangeMediaPath()) throw new Error('cannot relink ' + it.name); } catch (e) { if (/cannot relink/.test(e.message)) throw e; }
+  var ok = it.changeMediaPath(a.path, true);
+  if (ok === false) throw new Error('relink refused: ' + it.name);
+  return { name: it.name, path: a.path };
+};
+
 EFAPI.projectPath = function () { return { path: app.project.path || '' }; };
 EFAPI.importFiles = function (a) { var i, n = 0; for (i = 0; i < a.paths.length; i++) { EF.importFile(a.paths[i], a.bin || 'EditFast'); n++; } return { imported: n }; };
 

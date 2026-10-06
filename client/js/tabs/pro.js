@@ -1,7 +1,18 @@
 /* مشاهد Pro — Remotion: المخرج الذكي بيصمم، وانت تعدّل وتعاين وتنزّل. */
 (function () {
   var EF = window.EF, UI = EF.ui, h = UI.h;
-  var state = { spec: null, brief: '', overlay: false, duration: 6 };
+  var state = { spec: null, brief: '', overlay: false, duration: 6, style: '', editStyle: 'collage', editCount: 3, editBrief: '' };
+  var SWATCH = { collage: ['#F3EADB', '#E63946', '#FFD166'], '3d': ['#0B0B14', '#7C5CFF', '#22D3EE'], neon: ['#05010F', '#00F0FF', '#FF2BD6'], minimal: ['#F5F5F2', '#111111', '#FF5A1F'], cinematic: ['#080706', '#C8A15A', '#F2E3C6'], popart: ['#FFE135', '#FF3B6B', '#2B6CFF'], glass: ['#0B0A12', '#8B5CF6', '#EC4899'], social: ['#0A0F1F', '#2563EB', '#22C55E'] };
+  function styleChips(packs, value, onchange, allowNone) {
+    var wrap = h('div', { class: 'style-chips' });
+    (allowNone ? [{ id: '', label: 'ستايلي' }] : []).concat(packs).forEach(function (p) {
+      var sw = SWATCH[p.id] || ['#2a2340', '#8B5CF6', '#FBBF24'];
+      wrap.appendChild(h('button', { type: 'button', class: 'style-chip' + (p.id === value ? ' on' : ''), 'data-style': p.id, onclick: function () {
+        Array.prototype.forEach.call(wrap.children, function (x) { x.classList.remove('on'); }); this.classList.add('on'); onchange(p.id);
+      } }, h('span', { class: 'sw', style: { background: 'linear-gradient(135deg,' + sw[0] + ' 0 40%,' + sw[1] + ' 40% 70%,' + sw[2] + ' 70%)' } }), p.label));
+    });
+    return wrap;
+  }
   EF.tabs.push({
     id: 'pro', icon: '🎞', label: 'مشاهد Pro', title: 'مشاهد Pro — Remotion',
     render: function (view) {
@@ -27,7 +38,7 @@
       var brief = h('textarea', { placeholder: 'اوصف المشهد… مثلاً: "افتتاحية لقناة بتشرح مونتاج، اسم القناة EditFast وبعدين 3 نقاط هنتعلمها وفي الآخر اشترك"', rows: 3 }, state.brief);
       brief.addEventListener('input', function () { state.brief = brief.value; });
       var design = UI.btn('صمّم المشهد بالذكاء الاصطناعي', function () {
-        UI.safe('المخرج بيصمم', function () { return S.designProScene({ brief: brief.value, duration: state.duration, transparent: state.overlay }).then(function (spec) { state.spec = spec; drawSpec(); UI.toast(spec.elements.length + ' عناصر — راجعهم وعاين'); }); }, design);
+        UI.safe('المخرج بيصمم', function () { return S.designProScene({ brief: brief.value, duration: state.duration, transparent: state.overlay, style: state.style || undefined }).then(function (spec) { state.spec = spec; drawSpec(); UI.toast(spec.elements.length + ' عناصر — راجعهم وعاين'); }); }, design);
       }, 'primary');
 
       function propInput(el, key, def) {
@@ -35,6 +46,11 @@
         if (t === 'boolean') return h('input', { type: 'checkbox', checked: !!v, onchange: function (e) { el.props[key] = e.target.checked; } });
         if (t.indexOf('enum:') === 0) return UI.select(t.slice(5).split('|').map(function (o) { return { value: o, label: o }; }), v, function (x) { el.props[key] = x; });
         if (t === 'bars') return h('input', { class: 'grow', value: (v || []).map(function (b) { return b.label + ':' + b.value; }).join('، '), placeholder: 'يناير:40، فبراير:65', onchange: function (e) { el.props[key] = e.target.value.split(/[،,]/).map(function (p) { var a = p.split(':'); return { label: (a[0] || '').trim(), value: +a[1] || 0 }; }).filter(function (b) { return b.label; }); } });
+        if (t === 'media[]') {
+          var lab = h('span', { class: 'hint' }, (v || []).length ? (v || []).length + ' ملف' : 'لقطات من الفيديو تلقائي');
+          return h('span', { class: 'row grow' }, lab, UI.btn('اختار', function () { var fs = EF.pickFiles('صور/فيديوهات'); if (fs && fs.length) { el.props[key] = fs.slice(0, 10); lab.textContent = fs.length + ' ملف'; } }, 'small'));
+        }
+        if (t === 'svg') return h('span', { class: 'hint' }, 'من مكتبة الأيقونات');
         if (t === 'string[]') return h('input', { class: 'grow', value: (v || []).join('، '), onchange: function (e) { el.props[key] = e.target.value.split(/[،,]/).map(function (x) { return x.trim(); }).filter(Boolean); } });
         return h('input', { class: 'grow', type: t === 'number' ? 'number' : 'text', value: v == null ? '' : v, onchange: function (e) { el.props[key] = t === 'number' ? +e.target.value : e.target.value; } });
       }
@@ -43,7 +59,7 @@
         UI.empty(specBox);
         if (!state.spec) return;
         var sp = state.spec;
-        var bgSel = UI.select(PRO.BACKGROUNDS.map(function (b) { return { value: b, label: { mesh: 'ميش ناعم', gradient: 'تدرج', grid: 'جريد تقني', particles: 'جزيئات', spotlight: 'سبوت لايت', solid: 'لون واحد', transparent: 'شفاف (فوق الفيديو)' }[b] }; }), sp.background.type, function (v) { sp.background = { type: v }; });
+        var bgSel = UI.select(PRO.BACKGROUNDS.map(function (b) { return { value: b, label: { mesh: 'ميش ناعم', gradient: 'تدرج', grid: 'جريد تقني', particles: 'جزيئات', spotlight: 'سبوت لايت', paper: 'ورق (كولاج)', halftone: 'هالفتون (بوب آرت)', studio: 'استوديو ثري دي', solid: 'لون واحد', transparent: 'شفاف (فوق الفيديو)' }[b] }; }), sp.background.type, function (v) { sp.background = { type: v }; });
         specBox.appendChild(UI.card('المشهد (' + sp.duration + ' ثانية)', UI.field('الخلفية', bgSel)));
         sp.elements.forEach(function (el, i) {
           var def = CAT[el.type].props;
@@ -70,7 +86,7 @@
 
       // gallery
       var gal = h('div', { class: 'grid' });
-      Object.keys(CAT).forEach(function (type) {
+      Object.keys(CAT).filter(function (k) { return k !== 'icon'; }).forEach(function (type) {
         gal.appendChild(h('div', { class: 'tile', 'data-type': type, onclick: function () {
           var props = {}; Object.keys(CAT[type].props).forEach(function (k) { props[k] = CAT[type].props[k][1]; });
           if (!state.spec) state.spec = { width: 1920, height: 1080, fps: 30, duration: 5, theme: {}, background: { type: state.overlay ? 'transparent' : 'mesh' }, elements: [] };
@@ -83,7 +99,24 @@
       });
 
       view.appendChild(engCard);
+      var packs = S.stylePacks();
+      // whole-video style edit: one AI request plans every scene, Remotion renders them all
+      var eBrief = h('input', { class: 'grow', placeholder: 'عايز إيه بالظبط؟ (اختياري) — مثلاً: ركّز على الأرقام والنصايح', value: state.editBrief, oninput: function (e) { state.editBrief = e.target.value; } });
+      var eProg = UI.progress(), eLog = h('div', { class: 'hint' });
+      var eGo = UI.btn('مونتج الفيديو بالاستايل ده', function () {
+        eProg.set(0);
+        UI.safe('مونتاج بالاستايل', function () {
+          return S.styleEdit({ style: state.editStyle, brief: state.editBrief, count: state.editCount, onStep: function (m, p) { eLog.textContent = m; eProg.set(p); UI.status(m, 'busy'); } })
+            .then(function (r) { eProg.set(1); eLog.textContent = r.scenes.length + ' مشاهد ' + r.label + ' نزلت على التايملين — تراجع من تبويب المونتاج الذكي لو مش عاجبك'; UI.toast('خلص ✓'); });
+        }, eGo);
+      }, 'primary');
+      view.appendChild(UI.card('مونتاج بالاستايل',
+        styleChips(packs, state.editStyle, function (v) { state.editStyle = v; }),
+        UI.field('عدد المشاهد', UI.slider(1, 8, 1, state.editCount, function (v) { return v; }, function (v) { state.editCount = v; })),
+        eBrief, UI.modelPicker('scene'), eProg, eLog, UI.row(eGo),
+        UI.hint('المخرج الذكي بيقرا كلام الفيديو ويشوف لقطاته ويخطط كل المشاهد في طلب واحد، وRemotion بيرندرها على جهازك (من غير توكنز) وتنزل فوق الفيديو في أماكنها.')));
       view.appendChild(UI.card('المخرج الذكي', brief,
+        UI.field('الاستايل', styleChips(packs, state.style, function (v) { state.style = v; }, true)),
         UI.field('المدة', UI.slider(2, 30, 0.5, state.duration, function (v) { return v + 's'; }, function (v) { state.duration = v; })),
         UI.row(h('label', null, 'فوق الفيديو'), h('input', { type: 'checkbox', checked: state.overlay, onchange: function (e) { state.overlay = e.target.checked; } }), h('span', { class: 'hint' }, 'خلفية شفافة')),
         UI.modelPicker('scene'), UI.row(design)));

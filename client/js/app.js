@@ -22,6 +22,7 @@
       renderGlass: function (job) { return EF.renderGlass(job); },
       analyzeFaces: function (job) { return EF.analyzeFaces(job); },
       renderCaptions: function (job) { return EF.renderCaptionClips(job); },
+      renderOverlay: function (job) { return EF.renderSafeOverlay(job); },
       log: function (m) { console.log('[EditFast]', m); }
     });
     var nav = document.getElementById('nav');

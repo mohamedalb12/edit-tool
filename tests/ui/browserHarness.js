@@ -100,6 +100,35 @@
       return rec('testModels', null, res);
     },
     projectState: function () { return rec('projectState', null, { sequence: 'Main' }); },
+    // ——— new batch: templates, carousel, icons, sfx pack, downloads, web search, safe zones, relink, styles ———
+    stylePacks: function () { return load('stylePacks').list(); },
+    styleEdit: function (o) { if (o.onStep) { o.onStep('بيخطط', 0.2); o.onStep('خلص', 1); } return rec('styleEdit', { style: o.style, count: o.count, brief: o.brief }, { style: o.style, label: load('stylePacks').get(o.style).label, scenes: [{ time: 3, duration: 3, overlay: false, elements: ['collage'] }, { time: 12, duration: 4, overlay: true, elements: ['cutoutTitle'] }] }); },
+    templatesList: function () { var T = load('templates'); return { cats: T.CATS, items: T.TEMPLATES.map(function (t) { return { id: t.id, cat: t.cat, label: t.label, overlay: t.overlay, duration: t.spec.duration, fields: T.fields(t), media: T.mediaNeed(t) }; }) }; },
+    favorites: function (k) { return (settings.favorites && settings.favorites[k]) || []; },
+    toggleFavorite: function (k, id) { settings.favorites = settings.favorites || {}; var l = settings.favorites[k] || []; settings.favorites[k] = l.indexOf(id) >= 0 ? l.filter(function (x) { return x !== id; }) : l.concat([id]); calls.push({ name: 'toggleFavorite', args: id }); return settings.favorites[k]; },
+    addTemplate: function (o) { if (o.onProgress) o.onProgress(1); return rec('addTemplate', { id: o.id, values: o.values, preview: !!o.preview, duration: o.duration }, o.preview ? { file: '/tmp/tpl.png' } : { track: 2, start: 2, end: 6 }); },
+    sceneFrames: function (o) { return rec('sceneFrames', o, [{ file: '/tests/fixtures/face.png', time: 1 }, { file: '/tests/fixtures/face.png', time: 5 }]); },
+    carousel3D: function (o) { if (o.onProgress) o.onProgress(1); return rec('carousel3D', { files: o.files.length, layout: o.layout, speed: o.speed, tilt: o.tilt, background: o.background, preview: !!o.preview, title: o.title }, o.preview ? { file: '/tmp/c.png' } : { track: 1, start: 2, end: 8 }); },
+    iconsData: function () { if (!S._icons) { var x = new XMLHttpRequest(); x.open('GET', '/client/vendor/icons/icons.json', false); x.send(); S._icons = JSON.parse(x.responseText); } return S._icons; },
+    iconSearch: function (q, cat) { var t = String(q || '').toLowerCase(); return S.iconsData().icons.filter(function (i) { return (!cat || i.cat === cat) && (!t || i.name.toLowerCase().indexOf(t) >= 0 || (i.ar || '').indexOf(t) >= 0); }); },
+    addIcon: function (o) { return rec('addIcon', { id: o.id, anim: o.anim, badge: o.badge, label: o.label }, { track: 2, start: 2 }); },
+    sfxPackList: function () { return [{ id: 'whoosh', label: 'ووش', tags: 'transition' }, { id: 'impact', label: 'إمباكت', tags: 'hit' }, { id: 'pop', label: 'بوب', tags: 'pop' }]; },
+    sfxPackFile: function (id) { return '/tmp/' + id + '.wav'; },
+    placeSfx: function (o) { return rec('placeSfx', o, { track: 1 }); },
+    sfxPackInstall: function () { return rec('sfxPackInstall', null, { files: 30 }); },
+    generateMusic: function (o) { return rec('generateMusic', { prompt: o.prompt, seconds: o.seconds, instrumental: o.instrumental }, { file: '/tmp/music.mp3', prompt: 'lofi chill' }); },
+    ytdlpBin: function () { return settings.paths.ytdlp === 'none' ? null : '/usr/bin/yt-dlp'; },
+    downloadInfo: function (u) { return rec('downloadInfo', u, { id: 'abc', title: 'فيديو تجربة', duration: 212, thumbnail: '', uploader: 'EditFast', heights: [1080, 720, 480], platform: { id: 'youtube', label: 'يوتيوب' } }); },
+    downloadMedia: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('downloadMedia', { url: o.url, quality: o.quality, start: o.start, end: o.end, place: o.place }, { file: '/proj/EditFast Media/Downloads/x.mp4', type: 'video', placed: { track: 0 } }); },
+    webSearch: function (o) { return rec('webSearch', { q: o.q, type: o.type, sources: o.sources }, { q: o.q, results: [{ id: 'openverse-1', source: 'openverse', type: 'photo', title: 'Cairo tower', url: 'https://x/1.jpg', thumb: '/tests/fixtures/face.png', width: 1600, height: 900, license: 'CC BY 2.0', credit: 'someone', page: 'https://x' }, { id: 'commons-2', source: 'commons', type: 'photo', title: 'Nile', url: 'https://x/2.jpg', thumb: '/tests/fixtures/face.png', width: 800, height: 1200, license: 'CC BY-SA 4.0' }], errors: [{ source: 'google', error: 'no key' }] }); },
+    webSearchPage: function (e, q) { return 'https://' + e + '.test/?q=' + encodeURIComponent(q); },
+    webImport: function (o) { return rec('webImport', { id: o.item ? o.item.id : null, url: o.url, place: o.place }, { file: '/proj/x.jpg', placed: { track: 2 } }); },
+    lookAtFrames: function (o) { return rec('lookAtFrames', o, []); },
+    safeZoneCheck: function (o) { return rec('safeZoneCheck', o, { platform: o.platform, vertical: false, score: 75, captionY: 0.8, faces: 8, issues: [{ kind: 'face', time: 4, text: 'الوش قريب من يمين (زراير المنصة)' }, { kind: 'caption', time: null, text: 'الكابشن تحت تحت — هيتغطّى' }] }); },
+    safeZoneGuide: function (o) { return rec('safeZoneGuide', o, { track: 3 }); },
+    safeCaptions: function (o) { calls.push({ name: 'safeCaptions', args: o }); return { y: 0.73 }; },
+    relinkScan: function (o) { return rec('relinkScan', { dirs: o.dirs }, { items: [{ id: 'n1', name: 'talk.mp4', path: '/old/talk.mp4', match: { path: '/new/talk.mp4', score: 0.99, reason: 'نفس الاسم', others: 0 } }, { id: 'n2', name: 'music.wav', path: '/old/music.wav', match: null }], searched: ['/new'], indexed: 120 }); },
+    relinkApply: function (items) { return rec('relinkApply', items.map(function (i) { return i.id; }), { done: items.length, failed: [] }); },
     llm: {
       chat: function (req) { calls.push({ name: 'llm.chat', args: { model: req.model, n: req.messages.length } }); return Promise.resolve(agentScript.shift() || { content: 'تمام ✓' }); },
       listModels: function () { return rec('listModels', null, [{ id: 'anthropic/claude-opus-5.5', name: 'Claude Opus 5.5' }, { id: 'openai/gpt-5', name: 'GPT-5' }]); },
@@ -109,7 +138,7 @@
   window.EF_TEST = {
     node: load, services: S,
     host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'Premiere Pro (test)' } : {}); },
-    pickFolder: function () { return '/picked/folder'; }, pickFile: function () { return '/picked/file.mogrt'; },
+    pickFolder: function () { return '/picked/folder'; }, pickFile: function () { return '/picked/file.mogrt'; }, pickFiles: function () { return ['/tests/fixtures/face.png', '/tests/fixtures/face.png', '/tests/fixtures/face.png']; }, writeFile: function () {},
     setAgentScript: function (s) { agentScript = s; }
   };
 })();

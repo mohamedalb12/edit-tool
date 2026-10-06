@@ -25,6 +25,13 @@
     reels: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><circle cx="12" cy="10" r="2.6"/><path d="M8.8 16.5a3.6 3.6 0 0 1 6.4 0"/>',
     audio: '<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><circle cx="4" cy="13" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="15" r="2"/>',
     thumb: '<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M6 15.5h7M6 12h5"/><path d="M15 9.5l3.5 2-3.5 2z" fill="currentColor"/>',
+    templates: '<rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M17.25 13.5l1.1 2.3 2.4.35-1.75 1.7.4 2.4-2.15-1.15-2.15 1.15.4-2.4-1.75-1.7 2.4-.35z"/>',
+    carousel: '<rect x="8" y="5" width="8" height="12" rx="1.6"/><path d="M5.5 7v8M18.5 7v8M3 8.5v5M21 8.5v5"/><path d="M5 20.5c4.5 1.6 9.5 1.6 14 0"/>',
+    icons: '<circle cx="7.5" cy="7.5" r="3.5"/><path d="M16.5 3.5l4 7h-8z"/><rect x="4" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14.2l1.1 2.2 2.4.4-1.7 1.7.4 2.4-2.2-1.2-2.2 1.2.4-2.4-1.7-1.7 2.4-.4z"/>',
+    download: '<path d="M12 3v12M7 10.5l5 5 5-5"/><path d="M4 17v1.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V17"/>',
+    websearch: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z"/>',
+    safezones: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><rect x="8.5" y="6" width="7" height="9" rx="1" stroke-dasharray="2 1.6"/><path d="M8.5 18h4"/>',
+    relink: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
     settings: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>'
   };
   UI.icon = function (name) {
