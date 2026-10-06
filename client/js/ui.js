@@ -185,7 +185,7 @@
     return Promise.resolve().then(fn).then(function (r) { UI.status('جاهز'); return r; }, function (e) {
       var msg = (e && e.message) || String(e);
       UI.status('خطأ', 'err'); UI.toast(msg, true); console.error(e); throw e;
-    }).finally(function () { if (btn) btn.disabled = false; });
+    }).finally(function () { if (btn) btn.disabled = false; if (EF.spend) EF.spend.refresh(); });
   };
   UI.safe = function (label, fn, btn) { return UI.run(label, fn, btn).catch(function () {}); };
 
@@ -202,8 +202,18 @@
     var tag = h('span', { class: 'mp-tag' });
     var dot = h('span', { class: 'mp-dot', title: '' });
     var list = h('div', { class: 'mp-list', style: { display: 'none' } });
-    var wrap = h('div', { class: 'mp' }, h('div', { class: 'mp-row' }, dot, inp, tag), list);
+    var cost = feature === '__default' ? null : h('span', { class: 'mp-cost' });
+    var wrap = h('div', { class: 'mp' }, h('div', { class: 'mp-row' }, dot, inp, tag), cost, list);
+    function paintCost() {
+      if (!cost) return;
+      var C = UI.costLib(); if (!C) return;
+      var e = C.estimate(feature, effective(), EF.modelList);
+      cost.textContent = '💲 ' + C.fmtRange(e) + (e && !e.free ? ' للمرة' : '');
+      cost.className = 'mp-cost' + (e && e.high >= 0.5 ? ' high' : '');
+      cost.title = e ? 'تقدير لـ ' + e.what + ' بالموديل ده (على فيديو ~10 دقايق). اللي بيتصرف فعلًا بيظهر في العداد فوق.' : 'مش لاقي سعر الموديل ده — حدّث قائمة الموديلات من الإعدادات';
+    }
     function paintTag() {
+      paintCost();
       tag.textContent = current() ? 'متغيّر' : 'افتراضي'; tag.className = 'mp-tag' + (current() ? ' on' : '');
       var t = (EF.modelTests || {})[feature];
       dot.className = 'mp-dot' + (t ? (t.ok ? ' ok' : ' bad') : ''); dot.title = t ? (t.ok ? 'شغّال ✓ ' + t.ms + 'ms' : (t.error || 'فشل')) : 'لسه ماتجرّبش';
@@ -246,10 +256,13 @@
     paintTag();
     return opts.bare ? wrap : h('div', { class: 'row' }, h('label', null, 'الموديل'), wrap);
   };
-  UI.refreshPickers = function () { (UI._pickers || []).forEach(function (p) { if (document.body.contains(p)) p.refresh(); }); };
+  UI.costLib = function () { if (UI._cost === undefined) { try { UI._cost = EF.node('cost'); } catch (e) { UI._cost = null; } } return UI._cost; };
+  UI.refreshPickers = function () { UI._pickers = (UI._pickers || []).filter(function (p) { return document.body.contains(p); }); UI._pickers.forEach(function (p) { p.refresh(); }); };
 
   UI.fillModels = function (models) {
     EF.modelList = models || [];
+    try { EF.node('openrouter').catalog.list = EF.modelList; } catch (e) {} // prices for the spend counter too
+    UI.refreshPickers();
     var dl = document.getElementById('ef-models'); if (!dl) return; dl.innerHTML = '';
     EF.modelList.forEach(function (m) { dl.appendChild(h('option', { value: m.id }, m.name || m.id)); });
   };

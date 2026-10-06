@@ -60,7 +60,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #nav button.active::after { content: ""; position: absolute; inset-inline-end: 0; top: 10px; width: 3px; height: 26px; border-radius: 3px 0 0 3px; background: var(--grad-warm); box-shadow: 0 0 12px rgba(244, 114, 182, .8); animation: barIn .4s var(--spring); }
 @keyframes barIn { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 
-#main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 
 /* ——— header ——— */
 #topbar { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(18, 15, 32, .8), rgba(18, 15, 32, .35)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
@@ -495,3 +495,29 @@ input::placeholder, textarea::placeholder { color: rgba(255,255,255,.38); }
 @keyframes icJiggle { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
 @keyframes icOpen { 0% { transform: scale(.2); opacity: .2; } 45%, 100% { transform: scale(1); opacity: 1; } }
 @keyframes icFloat { 0%, 100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-10px) rotate(3deg); } }
+
+/* ---------- الصرف: تقدير جنب كل موديل + عداد فوق ---------- */
+.mp-cost { display: inline-block; margin-top: 4px; font-size: 10.5px; font-weight: 700; color: #6EE7B7; background: rgba(52, 211, 153, .08); border: 1px solid rgba(52, 211, 153, .25); padding: 1px 8px; border-radius: 99px; }
+.mp-cost.high { color: #FBBF24; background: rgba(251, 191, 36, .08); border-color: rgba(251, 191, 36, .35); }
+.pill.spend { cursor: pointer; flex: 0 0 auto; gap: 5px; color: var(--text); font-family: inherit; margin-inline-start: auto; }
+.pill.spend .lbl { color: var(--muted); font-weight: 600; }
+.pill.spend b { color: #6EE7B7; }
+.pill.spend.warn { border-color: rgba(251, 113, 133, .6); }
+.pill.spend.warn b { color: #FB7185; }
+.pill.spend:hover { border-color: rgba(255, 255, 255, .25); }
+#topbar #status { margin-inline-start: 0; }
+.spend-pop { position: absolute; top: 54px; inset-inline-start: 10px; inset-inline-end: 10px; z-index: 50; max-width: 380px; margin-inline-start: auto; padding: 14px; border-radius: 16px; background: rgba(20, 16, 36, .96); border: 1px solid var(--line); box-shadow: 0 18px 50px -12px rgba(0, 0, 0, .7); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); animation: rise .25s var(--ease); }
+.spend-pop h4 { margin: 12px 0 6px; font-size: 12px; color: var(--muted); }
+.sp-head { display: flex; justify-content: space-between; gap: 12px; }
+.sp-big { font-size: 26px; font-weight: 800; color: #6EE7B7; line-height: 1.2; }
+.sp-mid { font-size: 18px; font-weight: 800; line-height: 1.5; }
+.sp-bars { display: flex; align-items: flex-end; gap: 6px; height: 66px; margin-top: 10px; }
+.sp-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; height: 100%; }
+.sp-bar i { display: block; width: 100%; border-radius: 4px 4px 2px 2px; background: rgba(139, 92, 246, .45); }
+.sp-bar.now i { background: var(--grad); }
+.sp-bar span { font-size: 9.5px; color: var(--muted); }
+.sp-model { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 11.5px; }
+.sp-limit { width: 70px; }
+#topbar .brand { min-width: 96px; }
+#topbar #status { max-width: 34%; }
+.pill.spend { max-width: 30%; }

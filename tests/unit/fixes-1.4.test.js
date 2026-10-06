@@ -120,3 +120,38 @@ test('offline SFX pack: a description picks a matching sound (used when there is
   assert.equal(pack.match('qqq zzz'), null);
   assert.equal(pack.match(''), null);
 });
+
+test('cost: estimate per feature from the model price (OpenRouter list first, known table as fallback)', () => {
+  const C = require('../../core/cost');
+  const { FEATURES } = require('../../core/openrouter');
+  for (const f of FEATURES) assert.ok(C.PROFILES[f.id], 'profile for ' + f.id);
+  const opus = C.estimate('hook', 'anthropic/claude-opus-5.5', []), sonnet = C.estimate('hook', 'anthropic/claude-sonnet-5.5', []);
+  assert.ok(opus.low > 0 && opus.high > opus.low); assert.ok(Math.abs(opus.low - sonnet.low * 2) < 1e-9, 'Opus is twice Sonnet');
+  assert.ok(C.estimate('agent_max', 'anthropic/claude-opus-5.5', []).low > C.estimate('revisions', 'anthropic/claude-opus-5.5', []).high, 'a long chat costs more than a short task');
+  assert.ok(C.estimate('hook', 'anthropic/claude-opus-5.5', [], { minutes: 30 }).low > opus.low * 2.5, 'longer video → more');
+  assert.equal(C.estimate('hook', 'x/unknown', []), null);
+  const list = [{ id: 'x/cheap', price: { in: 0.1, out: 0.4 } }, { id: 'x/free', price: { in: 0, out: 0 } }];
+  assert.ok(C.estimate('hook', 'x/cheap', list).low < 0.01);
+  assert.equal(C.fmtRange(C.estimate('hook', 'x/free', list)), 'مجاني');
+  assert.equal(C.fmtRange(C.estimate('hook', 'x/cheap', list)), 'أقل من سنت');
+  assert.match(C.fmtRange(opus), /^≈ \d+–\d+ سنت$/);
+  assert.match(C.fmtRange({ low: 1.2, high: 2.6 }), /^≈ \$1\.20–2\.60$/);
+  assert.equal(C.fmtRange(null), 'السعر مش معروف');
+  assert.equal(C.fmt(0.004), 'أقل من سنت'); assert.equal(C.fmt(0.42), '42 سنت'); assert.equal(C.fmt(3.5), '$3.50');
+});
+
+test('cost: what a request cost (OpenRouter number, else tokens × price with cached tokens cheaper), ledger by day', () => {
+  const C = require('../../core/cost');
+  assert.equal(C.costOfUsage({ cost: 0.0123 }, 'any', []), 0.0123);
+  const u = { prompt_tokens: 100000, completion_tokens: 10000, prompt_tokens_details: { cached_tokens: 80000 } };
+  assert.ok(Math.abs(C.costOfUsage(u, 'anthropic/claude-opus-5.5', []) - (20000 * 4 + 80000 * 0.2 + 10000 * 20) / 1e6) < 1e-9);
+  const dir = path.join(TMP, 'spend-' + Date.now());
+  const d1 = new Date(2026, 9, 5, 12), d2 = new Date(2026, 9, 6, 9);
+  C.record(dir, { model: 'm/a', cost: 0.5, tokens: 1000 }, d1);
+  C.record(dir, { model: 'm/a', cost: 0.25 }, d2); C.record(dir, { model: 'm/b', cost: 0.75 }, d2);
+  const s = C.summary(dir, d2);
+  assert.equal(s.today, 1); assert.equal(s.todayCalls, 2); assert.equal(s.month, 1.5); assert.equal(s.monthCalls, 3);
+  assert.deepEqual(s.byModel.map(m => m.id), ['m/b', 'm/a']);
+  assert.equal(s.last7.length, 7); assert.equal(s.last7[6].cost, 1); assert.equal(s.last7[5].cost, 0.5);
+  assert.equal(C.summary(dir, new Date(2026, 10, 1)).month, 0, 'new month starts from zero');
+});

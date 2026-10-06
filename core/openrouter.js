@@ -66,9 +66,13 @@ function modelFor(featureId, settings = {}) {
   return (settings.models && settings.models[featureId]) || settings.defaultModel || (f && f.def) || FALLBACK_MODELS[0].id;
 }
 
+// last model list fetched (with prices) — used to price requests when OpenRouter doesn't send the cost
+const catalog = { list: [] };
+
 class OpenRouter {
-  constructor({ apiKey, fetchImpl, retries = 2, appName = 'EditFast for Premiere Pro' } = {}) {
+  constructor({ apiKey, fetchImpl, retries = 2, appName = 'EditFast for Premiere Pro', onUsage } = {}) {
     this.apiKey = apiKey;
+    this.onUsage = onUsage; // (model, usage) after every answered request → the spend counter
     this.fetch = fetchImpl || require('./http').nodeFetch;
     this.retries = retries;
     this.appName = appName;
@@ -112,12 +116,12 @@ class OpenRouter {
     const res = await this.fetch(BASE + '/models', { headers: { 'HTTP-Referer': 'https://editfast.local', 'X-Title': this.appName } });
     if (!res.ok) throw new Error(`OpenRouter models ${res.status}`);
     const data = await res.json();
-    return (data.data || []).map(m => ({
+    return (catalog.list = (data.data || []).map(m => ({
       id: m.id, name: m.name || m.id, context: m.context_length,
       tools: Array.isArray(m.supported_parameters) ? m.supported_parameters.includes('tools') : undefined,
       vision: m.architecture && Array.isArray(m.architecture.input_modalities) ? m.architecture.input_modalities.includes('image') : undefined,
-      price: m.pricing ? { in: +m.pricing.prompt * 1e6, out: +m.pricing.completion * 1e6 } : null
-    }));
+      price: m.pricing ? Object.assign({ in: +m.pricing.prompt * 1e6, out: +m.pricing.completion * 1e6 }, m.pricing.input_cache_read !== undefined ? { cached: +m.pricing.input_cache_read * 1e6 } : {}) : null
+    })));
   }
 
   /** OpenAI-style chat completion. Returns the assistant message object. */
@@ -127,6 +131,7 @@ class OpenRouter {
     if (tools && tools.length) { body.tools = tools; body.tool_choice = 'auto'; }
     if (jsonMode) body.response_format = { type: 'json_object' };
     const data = await this.request('/chat/completions', body);
+    if (this.onUsage && data.usage) { try { this.onUsage(model, data.usage); } catch (_) {} }
     const choice = data.choices && data.choices[0];
     if (!choice) throw new Error('OpenRouter رجّع رد فاضي');
     return { ...choice.message, finish_reason: choice.finish_reason, usage: data.usage };
@@ -148,4 +153,4 @@ class OpenRouter {
   }
 }
 
-module.exports = { OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, withCache, friendly, BASE };
+module.exports = { catalog, OpenRouter, FEATURES, FALLBACK_MODELS, modelFor, withCache, friendly, BASE };

@@ -280,3 +280,19 @@ test('SFX without ElevenLabs: a description places a matching sound from the bui
   assert.equal(r2.id, 'whoosh');
   assert.ok(seq.a.reduce((n, t) => n + t.items.length, 0) >= 2, 'both placed on the timeline');
 });
+
+test('spend counter: every answered AI request is recorded (OpenRouter cost), the panel is told, estimate uses the chosen model', async () => {
+  let n = 0;
+  const fetchImpl = async () => mockResponse({ choices: [{ message: { content: '{"start":1,"end":4,"reason":"x"}' } }], usage: { prompt_tokens: 900, completion_tokens: 50, cost: 0.0042 + (n++) * 0 } });
+  const { S } = world({ fetchImpl, settings: { models: { hook: 'anthropic/claude-opus-5.5' } } });
+  const before = S.spendSummary().today;
+  const told = []; S.onSpend = c => told.push(c);
+  await S.llm.text({ model: 'anthropic/claude-opus-5.5', user: 'x' });
+  await S.llm.json({ model: 'anthropic/claude-opus-5.5', user: 'x' });
+  const s = S.spendSummary();
+  assert.ok(Math.abs(s.today - before - 0.0084) < 1e-9);
+  assert.deepEqual(told, [0.0042, 0.0042]);
+  assert.ok(s.byModel.some(m => m.id === 'anthropic/claude-opus-5.5'));
+  const e = S.costEstimate('hook');
+  assert.ok(e.low > 0); assert.equal(e.what, 'اختيار الهوك');
+});

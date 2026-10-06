@@ -842,4 +842,42 @@ test('أيقونات آيفون: flat colour emoji, iPhone app-icon badge, notif
   await shot('38-icons-ios');
 });
 
+test('الصرف: estimate next to every AI model (changes with the model), today counter in the top bar, breakdown + daily alert', async () => {
+  await open('agent');
+  await page.locator('.seg button', { hasText: 'قوي جدًا' }).click();
+  const tag = page.locator('.mp-cost').first();
+  const opus = await tag.textContent();
+  assert.match(opus, /≈ .*للمرة/);
+  // every tab with an AI feature shows its own estimate
+  for (const id of ['auto', 'revisions', 'autofx', 'reels', 'thumb', 'pro', 'transcribe', 'sfx', 'broll', 'search']) {
+    await open(id); assert.ok(await page.locator('.mp-cost').count() >= 1, id);
+  }
+  await open('agent');
+  const picker = page.locator('.mp-input').first();
+  await picker.click(); await page.waitForSelector('.mp-list .mp-item');
+  await picker.fill('sonnet'); // not in the test list → Enter saves as typed
+  await picker.press('Enter');
+  const sonnet = await page.locator('.mp-cost').first().textContent();
+  assert.notEqual(sonnet, opus, 'cheaper model → different estimate');
+  // live counter
+  assert.match(await page.textContent('#spend'), /0/);
+  await page.evaluate(() => { EF_TEST.spend('anthropic/claude-opus-5.5', 0.42); EF_TEST.spend('anthropic/claude-sonnet-5.5', 0.07); });
+  await page.waitForTimeout(300);
+  assert.match(await page.textContent('#spend'), /49 سنت/);
+  await page.click('#spend');
+  await page.waitForSelector('.spend-pop');
+  assert.match(await page.textContent('.sp-big'), /49 سنت/);
+  assert.equal(await page.locator('.sp-model').count(), 2);
+  assert.equal(await page.locator('.sp-bar').count(), 7);
+  await page.fill('.sp-limit', '0.4'); await page.locator('.sp-limit').dispatchEvent('change');
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => EF.services.settings.spendAlert), 0.4);
+  assert.ok(await page.locator('#spend.warn').count() === 1, 'over the daily limit → red');
+  assert.ok(await page.isVisible('text=عدّيت الحد'));
+  await shot('39-spend');
+  await page.mouse.click(5, 790);
+  assert.equal(await page.locator('.spend-pop').count(), 0, 'closes on outside click');
+  await page.evaluate(() => { EF.services.saveSettings({ spendAlert: 0, models: {} }); });
+});
+
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

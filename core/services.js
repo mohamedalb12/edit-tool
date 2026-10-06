@@ -163,9 +163,21 @@ class Services {
   reload() {
     this.settings = config.load();
     this.tools = ff.resolveTools(this.settings);
-    this.llm = new OpenRouter({ apiKey: this.settings.keys.openrouter, fetchImpl: this.fetch });
+    this.llm = new OpenRouter({ apiKey: this.settings.keys.openrouter, fetchImpl: this.fetch, onUsage: (model, u) => this.recordSpend(model, u) });
     return this.settings;
   }
+
+  /* ---------- كام اتصرف ---------- */
+  recordSpend(model, usage) {
+    const C = require('./cost');
+    const cost = C.costOfUsage(usage, model, require('./openrouter').catalog.list);
+    C.record(config.dataDir(), { model, cost, tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) });
+    if (this.onSpend) this.onSpend(cost);
+    return cost;
+  }
+  spendSummary() { return require('./cost').summary(config.dataDir()); }
+  /** estimated cost of one run of an AI feature with the model it will use now */
+  costEstimate(feature, { minutes } = {}) { const C = require('./cost'); return C.estimate(feature, this.model(feature), require('./openrouter').catalog.list, { minutes }); }
 
   saveSettings(patch) { config.update(patch); return this.reload(); }
   model(feature) { return modelFor(feature, this.settings); }

@@ -103,6 +103,13 @@
     // ——— new batch: templates, carousel, icons, sfx pack, downloads, web search, safe zones, relink, styles ———
     // ——— client revisions ———
     _rev: { project: '', rounds: [] },
+    // ——— spend counter ———
+    _spend: [],
+    spendSummary: function () {
+      var t = 0, by = {}; S._spend.forEach(function (x) { t += x.cost; (by[x.model] = by[x.model] || { id: x.model, cost: 0, calls: 0 }).cost += x.cost; by[x.model].calls++; });
+      var d = new Date(), last7 = []; for (var i = 6; i >= 0; i--) { var x = new Date(d); x.setDate(d.getDate() - i); last7.push({ day: x.toISOString().slice(0, 10), cost: i === 0 ? t : i * 0.03 }); }
+      return Promise.resolve({ today: t, todayCalls: S._spend.length, month: t + 1.2, monthCalls: S._spend.length + 40, byModel: Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return b.cost - a.cost; }), last7: last7 });
+    },
     revisionsLoad: function () { return rec('revisionsLoad', null, JSON.parse(JSON.stringify(S._rev))); },
     revisionsSplit: function (o) { var R = load('revisions'); var round = { id: 'round-1', at: Date.now(), client: o.client, raw: o.text, items: R.splitOffline(o.text) }; S._rev.rounds.push(round); return rec('revisionsSplit', { text: o.text, client: o.client }, { round: round, ai: false, warning: '' }); },
     revisionsToggle: function (o) { var r = S._rev.rounds.find(function (x) { return x.id === o.roundId; }); var it = r.items.find(function (x) { return x.id === o.itemId; }); it.done = !it.done; return rec('revisionsToggle', o, JSON.parse(JSON.stringify(r))); },
@@ -154,6 +161,7 @@
     node: load, services: S,
     host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'Premiere Pro (test)' } : {}); },
     pickFolder: function () { return '/picked/folder'; }, pickFile: function () { return '/picked/file.mogrt'; }, pickFiles: function () { return ['/tests/fixtures/face.png', '/tests/fixtures/face.png', '/tests/fixtures/face.png']; }, writeFile: function () {},
-    setAgentScript: function (s) { agentScript = s; }
+    setAgentScript: function (s) { agentScript = s; },
+    spend: function (model, cost) { S._spend.push({ model: model, cost: cost }); if (S.onSpend) S.onSpend(cost); }
   };
 })();

@@ -18,6 +18,7 @@ const DEFAULTS = {
   favorites: {},
   layeredScenes: true, // Pro scenes land as a nested sequence with one track per layer
   autoUpdate: true,
+  spendAlert: 0, // $ في اليوم: تنبيه لو الصرف على الذكاء الاصطناعي عدّاه (0 = من غير)
   updateUrl: ''
 };
 
