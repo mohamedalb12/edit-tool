@@ -433,3 +433,7 @@ canvas.thumb-stage { display: block; width: 100%; aspect-ratio: 16/9; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .ease-row { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .ease-curve { width: 160px; height: 88px; flex: none; border-radius: 12px; background: rgba(8,7,16,.5); border: 1px solid var(--line); }
+.edit-badge { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; padding: 6px 10px; border-radius: 10px; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.4); color: #FBBF24; font-weight: 700; font-size: 12px; }
+.update-bar { margin: 8px 12px 0; padding: 10px 12px; border-radius: 14px; background: linear-gradient(135deg, rgba(124,58,237,.35), rgba(236,72,153,.25)); border: 1px solid rgba(192,132,252,.5); box-shadow: 0 10px 30px -12px rgba(192,38,211,.8); animation: pop .45s var(--spring) both; font-size: 12.5px; }
+.update-bar .hint { margin: 2px 0 0; }
+.update-bar .progress { margin-top: 6px; }

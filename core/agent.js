@@ -50,6 +50,7 @@ const TOOLS = [
   fn('pro_scene', 'مشهد موشن جرافيك احترافي بمحرك Remotion (أقوى بكتير من build_scene): عناوين حركية، أرقام، رسوم، قوائم، لوور ثيرد، لوجو، اشترك، كولاج، كاروسيل ثري دي، نص ثري دي، محادثة، إشعار، متصفح… اكتب brief والمخرج هيصممه (ولو فيه style بيستخدم لقطات من الفيديو).', {
     brief: { type: 'string', description: 'وصف المشهد (المحتوى والإحساس)' }, spec: { type: 'object', description: 'اختياري: مواصفات جاهزة {duration, style, background:{type}, elements:[{type, from, duration, position, props}]}' },
     style: { type: 'string', enum: Object.keys(packs.PACKS) }, duration: { type: 'number' }, overlay: { type: 'boolean', description: 'true = خلفية شفافة فوق الفيديو' }, time: { type: 'number' } }),
+  fn('edit_scene', 'عدّل مشهد EditFast موجود على التايملين (المختار أو اللي عند رأس التشغيل): تغيير نص، لون، توقيت، حركة، عنصر زيادة… وبيترندر تاني في نفس مكانه.', { instruction: { type: 'string', description: 'التعديل المطلوب' } }, ['instruction']),
   fn('style_edit', 'مونتاج بالاستايل: المخرج يخطط كذا مشهد بالاستايل المطلوب (' + packs.list().map(p => p.label).join('، ') + ') من كلام الفيديو ولقطاته، وRemotion يرندرها ويحطها على التايملين. طلب واحد للذكاء الاصطناعي لكل المشاهد.', {
     style: { type: 'string', enum: Object.keys(packs.PACKS) }, brief: { type: 'string', description: 'اللي المونتير عايزه (اختياري)' }, count: { type: 'number', description: 'عدد المشاهد 1-8' }, captions: { type: 'boolean', description: 'كابشن متحرك بنفس الاستايل' } }, ['style']),
   fn('add_template', 'حط قالب جاهز من مكتبة القوالب (نصوص، جلاس، واجهات، مشاهد، ثري دي، كولاج) بنصوصك.', {
@@ -107,6 +108,7 @@ function systemPrompt({ style, level }) {
     '3) قرر الفيديو ده محتاج إيه فعلًا: شيل التكرار والسكتات، ابدأ بهوك قوي لو الفيديو محتاج، مشاهد متحركة بستايله، كابشن ومؤثرات على الكلمة.',
     '3.2) عندك عين: look_at_frames بيوريك صور حقيقية من الفيديو. استخدمها لما القرار محتاج تشوف الصورة (أحسن تيك، جودة اللقطة، مكان مناسب للـ B-Roll أو للنص، سؤال عن اللي باين في الكادر).',
     '3.5) للمشاهد المتحركة استخدم pro_scene (Remotion) — جودته أعلى بكتير؛ build_scene بس لو pro_scene رجّع إنه مش متثبّت.',
+    '3.55) المشاهد بتنزل لايرز (سيكونس جوه السيكونس) والمونتير يقدر يعدّل فيها. لو طلب تعديل في مشهد نازل قبل كده استخدم edit_scene (مش مشهد جديد).',
     '3.6) لو طلب استايل (كولاج آرت، ثري دي، نيون، مينيمال، سينمائي، بوب آرت، جلاس، واجهات سوشيال) للفيديو كله استخدم style_edit؛ لمشهد واحد pro_scene مع style. للقوالب الجاهزة add_template، للأيقونات add_icon، والمؤثرات الترند place_trendy_sfx (مجانية وأوفلاين).',
     '4) لو المونتير طلب حاجة محددة ("ابني المشهد الفلاني" / "اعمل كذا") نفّذها هي بس من غير ما تعمل حاجات زيادة.',
     '5) العمليات اللي بتشيل أجزاء بتشتغل على نسخة من السيكوينس عشان الأصل يفضل سليم.',
@@ -196,6 +198,7 @@ class EditFastAgent {
       case 'find_shorts': return s.findShorts({ count: args.count || 3 });
       case 'make_short': return s.makeShort({ start: args.start, end: args.end, title: args.title || 'Short' }, { reframe: args.reframe !== false, captions: args.captions !== false });
       case 'set_playhead': return s.setPlayhead(args.time);
+      case 'edit_scene': { const r = await s.editSceneAI({ instruction: args.instruction }); return { replaced: r.replaced, track: r.track, start: r.start, layered: r.layered, elements: r.spec.elements.map(e => e.type) }; }
       case 'style_edit': { const r = await s.styleEdit({ style: args.style, brief: args.brief || '', count: args.count || 3, captions: !!args.captions }); return { style: r.label, scenes: r.scenes.map(x => ({ time: x.time, duration: x.duration, overlay: x.overlay, elements: x.elements })) }; }
       case 'add_template': { const r = await s.addTemplate({ id: args.id, values: args.values || {}, time: args.time, duration: args.duration }); return { track: r.track, start: r.start, end: r.end }; }
       case 'carousel_3d': { const r = await s.carousel3D({ files: args.files || [], layout: args.layout || 'ring', speed: args.speed ?? 1, title: args.title || '', background: args.background || 'studio', duration: args.duration || 6, time: args.time }); return { track: r.track, start: r.start, end: r.end }; }

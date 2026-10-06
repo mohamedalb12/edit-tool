@@ -153,12 +153,33 @@ function engineInfo(root = path.join(__dirname, '..', 'remotion')) {
 }
 
 /** Run render.mjs with a system Node (Remotion needs real Node ≥ 18, not the CEP runtime). */
-function render({ node, spec, out, still = false, frame, browserExecutable, gl, onProgress, root }) {
+/**
+ * Split a scene into separate layers for an editable nested sequence:
+ * background (opaque) → one layer per element (transparent, its own timing) → the look on top (grain, vignette, VHS…).
+ */
+function layers(spec) {
+  const out = [];
+  const bgT = (spec.background || {}).type || 'mesh';
+  const transparent = bgT === 'transparent';
+  if (!transparent) out.push({ kind: 'background', name: 'خلفية', from: 0, duration: spec.duration, spec: { ...spec, layer: 'background', elements: [] } });
+  spec.elements.forEach((el, i) => {
+    const c = CATALOG[el.type] || { label: el.type };
+    const txt = el.props && (el.props.text || el.props.title || el.props.name || el.props.query || el.props.caption || el.props.prefix || '');
+    out.push({ kind: 'element', index: i, name: `${i + 1}. ${c.label}${txt ? ' — ' + String(txt).slice(0, 24) : ''}`, from: el.from, duration: el.duration,
+      spec: { ...spec, layer: 'element', background: { type: 'transparent' }, duration: el.duration, elements: [{ ...el, from: 0 }] } });
+  });
+  const look = spec.overlay || (!transparent && (spec.grain || spec.vignette || spec.letterbox || spec.sweep));
+  if (look) out.push({ kind: 'look', name: 'اللوك (جرين/فينييت/طبقة)', from: 0, duration: spec.duration, spec: { ...spec, layer: 'look', background: { type: 'transparent' }, elements: [] } });
+  return out;
+}
+
+function render({ node, spec, out, still = false, frame, browserExecutable, gl, onProgress, root, batch }) {
   const info = engineInfo(root);
   if (!info.installed) return Promise.reject(new Error('محرك المشاهد Pro مش متثبّت — شغّل المثبّت تاني أو "ثبّت المحرك" من الإعدادات.'));
   if (!node) return Promise.reject(new Error('محتاج Node.js على الجهاز عشان المشاهد Pro (المثبّت بيثبّته).'));
-  const job = path.join(path.dirname(out), `job-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-  fs.writeFileSync(job, JSON.stringify({ spec, out, still, frame, browserExecutable, gl }));
+  const dir = path.dirname(out || (batch && batch[0].out));
+  const job = path.join(dir, `job-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  fs.writeFileSync(job, JSON.stringify(batch ? { batch, browserExecutable, gl } : { spec, out, still, frame, browserExecutable, gl }));
   return new Promise((resolve, reject) => {
     const child = spawn(node, [info.script, job], { cwd: info.root, windowsHide: true });
     let buf = '', err = '', done = null, failed = null;
@@ -175,4 +196,4 @@ function render({ node, spec, out, still = false, frame, browserExecutable, gl, 
   });
 }
 
-module.exports = { CATALOG, POSITIONS, BACKGROUNDS, FILTERS, OVERLAYS, normalize, cleanProps, resolveMedia, catalogText, mediaText, DIRECTOR_SYSTEM, direct, engineInfo, render };
+module.exports = { layers, CATALOG, POSITIONS, BACKGROUNDS, FILTERS, OVERLAYS, normalize, cleanProps, resolveMedia, catalogText, mediaText, DIRECTOR_SYSTEM, direct, engineInfo, render };

@@ -65,26 +65,32 @@ async function serveMedia(spec) {
   return server;
 }
 
+// one job = one render, or a batch (the layers of a scene) sharing one bundle
+const items = job.batch || [{ spec: job.spec, out: job.out, still: job.still, frame: job.frame }];
 let mediaServer = null;
 try {
   const serveUrl = await getBundle();
-  mediaServer = await serveMedia(job.spec);
-  const inputProps = { spec: job.spec };
-  const common = { serveUrl, inputProps, browserExecutable: job.browserExecutable || null, chromiumOptions: { gl: job.gl || 'angle' }, logLevel: job.logLevel || 'error', timeoutInMilliseconds: 120000 };
-  const composition = await selectComposition({ ...common, id: 'Scene' });
-  const transparent = (job.spec.background || {}).type === 'transparent';
-  if (job.still) {
-    await renderStill({ ...common, composition, output: job.out, frame: job.frame ?? Math.floor(composition.durationInFrames * 0.6), imageFormat: 'png' });
-  } else {
-    await renderMedia({
-      ...common, composition, outputLocation: job.out,
-      codec: transparent ? 'prores' : 'h264', ...(transparent ? { proResProfile: '4444', pixelFormat: 'yuva444p10le', imageFormat: 'png' } : { crf: 16, pixelFormat: 'yuv420p', imageFormat: 'jpeg', jpegQuality: 92 }),
-      concurrency: job.concurrency || null,
-      onProgress: ({ progress }) => say({ progress: Math.round(progress * 1000) / 1000 })
-    });
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    mediaServer = await serveMedia(it.spec);
+    const inputProps = { spec: it.spec };
+    const common = { serveUrl, inputProps, browserExecutable: job.browserExecutable || null, chromiumOptions: { gl: job.gl || 'angle' }, logLevel: job.logLevel || 'error', timeoutInMilliseconds: 120000 };
+    const composition = await selectComposition({ ...common, id: 'Scene' });
+    const transparent = (it.spec.background || {}).type === 'transparent';
+    if (it.still) {
+      await renderStill({ ...common, composition, output: it.out, frame: it.frame ?? Math.floor(composition.durationInFrames * 0.6), imageFormat: 'png' });
+    } else {
+      await renderMedia({
+        ...common, composition, outputLocation: it.out,
+        codec: transparent ? 'prores' : 'h264', ...(transparent ? { proResProfile: '4444', pixelFormat: 'yuva444p10le', imageFormat: 'png' } : { crf: 16, pixelFormat: 'yuv420p', imageFormat: 'jpeg', jpegQuality: 92 }),
+        concurrency: job.concurrency || null,
+        onProgress: ({ progress }) => say({ progress: Math.round(((k + progress) / items.length) * 1000) / 1000 })
+      });
+    }
+    if (mediaServer) { mediaServer.close(); mediaServer = null; }
+    if (job.batch) say({ layer: k, out: it.out });
   }
-  say({ done: job.out });
-  if (mediaServer) mediaServer.close();
+  say({ done: job.batch ? items.map(i => i.out) : job.out });
 } catch (e) {
   say({ error: String(e && e.message || e) });
   process.exit(1);

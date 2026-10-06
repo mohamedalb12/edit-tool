@@ -63,10 +63,11 @@ class Services {
     let before = null;
     if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
     const r = await this.hostRaw(name, args);
-    const LABELS = { placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
+    const LABELS = { buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
     if (!LABELS[name]) return r;
     const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
     if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
+    else if (name === 'buildLayeredScene') e.undo = { kind: 'removeClip', args: { kind: 'video', track: r.track, start: r.start, path: '' } };
     else if (name === 'addMarkers') e.undo = { kind: 'removeMarkers', args: { markers: args.markers.map(m => ({ time: m.time, name: m.name })) } };
     else if (willClone && before && before.id) e.undo = { kind: 'openSequence', args: { id: before.id }, note: `رجوع لـ "${before.name}"` };
     else if (name === 'muteTrack') e.undo = { kind: 'muteTrack', args: { track: args.track, mute: !args.mute } };
@@ -86,7 +87,7 @@ class Services {
     for (const e of group) {
       if (seqUndo && e !== seqUndo) { undone++; continue; }
       if (!e.undo) { manual.push(e.op); continue; }
-      try { await this.hostRaw(e.undo.kind, e.undo.args); undone++; } catch (err) { manual.push(e.op); }
+      try { if (e.undo.kind.startsWith('svc:')) await this[e.undo.kind.slice(4)](e.undo.args); else await this.hostRaw(e.undo.kind, e.undo.args); undone++; } catch (err) { manual.push(e.op); }
     }
     if (this.onHistory) this.onHistory(this.history);
     return { undone, group: last.group, manual: Array.from(new Set(manual)), message: manual.length ? 'جزء اترجع؛ الباقي (' + Array.from(new Set(manual)).join('، ') + ') رجّعه بـ Ctrl+Z في بريمير' : 'اترجع ✓' };
@@ -566,7 +567,7 @@ class Services {
     return pro.normalize(raw, { width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: this.settings.style, media: media.map(m => m.file) });
   }
 
-  async renderProScene({ spec, time, preview = false, onProgress }) {
+  async renderProScene({ spec, time, preview = false, onProgress, layered, track, minTrack: forceMin }) {
     const pro = require('./proScene');
     const s = await this.seq().catch(() => null);
     // components that show photos (collage, 3D carousel…) but got none: use stills from the editor's own video
@@ -579,6 +580,10 @@ class Services {
     const full = pro.normalize(spec, { width: s ? s.width : 1920, height: s ? s.height : 1080, fps: s ? Math.round(s.fps) || 30 : 30, style: this.settings.style });
     const e = this.proEngine();
     const transparent = full.background.type === 'transparent';
+    const id = hash(JSON.stringify(full)).slice(0, 8);
+    // editable layers (a nested sequence) whenever there's more than one thing in the scene
+    const useLayers = !preview && !!s && (layered !== undefined ? layered : this.settings.layeredScenes !== false) && (full.elements.length > 1 || !transparent);
+    if (useLayers) return this.renderLayeredScene({ full, id, s, time, onProgress, track, forceMin });
     const ext = preview ? 'png' : (transparent ? 'mov' : 'mp4');
     const out = path.join(config.cacheDir('pro'), `pro-${hash(JSON.stringify(full) + (preview ? '|still' : ''))}.${ext}`);
     if (!fs.existsSync(out)) {
@@ -586,10 +591,81 @@ class Services {
       await pro.render({ node: e.node, spec: spec2, out, still: preview, browserExecutable: this.settings.paths.chrome || undefined, onProgress });
     }
     if (preview || !s) return { file: out, spec: full };
-    let minTrack = 1;
-    if (transparent) { const g = await this.glassSource(time); minTrack = g.track + 1; }
-    const placed = await this.host('placeFile', { path: out, time: time ?? s.playhead, kind: 'video', track: -1, minTrack, duration: full.duration, bin: 'EditFast/Pro Scenes' });
-    return { ...placed, file: out, spec: full };
+    let minTrack = forceMin || 1;
+    if (transparent && !forceMin) { const g = await this.glassSource(time); minTrack = g.track + 1; }
+    const placed = await this.host('placeFile', { path: out, time: time ?? s.playhead, kind: 'video', track: track ?? -1, minTrack, duration: full.duration, bin: 'EditFast/Pro Scenes' });
+    require('./sceneRegistry').register({ id, spec: full, layered: false, file: out, duration: full.duration });
+    return { ...placed, id, layered: false, file: out, spec: full };
+  }
+
+  /** Render every layer of a scene (one Remotion run) and nest them as a sequence on the timeline. */
+  async renderLayeredScene({ full, id, s, time, onProgress, track, forceMin }) {
+    const pro = require('./proScene');
+    const e = this.proEngine();
+    const L = pro.layers(full);
+    const dir = config.cacheDir('pro');
+    const files = L.map(l => path.join(dir, `layer-${hash(JSON.stringify(l.spec))}.${(l.spec.background || {}).type === 'transparent' ? 'mov' : 'mp4'}`));
+    const todo = L.map((l, i) => ({ spec: l.spec, out: files[i] })).filter(j => !fs.existsSync(j.out));
+    if (todo.length) await pro.render({ node: e.node, batch: todo, browserExecutable: this.settings.paths.chrome || undefined, onProgress });
+    let minTrack = forceMin || 1;
+    if (full.background.type === 'transparent' && !forceMin) { const g = await this.glassSource(time); minTrack = g.track + 1; }
+    if (track !== undefined && track >= 0) minTrack = track;
+    const name = `EF Scene ${id}`;
+    const placed = await this.host('buildLayeredScene', { name, time: time ?? s.playhead, minTrack, duration: full.duration, bin: 'EditFast/Pro Scenes',
+      layers: L.map((l, i) => ({ path: files[i], start: l.from, duration: l.duration, name: l.name })) });
+    require('./sceneRegistry').register({ id, spec: full, layered: true, sequenceId: placed.sequenceId, layers: L.map((l, i) => ({ name: l.name, kind: l.kind, file: files[i] })), duration: full.duration });
+    return { ...placed, id, layered: true, layers: L.length, spec: full };
+  }
+
+  /** The scene under the selection (or the playhead): its spec + where it sits. */
+  async sceneAt({ time } = {}) {
+    const R = require('./sceneRegistry');
+    const s = await this.seq();
+    const t = time ?? s.playhead;
+    const hits = [];
+    s.video.forEach((tr, ti) => tr.clips.forEach(c => { if (c.selected || (c.start <= t + 1e-3 && t < c.end - 1e-3)) hits.push({ ...c, track: ti }); }));
+    hits.sort((a, b) => (b.selected ? 1 : 0) - (a.selected ? 1 : 0) || b.track - a.track);
+    for (const c of hits) { const entry = R.forClip(c); if (entry) return { ...entry, clip: { track: c.track, start: c.start, end: c.end, name: c.name, mediaPath: c.mediaPath } }; }
+    return null;
+  }
+
+  /** Re-render an edited scene and put it back exactly where the old one was (undo brings the old one back). */
+  async replaceScene({ scene, spec, onProgress }) {
+    const sc = scene || await this.sceneAt();
+    if (!sc) throw new Error('مفيش مشهد من EditFast عند رأس التشغيل أو مختار — اختار المشهد على التايملين');
+    const { track, start } = sc.clip;
+    await this.hostRaw('removeClip', { kind: 'video', track, start, path: '' });
+    const r = await this.op('تعديل مشهد', () => this.renderProScene({ spec, time: start, track, minTrack: track, layered: sc.layered, onProgress }));
+    // replace the generic "remove the new clip" undo with one that also restores the old scene
+    const last = this.history[this.history.length - 1];
+    if (last) last.undo = { kind: 'svc:restoreScene', args: { track: r.track, start: r.start, old: { layered: sc.layered, sequenceId: sc.sequenceId, file: sc.file, duration: sc.duration, track, start } } };
+    return { ...r, replaced: sc.id };
+  }
+
+  async restoreScene({ track, start, old }) {
+    await this.hostRaw('removeClip', { kind: 'video', track, start, path: '' });
+    if (old.layered && old.sequenceId) return this.hostRaw('placeSequence', { id: old.sequenceId, time: old.start, track: old.track, duration: old.duration });
+    return this.hostRaw('placeFile', { path: old.file, time: old.start, kind: 'video', track: old.track, duration: old.duration, bin: 'EditFast/Pro Scenes' });
+  }
+
+  /** "خلّي العنوان أكبر وغيّر اللون للأحمر" → the AI edits the scene's spec, then it's re-rendered in place. */
+  async editSceneAI({ instruction, onProgress }) {
+    const pro = require('./proScene');
+    const sc = await this.sceneAt();
+    if (!sc) throw new Error('مفيش مشهد من EditFast عند رأس التشغيل أو مختار');
+    // long icon paths stay out of the prompt (cheaper) and come back untouched
+    const svgs = sc.spec.elements.map(e => e.props && e.props.svg);
+    const lite = { ...sc.spec, elements: sc.spec.elements.map(e => (e.props && e.props.svg ? { ...e, props: { ...e.props, svg: '[icon]' } } : e)) };
+    const next = await this.llm.json({ model: this.model('scene'), system: pro.DIRECTOR_SYSTEM(sc.spec.style), maxTokens: 4000,
+      user: `ده مشهد موجود:
+${JSON.stringify(lite)}
+
+عدّله حسب طلب المونتير وبس (سيب الباقي زي ما هو): ${instruction}
+رجّع المشهد كله بنفس الشكل.` });
+    (next.elements || []).forEach((e, i) => { if (e && e.props && e.props.svg === '[icon]') e.props.svg = svgs[i] || ''; });
+    if (sc.spec.style && !next.style) next.style = sc.spec.style;
+    const spec = pro.normalize(next, { width: sc.spec.width, height: sc.spec.height, fps: sc.spec.fps });
+    return this.replaceScene({ scene: sc, spec, onProgress });
   }
 
   /* ---------- ريلز وشورتس ---------- */
@@ -1165,6 +1241,29 @@ class Services {
       onProgress && onProgress((i + 1) / items.length, it.name);
     }
     return { done, failed };
+  }
+
+  /* ---------- التحديث التلقائي ---------- */
+  extRoot() { return this._extRoot || path.join(__dirname, '..'); }
+  version() { return require('./updater').currentVersion(this.extRoot()); }
+  async checkUpdate() {
+    const U = require('./updater');
+    const r = await U.check({ extRoot: this.extRoot(), sources: this.settings.updateUrl ? [this.settings.updateUrl] : null, fetchImpl: this.fetch });
+    this.saveSettings({ lastUpdateCheck: Date.now() });
+    return r;
+  }
+  async applyUpdate(info, onProgress) {
+    const U = require('./updater');
+    const r = await U.install({ info, extRoot: this.extRoot(), dataDir: config.dataDir(), fetchImpl: this.fetch, onProgress });
+    // a new Remotion version → reinstall the engine now so scenes keep working after the reload
+    if (r.engineChanged && this.proEngine().npm) { onProgress && onProgress(1, 'engine'); await this.installProEngine().catch(e => { r.engineError = e.message; }); }
+    this.saveSettings({ lastUpdate: { version: r.version, previous: r.previous, notes: r.notes || '', at: Date.now(), seen: false } });
+    return r;
+  }
+  rollbackUpdate() {
+    const r = require('./updater').rollback({ extRoot: this.extRoot(), dataDir: config.dataDir() });
+    this.saveSettings({ lastUpdate: { version: r.version, notes: 'رجعت للنسخة ' + r.version, at: Date.now(), seen: false } });
+    return r;
   }
 }
 

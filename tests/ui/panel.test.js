@@ -708,4 +708,51 @@ test('حركة الكلام: entrance grid with live previews, speed curve, my o
   assert.ok(r.casc[1] > r.casc[0] * 1.2, 'cascade shows the 2nd word on my timing, before it is spoken');
 });
 
+test('تعديل مشهد نازل: open the selected scene, change its text, update in place; AI edit; layers toggle', async () => {
+  await open('pro'); await clearCalls();
+  await clickText('عدّل المشهد المختار');
+  await page.waitForSelector('.edit-badge');
+  assert.match(await page.textContent('.edit-badge'), /V2/);
+  // the element's text field (inputs carry their value as a property)
+  await page.evaluate(() => { const i = Array.from(document.querySelectorAll('#view input')).find(x => x.value === 'عنوان قديم'); i.value = 'عنوان جديد'; i.dispatchEvent(new Event('change')); });
+  await clickText('حدّث المشهد في مكانه');
+  await page.fill('input[placeholder^="أو قول التعديل"]', 'كبّر العنوان');
+  await clickText('عدّله بالذكاء الاصطناعي');
+  const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'replaceScene').args, { id: 'abcd1234', text: 'عنوان جديد' });
+  assert.deepEqual(c.find(x => x.name === 'editSceneAI').args, { instruction: 'كبّر العنوان' });
+  assert.equal(await page.locator('.edit-badge').count(), 0, 'editing mode ends after the update');
+  await page.locator('label', { hasText: 'المشاهد تنزل لايرز' }).locator('input').uncheck();
+  assert.equal(await page.evaluate(() => EF.services.settings.layeredScenes), false);
+  await page.locator('label', { hasText: 'المشاهد تنزل لايرز' }).locator('input').check();
+});
+
+test('التحديث التلقائي: banner with notes and a countdown, installs and reloads; manual check + rollback in settings', async () => {
+  await page.evaluate(() => { window.__updateAvailable = true; window.__reloaded = 0; EF.updates.reload = function () { window.__reloaded++; }; });
+  await clearCalls();
+  await page.evaluate(() => EF.updates.check(false));
+  await page.waitForSelector('#update-bar');
+  assert.match(await page.textContent('#update-bar'), /تحديث جديد 1\.3\.0/);
+  assert.match(await page.textContent('#update-bar'), /مشاهد لايرز/);
+  assert.match(await page.textContent('#update-bar'), /هيتحدّث لوحده خلال/);
+  await shot('36-update-banner');
+  await page.waitForFunction(() => window.__reloaded === 1, null, { timeout: 15000 });
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(x => x.name === 'applyUpdate').map(x => x.args)), ['1.3.0']);
+  // with auto-update off it waits for the button
+  await page.evaluate(() => { EF.updates.busy = false; EF.services.settings.autoUpdate = false; });
+  await page.evaluate(() => EF.updates.check(false));
+  await page.waitForSelector('#update-bar button');
+  assert.equal(await page.isVisible('text=هيتحدّث لوحده'), false);
+  await page.locator('#update-bar button', { hasText: 'بعدين' }).click();
+  assert.equal(await page.locator('#update-bar').count(), 0);
+  await open('settings');
+  assert.match(await page.textContent('#view'), /النسخة الحالية\s*1\.2\.0/);
+  await page.evaluate(() => { window.__updateAvailable = false; });
+  await clickText('دوّر على تحديث');
+  await page.waitForFunction(() => /آخر نسخة/.test(document.getElementById('toast').textContent));
+  await clickText('رجّع النسخة اللي فاتت');
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'rollbackUpdate')));
+  await page.evaluate(() => { EF.services.settings.autoUpdate = true; EF.updates.busy = false; });
+});
+
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

@@ -35,6 +35,7 @@
     try { var ms = JSON.parse(localStorage.getItem('ef-models') || 'null'); UI.fillModels(ms || EF.node('openrouter').FALLBACK_MODELS); } catch (e) {}
     var first = null; try { first = localStorage.getItem('ef-tab'); } catch (e3) {}
     show(first || 'agent');
+    if (EF.updates) EF.updates.boot();
     EF.loadHostScript().then(function () { return EF.host('ping', {}); }).then(function (r) { UI.status('متصل بـ ' + (r.app || 'Premiere')); }).catch(function (e) { UI.status('مش متصل ببريمير', 'err'); console.warn(e); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

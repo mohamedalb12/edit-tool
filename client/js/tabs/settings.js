@@ -70,6 +70,19 @@
       view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('اختار الموديل اللي يشغّل كل ميزة. اكتب أي ID من OpenRouter أو حمّل القائمة.'), UI.row(loadBtn, testAll), testBox, modelsBox));
       view.appendChild(UI.card('البرامج المحلية (أوفلاين)', pathInput('ffmpeg', 'ffmpeg'), pathInput('whisper', 'whisper.cpp'), pathInput('whisperModel', 'موديل Whisper'),
         UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), pathInput('node', 'Node.js (للمشاهد Pro)'), pathInput('chrome', 'Chrome للـ Remotion (اختياري)'), pathInput('ytdlp', 'yt-dlp (التحميل من اللينكات)'), stBox));
+      // ——— التحديثات ———
+      var ver = S.version ? S.version() : '';
+      var lastChk = h('span', { class: 'hint' }, S.settings.lastUpdateCheck ? 'آخر فحص: ' + new Date(S.settings.lastUpdateCheck).toLocaleString('ar-EG') : '');
+      var chk = UI.btn('دوّر على تحديث', function () { UI.safe('بيدوّر', function () { return EF.updates.check(true); }, chk); }, 'primary');
+      var rb = UI.btn('رجّع النسخة اللي فاتت', function () {
+        UI.safe('بيرجّع', function () { return Promise.resolve(S.rollbackUpdate()).then(function (r) { UI.toast('رجعت لـ ' + r.version + ' — بيعيد التشغيل'); setTimeout(function () { EF.updates.reload(); }, 900); }); }, rb);
+      }, 'small');
+      var src = h('input', { class: 'grow ltr', placeholder: 'مصدر التحديثات (فاضي = الافتراضي على GitHub)', value: S.settings.updateUrl || '', onchange: function (e) { S.saveSettings({ updateUrl: e.target.value.trim() }); } });
+      view.appendChild(UI.card('التحديثات',
+        UI.row(h('span', null, 'النسخة الحالية '), h('b', { class: 'ltr' }, ver), h('span', { class: 'spacer' }), lastChk),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: S.settings.autoUpdate !== false, onchange: function (e) { S.saveSettings({ autoUpdate: e.target.checked }); } }), ' حدّث لوحده أول ما تنزل نسخة جديدة')),
+        UI.row(chk, rb), src,
+        UI.hint('الإضافة بتدوّر على تحديث أول ما تفتح وكل 6 ساعات. التحديث بيتأكد من سلامة الملف، وبياخد نسخة احتياطية، ومش بيلمس محرك المشاهد ولا إعداداتك.')));
       drawModels(); status();
     }
   });

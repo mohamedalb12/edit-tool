@@ -755,6 +755,56 @@ EFAPI.createSequenceFromClips = function (a) {
   return { name: seq.name, id: seq.sequenceID, clips: items.length };
 };
 
+/**
+ * Editable scene: the layers go into their own sequence (one track per layer, each at its own time),
+ * and that sequence is nested into the active sequence at `time`.
+ * a: { name, bin, time, minTrack, duration, layers: [{ path, start, duration, name }] }
+ */
+EFAPI.buildLayeredScene = function (a) {
+  var main = EF.seq(), mainId = main.sequenceID, i, j, k, tr, items = [];
+  var t = a.time === undefined || a.time === null ? EF.sec(main.getPlayerPosition()) : a.time;
+  var binPath = a.bin || 'EditFast/Pro Scenes';
+  for (i = 0; i < a.layers.length; i++) items.push(EF.importFile(a.layers[i].path, binPath + '/' + a.name));
+  var nest = app.project.createNewSequenceFromClips(a.name, [items[0]], EF.ensureBin(binPath));
+  if (!nest) throw new Error('createNewSequenceFromClips failed');
+  app.project.openSequence(nest.sequenceID);
+  nest = app.project.activeSequence;
+  // start clean: the helper put the first file on V1/A1
+  for (k = 0; k < 2; k++) {
+    var all = EF.tracks(nest, k ? 'audio' : 'video');
+    for (i = 0; i < all.numTracks; i++) { tr = all[i]; for (j = tr.clips.numItems - 1; j >= 0; j--) tr.clips[j].remove(false, false); }
+  }
+  var vt = EF.tracks(nest, 'video');
+  if (vt.numTracks < a.layers.length) { try { EF.qeSeq().addTracks(a.layers.length - vt.numTracks, vt.numTracks, 0); } catch (e) {} vt = EF.tracks(nest, 'video'); }
+  for (i = 0; i < a.layers.length; i++) {
+    var L = a.layers[i], ti = Math.min(i, vt.numTracks - 1);
+    vt[ti].overwriteClip(items[i], L.start);
+    var c = EF.clipAt(vt[ti], L.start + 0.01);
+    if (c && L.duration) { try { c.end = EF.timeObj(L.start + L.duration); } catch (e2) {} }
+  }
+  var nestId = nest.sequenceID, nestItem = nest.projectItem;
+  app.project.openSequence(mainId);
+  main = app.project.activeSequence;
+  var dur = a.duration || 5;
+  var mi = EF.pickTrack(main, 'video', t, t + dur, a.minTrack || 1);
+  EF.tracks(main, 'video')[mi].overwriteClip(nestItem, t);
+  var placed = EF.clipAt(EF.tracks(main, 'video')[mi], t + 0.01);
+  if (placed) { try { placed.end = EF.timeObj(t + dur); } catch (e3) {} }
+  return { track: mi, start: t, end: placed ? EF.sec(placed.end) : t + dur, name: a.name, sequenceId: nestId, layers: a.layers.length };
+};
+
+/** Put an existing sequence (a nested scene) back on the timeline. */
+EFAPI.placeSequence = function (a) {
+  var seq = EF.seq(), i, item = null;
+  for (i = 0; i < app.project.sequences.numSequences; i++) if (app.project.sequences[i].sequenceID === a.id) item = app.project.sequences[i].projectItem;
+  if (!item) throw new Error('sequence not found: ' + a.id);
+  var dur = a.duration || 5, ti = a.track >= 0 ? a.track : EF.pickTrack(seq, 'video', a.time, a.time + dur, a.minTrack || 1);
+  EF.tracks(seq, 'video')[ti].overwriteClip(item, a.time);
+  var c = EF.clipAt(EF.tracks(seq, 'video')[ti], a.time + 0.01);
+  if (c && a.duration) { try { c.end = EF.timeObj(a.time + a.duration); } catch (e) {} }
+  return { track: ti, start: a.time };
+};
+
 /* ---------------- dispatcher ---------------- */
 function ef_call(name, jsonArgs) {
   try {

@@ -153,6 +153,7 @@ test('templates, 3D carousel, icons and the style editor build the right Remotio
     { time: 5, overlay: true, spec: { duration: 2, elements: [{ type: 'cutoutTitle', props: { text: 'وأحلى لحظة' } }] } }] };
   const fetchImpl = async (url, o) => { llmReqs.push(JSON.parse(o.body)); return mockResponse({ choices: [{ message: { content: JSON.stringify(plan) } }] }); };
   const { S, seq } = world({ clip, fetchImpl });
+  S.saveSettings({ layeredScenes: false }); // this test checks the single-clip specs; layers have their own test
   const renders = [];
   S.proEngine = () => ({ installed: true, node: process.execPath, root: '/r' });
   const pro = require('../../core/proScene');
@@ -196,5 +197,59 @@ test('templates, 3D carousel, icons and the style editor build the right Remotio
     await S.undoLast();
     assert.ok(!seq.v.slice(1).some(tr => tr.items.some(i => i._start === 5)), 'the whole style edit undoes together');
     await assert.rejects(S.styleEdit({ style: 'عادي' }), /اختار استايل/);
+  } finally { pro.render = orig; }
+});
+
+test('editable scenes: layers nested as a sequence, found again on the timeline, edited in place, undo brings the old one back', async () => {
+  const clip = video('talk-layers.mp4');
+  const reqs = [];
+  const txt = c => (Array.isArray(c) ? c.map(p => p.text || '').join('') : c);
+  const fetchImpl = async (url, o) => { const b = JSON.parse(o.body); b.messages = b.messages.map(m => ({ ...m, content: txt(m.content) })); reqs.push(b); const cur = JSON.parse(/ده مشهد موجود:\n(.*)\n/.exec(b.messages[1].content)[1]); cur.elements[0].props.text = 'عنوان جديد'; cur.theme = { primary: '#FF0000' }; return mockResponse({ choices: [{ message: { content: JSON.stringify(cur) } }] }); };
+  const { S, h, seq } = world({ clip, fetchImpl });
+  S.proEngine = () => ({ installed: true, node: process.execPath, root: '/r' });
+  const pro = require('../../core/proScene');
+  const orig = pro.render, batches = [];
+  pro.render = async (o) => { if (o.batch) { batches.push(o.batch); o.batch.forEach(j => fs.writeFileSync(j.out, 'x')); return o.batch.map(j => j.out); } fs.writeFileSync(o.out, 'x'); return o.out; };
+  try {
+    seq.player = 2;
+    const spec = { duration: 4, background: { type: 'mesh' }, elements: [{ type: 'kineticTitle', from: 0, duration: 3, props: { text: 'عنوان قديم' } }, { type: 'lowerThird', from: 1, duration: 3, props: { name: 'محمد', role: 'مونتير' } }] };
+    const r = await S.renderProScene({ spec });
+    assert.equal(r.layered, true); assert.equal(r.layers, 4, 'background + 2 elements + look');
+    assert.equal(batches[0].length, 4, 'one Remotion run renders every layer');
+    assert.deepEqual(batches[0].map(j => path.extname(j.out)), ['.mp4', '.mov', '.mov', '.mov']);
+    // the main sequence holds ONE clip: the nested scene sequence
+    const placed = seq.v[r.track].items.find(c => c._start === 2);
+    assert.ok(placed.projectItem.isSequence(), 'nested sequence on the timeline');
+    assert.match(placed.name, /^EF Scene [0-9a-f]{8}$/);
+    const nest = h.pr.project.seqs.find(x => x.sequenceID === r.sequenceId);
+    assert.deepEqual(nest.v.slice(0, 4).map(t => t.items.map(c => [c._start, c._end])), [[[0, 4]], [[0, 3]], [[1, 4]], [[0, 4]]], 'one track per layer, each at its own time');
+    assert.equal(nest.a.every(t => t.items.length === 0), true);
+    assert.equal(h.pr.project.activeSeq, seq, 'back on the main sequence');
+    // find it again from the timeline (playhead on it)
+    seq.player = 3;
+    const sc = await S.sceneAt();
+    assert.equal(sc.id, r.id); assert.equal(sc.spec.elements[0].props.text, 'عنوان قديم'); assert.deepEqual([sc.clip.track, sc.clip.start], [r.track, 2]);
+    // edit with the AI: only the asked change, re-rendered in the same place
+    const e = await S.editSceneAI({ instruction: 'غيّر العنوان لـ "عنوان جديد" وخليه أحمر' });
+    assert.equal(reqs.length, 1); assert.match(reqs[0].messages[1].content, /عنوان قديم/);
+    assert.equal(e.replaced, r.id); assert.equal(e.track, r.track); assert.equal(e.start, 2);
+    const now = seq.v[r.track].items.filter(c => c._start === 2);
+    assert.equal(now.length, 1); assert.notEqual(now[0].name, placed.name, 'the new scene replaced the old one');
+    assert.equal((await S.sceneAt()).spec.elements[0].props.text, 'عنوان جديد');
+    assert.equal((await S.sceneAt()).spec.theme.primary, '#FF0000');
+    // undo: old scene is back exactly where it was
+    await S.undoLast();
+    const back = seq.v[r.track].items.filter(c => c._start === 2);
+    assert.equal(back.length, 1); assert.equal(back[0].name, placed.name);
+    // a single overlay element stays one clip (no nesting needed), and is still editable
+    const one = await S.renderProScene({ spec: { duration: 2, background: { type: 'transparent' }, elements: [{ type: 'emojiBurst', props: { emoji: '🔥' } }] }, time: 6 });
+    assert.equal(one.layered, false);
+    seq.player = 6.5;
+    assert.equal((await S.sceneAt()).id, one.id);
+    // the setting switches nesting off
+    S.saveSettings({ layeredScenes: false });
+    assert.equal((await S.renderProScene({ spec, time: 0 })).layered, false);
+    seq.player = 50;
+    await assert.rejects(S.replaceScene({ spec }), /مفيش مشهد/);
   } finally { pro.render = orig; }
 });

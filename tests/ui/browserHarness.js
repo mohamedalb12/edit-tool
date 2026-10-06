@@ -68,7 +68,7 @@
     history: [],
     proEngine: function () { return { installed: true, node: '/usr/bin/node', root: '/x/remotion' }; },
     designProScene: function (o) { return rec('designProScene', o, { width: 1920, height: 1080, fps: 30, duration: 6, theme: {}, background: { type: 'mesh' }, elements: [{ type: 'kineticTitle', from: 0, duration: 3, props: { text: 'أهلا', style: 'rise', highlight: [] } }, { type: 'cta', from: 2.8, duration: 3, position: 'bottom', props: { text: 'اشترك', sub: '' } }] }); },
-    renderProScene: function (o) { return rec('renderProScene', { preview: !!o.preview, elements: o.spec.elements.length, bg: o.spec.background.type }, o.preview ? { file: '/tmp/prev.png', spec: o.spec } : { track: 1, file: '/tmp/pro.mp4', spec: o.spec }); },
+    renderProScene: function (o) { return rec('renderProScene', { preview: !!o.preview, elements: o.spec.elements.length, bg: o.spec.background.type }, o.preview ? { file: '/tmp/prev.png', spec: o.spec } : { track: 1, file: '/tmp/pro.mp4', spec: o.spec, layered: true, layers: 3 }); },
     installProEngine: function () { return rec('installProEngine', null, { installed: true, node: '/usr/bin/node' }); },
     autoEditSteps: function () { return [{ id: 'transcribe', label: 'تفريغ الكلام', on: true }, { id: 'silences', label: 'شيل السكتات', on: true }, { id: 'hook', label: 'هوك', on: true, ai: true }, { id: 'broll', label: 'B-Roll', on: false, ai: true }]; },
     runAutoEdit: function (steps, onStep) {
@@ -101,6 +101,14 @@
     },
     projectState: function () { return rec('projectState', null, { sequence: 'Main' }); },
     // ——— new batch: templates, carousel, icons, sfx pack, downloads, web search, safe zones, relink, styles ———
+    // ——— updates + editable scenes ———
+    version: function () { return '1.2.0'; },
+    checkUpdate: function () { var avail = !!window.__updateAvailable; return rec('checkUpdate', null, { current: '1.2.0', latest: avail ? '1.3.0' : '1.2.0', available: avail, info: avail ? { version: '1.3.0', url: 'https://x/EditFast-1.3.0.zip', notes: 'مشاهد لايرز + تحديث تلقائي' } : null, errors: [] }); },
+    applyUpdate: function (info, p) { if (p) { p(0.5, 'download'); p(1, 'done'); } return rec('applyUpdate', info.version, { version: info.version, previous: '1.2.0' }); },
+    rollbackUpdate: function () { calls.push({ name: 'rollbackUpdate' }); return { version: '1.1.0' }; },
+    sceneAt: function () { return rec('sceneAt', null, { id: 'abcd1234', layered: true, sequenceId: 'seq-9', spec: { width: 1920, height: 1080, fps: 30, duration: 4, theme: {}, background: { type: 'mesh' }, elements: [{ type: 'kineticTitle', from: 0, duration: 4, props: { text: 'عنوان قديم', style: 'rise', highlight: [] } }] }, clip: { track: 1, start: 6, end: 10, name: 'EF Scene abcd1234' } }); },
+    replaceScene: function (o) { if (o.onProgress) o.onProgress(1); return rec('replaceScene', { id: o.scene.id, text: o.spec.elements[0].props.text }, { track: 1, start: 6, layered: true, layers: 2 }); },
+    editSceneAI: function (o) { return rec('editSceneAI', o, { replaced: 'abcd1234', track: 1, start: 6 }); },
     stylePacks: function () { return load('stylePacks').list(); },
     styleEdit: function (o) { if (o.onStep) { o.onStep('بيخطط', 0.2); o.onStep('خلص', 1); } return rec('styleEdit', { style: o.style, count: o.count, brief: o.brief }, { style: o.style, label: load('stylePacks').get(o.style).label, scenes: [{ time: 3, duration: 3, overlay: false, elements: ['collage'] }, { time: 12, duration: 4, overlay: true, elements: ['cutoutTitle'] }] }); },
     templatesList: function () { var T = load('templates'); return { cats: T.CATS, items: T.TEMPLATES.map(function (t) { return { id: t.id, cat: t.cat, label: t.label, overlay: t.overlay, duration: t.spec.duration, fields: T.fields(t), media: T.mediaNeed(t) }; }) }; },

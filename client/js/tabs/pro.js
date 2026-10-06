@@ -75,13 +75,16 @@
         var prev = UI.btn('معاينة', function () {
           UI.safe('بيعاين', function () { return S.renderProScene({ spec: state.spec, preview: true }).then(function (r) { UI.empty(previewBox).appendChild(h('img', { src: EF.fileUrl(r.file) + '?' + Date.now() })); }); }, prev);
         });
-        var go = UI.btn('ارندر وحطه على التايملين', function () {
+        var onP = function (p, st) { prog.set(p); UI.status(st === 'bundling' ? 'بيجهّز المحرك…' : 'رندر ' + Math.round(p * 100) + '%', 'busy'); };
+        var go = UI.btn(state.editing ? 'حدّث المشهد في مكانه' : 'ارندر وحطه على التايملين', function () {
           UI.safe('Remotion بيرندر', function () {
-            return S.renderProScene({ spec: state.spec, onProgress: function (p, st) { prog.set(p); UI.status(st === 'bundling' ? 'بيجهّز المحرك…' : 'رندر ' + Math.round(p * 100) + '%', 'busy'); } })
-              .then(function (r) { prog.set(1); UI.toast('المشهد نزل على V' + (r.track + 1) + ' ✓'); });
+            if (state.editing) return S.replaceScene({ scene: state.editing, spec: state.spec, onProgress: onP }).then(function (r) { prog.set(1); state.editing = null; UI.toast('المشهد اتحدّث في مكانه ✓ (تراجع يرجّع القديم)'); drawSpec(); });
+            return S.renderProScene({ spec: state.spec, onProgress: onP })
+              .then(function (r) { prog.set(1); UI.toast(r.layered ? 'المشهد نزل لايرز (' + r.layers + ') جوه سيكونس على V' + (r.track + 1) + ' — دبل كليك تفتحها ✓' : 'المشهد نزل على V' + (r.track + 1) + ' ✓'); });
           }, go);
         }, 'primary');
-        specBox.appendChild(UI.card(null, previewBox, prog, UI.row(prev, go)));
+        specBox.appendChild(UI.card(null, state.editing ? h('div', { class: 'edit-badge' }, '✎ بتعدّل مشهد موجود على V' + (state.editing.clip.track + 1) + ' عند ' + UI.fmtTime(state.editing.clip.start), UI.btn('إلغاء', function () { state.editing = null; drawSpec(); }, 'small')) : null,
+          previewBox, prog, UI.row(prev, go)));
       }
 
       // gallery
@@ -100,6 +103,25 @@
 
       view.appendChild(engCard);
       var packs = S.stylePacks();
+      // edit a scene that's already on the timeline
+      var aiFix = h('input', { class: 'grow', placeholder: 'أو قول التعديل… مثلاً: كبّر العنوان وخلّي اللون أحمر' });
+      var loadSel = UI.btn('عدّل المشهد المختار', function () {
+        UI.safe('بيدوّر على المشهد', function () {
+          return S.sceneAt().then(function (sc) {
+            if (!sc) return UI.toast('اختار مشهد EditFast على التايملين (أو حط رأس التشغيل عليه)', true);
+            state.spec = JSON.parse(JSON.stringify(sc.spec)); state.editing = sc; drawSpec();
+            specBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); UI.toast('اتفتح المشهد — عدّل ودوس "حدّث المشهد في مكانه"');
+          });
+        }, loadSel);
+      }, 'primary');
+      var aiBtn = UI.btn('عدّله بالذكاء الاصطناعي', function () {
+        if (!aiFix.value.trim()) return UI.toast('اكتب التعديل', true);
+        UI.safe('بيعدّل المشهد', function () { return S.editSceneAI({ instruction: aiFix.value }).then(function () { aiFix.value = ''; UI.toast('المشهد اتعدّل في مكانه ✓'); }); }, aiBtn);
+      });
+      view.appendChild(UI.card('تعديل مشهد نازل',
+        UI.row(loadSel), UI.row(aiFix, aiBtn),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: S.settings.layeredScenes !== false, onchange: function (e) { S.saveSettings({ layeredScenes: e.target.checked }); } }), ' المشاهد تنزل لايرز (سيكونس جوه السيكونس: خلفية، كل عنصر لوحده، اللوك)')),
+        UI.hint('كل مشهد بيتحفظ بمواصفاته. اختاره على التايملين وعدّل نصوصه وألوانه وتوقيته هنا، أو قول التعديل للذكاء الاصطناعي، ويترندر تاني في نفس المكان بالظبط.')));
       // whole-video style edit: one AI request plans every scene, Remotion renders them all
       var eBrief = h('input', { class: 'grow', placeholder: 'عايز إيه بالظبط؟ (اختياري) — مثلاً: ركّز على الأرقام والنصايح', value: state.editBrief, oninput: function (e) { state.editBrief = e.target.value; } });
       var eProg = UI.progress(), eLog = h('div', { class: 'hint' });

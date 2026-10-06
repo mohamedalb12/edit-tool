@@ -25,11 +25,16 @@ export const Scene = ({ spec }) => {
   const { fps, durationInFrames } = useVideoConfig();
   const th = themeFrom(spec.theme);
   const transparent = (spec.background || {}).type === 'transparent';
+  // layered export: each layer renders one part (background | one element | the look on top) on its own
+  const layer = spec.layer;
+  const showBg = !layer || layer === 'background';
+  const showEls = !layer || layer === 'element';
+  const showLook = !layer || layer === 'look';
   return (
     <AbsoluteFill style={{ fontFamily: th.fontStack, filter: FILTERS[spec.filter] || undefined }}>
       <style>{fontFaceCss}</style>
-      <Background th={th} type={(spec.background || {}).type || 'mesh'} colors={(spec.background || {}).colors} />
-      {(spec.elements || []).map((el, i) => {
+      {showBg ? <Background th={th} type={(spec.background || {}).type || 'mesh'} colors={(spec.background || {}).colors} /> : null}
+      {(showEls ? spec.elements || [] : []).map((el, i) => {
         const C = COMPONENTS[el.type]; if (!C) return null;
         const from = Math.max(0, Math.round((el.from || 0) * fps));
         const dur = Math.max(6, Math.min(durationInFrames - from, Math.round((el.duration || (durationInFrames / fps - (el.from || 0))) * fps)));
@@ -40,8 +45,8 @@ export const Scene = ({ spec }) => {
           </Sequence>
         );
       })}
-      <LookOverlay type={spec.overlay} th={th} text={spec.overlayText} />
-      {!transparent ? <Overlays grain={spec.grain !== false} vignette={spec.vignette !== false} sweep={!!spec.sweep} letterbox={!!spec.letterbox} /> : null}
+      {showLook ? <LookOverlay type={spec.overlay} th={th} text={spec.overlayText} /> : null}
+      {(layer === 'look' || (!layer && !transparent)) ? <Overlays grain={spec.grain !== false} vignette={spec.vignette !== false} sweep={!!spec.sweep} letterbox={!!spec.letterbox} /> : null}
     </AbsoluteFill>
   );
 };

@@ -15,7 +15,10 @@ const DEFAULTS = {
   quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true },
   captions: { maxWords: 4, maxDuration: 2.5, singleWord: false },
   libraryDirs: [],
-  favorites: {}
+  favorites: {},
+  layeredScenes: true, // Pro scenes land as a nested sequence with one track per layer
+  autoUpdate: true,
+  updateUrl: ''
 };
 
 function dataDir() {

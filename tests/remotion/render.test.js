@@ -76,3 +76,21 @@ test('Remotion: style scenes with the editor\'s own photos + video (local media 
   const icPng = await pro.render({ node: NODE, spec: ic, out: path.join(TMP, 'icon.png'), still: true, frame: 24, browserExecutable: BROWSER, gl: 'swiftshader' });
   assert.ok(fs.statSync(icPng).size > 2000);
 });
+
+test('Remotion: a scene rendered as separate layers in one run (opaque background, transparent element layers, look on top)', { skip: !ready && 'remotion not installed', timeout: 600000 }, async () => {
+  const spec = pro.normalize({ style: 'vhs', duration: 1, elements: [{ type: 'kineticTitle', from: 0, duration: 1, props: { text: 'لاير' } }, { type: 'emojiBurst', from: 0.4, duration: 0.6, props: { emoji: '🔥' } }] }, { width: 320, height: 180, fps: 25 });
+  const L = pro.layers(spec);
+  const batch = L.map((l, i) => ({ spec: l.spec, out: path.join(TMP, `layer${i}.${(l.spec.background || {}).type === 'transparent' ? 'mov' : 'mp4'}`) }));
+  const prog = [];
+  const outs = await pro.render({ node: NODE, batch, browserExecutable: BROWSER, gl: 'swiftshader', onProgress: p => prog.push(p) });
+  assert.equal(outs.length, 4);
+  const v = f => probe(f).streams.find(s => s.codec_type === 'video');
+  assert.equal(v(outs[0]).codec_name, 'h264'); assert.equal(+v(outs[0]).nb_read_frames, 25);
+  for (const f of outs.slice(1)) { assert.equal(v(f).codec_name, 'prores'); assert.match(v(f).pix_fmt, /yuva/); }
+  assert.equal(+v(outs[2]).nb_read_frames, 15, 'the emoji layer is only as long as the emoji');
+  assert.ok(prog.some(p => p > 0.9) && prog.some(p => p < 0.5), 'progress covers the whole batch');
+  // the title layer is mostly transparent (alpha), the background layer is full
+  const FF = require('../../core/ffmpeg').findBinary('ffmpeg');
+  const alphaMean = f => +execFileSync(FF, ['-v', 'error', '-ss', '0.8', '-i', f, '-frames:v', '1', '-vf', 'alphaextract,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-', '-f', 'null', '-']).toString().match(/YAVG=([\d.]+)/)[1];
+  assert.ok(alphaMean(outs[1]) < 80, 'title layer is see-through around the text');
+});
