@@ -13,7 +13,11 @@ test('style packs: detected from free text, applied by the validator, explained 
   assert.equal(packs.detect('ستايل ثري دي'), '3d');
   assert.equal(packs.detect('cinematic documentary'), 'cinematic');
   assert.equal(packs.detect('عادي'), null);
-  assert.equal(packs.list().length, 8);
+  assert.equal(packs.list().length, 24);
+  assert.equal(packs.detect('ستايل هرموزي'), 'hormozi'); assert.equal(packs.detect('زي مستر بيست'), 'beast'); assert.equal(packs.detect('VHS ريترو'), 'vhs'); assert.equal(packs.detect('أبيض وأسود'), 'noir');
+  for (const p of packs.list()) { const n = pro.normalize({ style: p.id, elements: [{ type: 'quote' }] }); assert.equal(n.background.type, p.background, p.id); assert.ok(p.captions.style && p.captions.anim, p.id); }
+  const vhs = pro.normalize({ style: 'vhs', elements: [{ type: 'quote' }] }); assert.equal(vhs.overlay, 'vhs'); assert.equal(vhs.filter, 'faded');
+  assert.equal(pro.normalize({ overlay: 'nope', filter: 'bw', elements: [{ type: 'quote' }] }).overlay, undefined);
   const s = pro.normalize({ style: 'collage', elements: [{ type: 'collage', props: { media: ['@1', '@0', '@9', 'C:\\x\\a.png', 'rm -rf'], title: 'رحلة' } }] }, { media: ['/f/0.jpg', '/f/1.jpg'] });
   assert.equal(s.background.type, 'paper');
   assert.equal(s.theme.background, '#F3EADB');
@@ -248,7 +252,7 @@ test('agent: new tools are offered and routed to the right services', async () =
   const ag = new EditFastAgent({ llm: {}, model: 'm', services: s });
   const r1 = await ag.callTool('style_edit', { style: 'collage', count: 2 });
   assert.deepEqual(r1, { style: 'كولاج آرت', scenes: [{ time: 2, duration: 3, overlay: false, elements: ['collage'] }] });
-  assert.deepEqual(seen[0], ['styleEdit', { style: 'collage', brief: '', count: 2 }]);
+  assert.deepEqual(seen[0], ['styleEdit', { style: 'collage', brief: '', count: 2, captions: false }]);
   const r2 = await ag.callTool('add_icon', { query: 'عربية', anim: 'bounce', time: 4 });
   assert.equal(r2.icon, 'car'); assert.equal(seen[1][1].anim, 'bounce'); assert.equal(seen[1][1].time, 4);
   assert.ok((await ag.callTool('add_icon', { query: 'zzz' })).error);
@@ -256,4 +260,29 @@ test('agent: new tools are offered and routed to the right services', async () =
   assert.deepEqual(r3, { missing: 3, relinked: 1, needsReview: ['b.mp4', 'c.mp4'], failed: [] });
   await ag.callTool('place_trendy_sfx', { id: 'whoosh', time: 3 });
   assert.deepEqual(seen.pop(), ['placeSfx', { id: 'whoosh', time: 3 }]);
+});
+
+test('caption motion: speed curves (fast→slow), word timing modes, 17 entrances, 13 looks', () => {
+  const C = require('../../core/captionStyles');
+  assert.equal(C.ANIMS.length, 17); assert.equal(C.STYLES.length, 13); assert.equal(C.EASES.length, 7);
+  // "out" covers most of the distance early and creeps in at the end; "in" is the opposite
+  assert.ok(C.ease('out', 0.25, 3) > 0.55 && C.ease('out', 0.75, 3) > 0.98);
+  assert.ok(C.ease('in', 0.25, 3) < 0.02);
+  assert.ok(C.ease('out', 0.25, 6) > C.ease('out', 0.25, 2), 'stronger curve = faster start');
+  for (const e of C.EASES) { assert.ok(Math.abs(C.ease(e.id, 0, 3)) < 1e-9, e.id); assert.ok(Math.abs(C.ease(e.id, 1, 3) - 1) < 1e-6, e.id); }
+  assert.ok(C.ease('back', 0.7, 3) > 1, 'back overshoots');
+  const cue = { start: 2, end: 4, words: [{ text: 'a', start: 2, end: 2.5 }, { text: 'b', start: 2.5, end: 3 }, { text: 'c', start: 3.4, end: 4 }] };
+  const o = C.opts({ anim: 'drop', animDur: 0.4 });
+  assert.equal(C.wordStart(cue, 0, o), 2, 'first word never starts before the clip');
+  assert.ok(Math.abs(C.wordStart(cue, 2, o) - (3.4 - 0.12)) < 1e-9, 'sync: lands on the spoken word');
+  assert.ok(Math.abs(C.wordStart(cue, 2, C.opts({ timing: 'cascade', wordGap: 0.2 })) - 2.4) < 1e-9, 'cascade: my own speed');
+  assert.equal(C.wordStart(cue, 2, C.opts({ timing: 'line' })), 2);
+});
+
+test('agent: captions with an entrance animation and my own speed', async () => {
+  const { EditFastAgent } = require('../../core/agent');
+  let got;
+  const ag = new EditFastAgent({ llm: {}, model: 'm', services: { addAnimatedCaptions: async o => { got = o; return { clips: 3 }; } } });
+  await ag.callTool('add_captions', { style: 'hormozi', anim: 'drop', ease: 'out', anim_speed: 0.3, timing: 'cascade', word_gap: 0.15, exit: 'fade' });
+  assert.deepEqual(got.style, { style: 'hormozi', anim: 'drop', ease: 'out', animDur: 0.3, timing: 'cascade', wordGap: 0.15, exit: 'fade' });
 });

@@ -370,7 +370,7 @@ test('Reels: real offline face detection tracks a moving face, and the vertical 
   execFileSync(FFMPEG, ['-loglevel', 'error', '-y', '-ss', '2', '-i', src, '-ss', '2', '-i', out, '-filter_complex', '[0:v]scale=-2:480[a];[1:v]scale=-2:480[b];[a][b]hstack', '-frames:v', '1', path.join(SHOTS, '18-reels-face-tracking.png')]);
 });
 
-test('animated captions: 8 word-synced styles draw correctly (Arabic RTL), active word changes the picture', async () => {
+test('animated captions: 13 word-synced styles draw correctly (Arabic RTL), active word changes the picture', async () => {
   const shots = await page.evaluate(() => {
     const W = 640, H = 360, cue = { start: 0, end: 2.4, words: [{ text: 'المونتاج', start: 0, end: 0.6 }, { text: 'بقى', start: 0.6, end: 1.0 }, { text: 'أسرع', start: 1.0, end: 1.6 }, { text: 'بكتير', start: 1.6, end: 2.3 }] };
     const res = {};
@@ -393,7 +393,7 @@ test('animated captions: 8 word-synced styles draw correctly (Arabic RTL), activ
     fs.writeFileSync(path.join(TMP, `cap-${id}.png`), Buffer.from(r.png, 'base64'));
   }
   const ids = Object.keys(shots);
-  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', ...ids.flatMap(id => ['-i', path.join(TMP, `cap-${id}.png`)]), '-filter_complex', ids.map((_, i) => `[${i}:v]`).join('') + `xstack=inputs=${ids.length}:layout=0_0|w0_0|0_h0|w0_h0|0_h0+h0|w0_h0+h0|0_h0+h0+h0|w0_h0+h0+h0`, path.join(SHOTS, '19-caption-styles.png')]);
+  execFileSync(FFMPEG, ['-loglevel', 'error', '-y', ...ids.flatMap(id => ['-i', path.join(TMP, `cap-${id}.png`)]), '-filter_complex', ids.map((_, i) => `[${i}:v]`).join('') + `xstack=inputs=${ids.length}:layout=${ids.map((_, i) => `${(i % 3) * 640}_${Math.floor(i / 3) * 360}`).join('|')}:fill=black`, path.join(SHOTS, '19-caption-styles.png')]);
 });
 
 test('thumbnail styles render over a real photo (Arabic title, highlight word, readability gradient)', async () => {
@@ -486,13 +486,14 @@ test('ثامبنيل: best frames, AI titles, live preview, save PNG', async () 
 
 test('كابشن متحرك from the transcription tab: style pick, position, render + translate', async () => {
   await open('transcribe'); await clearCalls();
-  assert.equal(await page.locator('.cap-grid .tile').count(), 8);
+  assert.equal(await page.locator('.cap-grid:not(.anim-grid) .tile').count(), 13);
   await page.locator('.cap-grid .tile[data-style="karaoke"]').click();
-  await page.locator('.seg button', { hasText: 'فوق' }).click();
+  await page.locator('.seg button', { hasText: /^فوق$/ }).click();
   await clickText('نزّل كابشن متحرك');
   await clickText('ترجم الكابشن');
   const c = await page.evaluate(() => window.__calls);
-  assert.deepEqual(c.find(x => x.name === 'addAnimatedCaptions').args, { style: 'karaoke', position: 'top' });
+  const ac = c.find(x => x.name === 'addAnimatedCaptions').args;
+  assert.equal(ac.style, 'karaoke'); assert.equal(ac.position, 'top');
   assert.equal(c.find(x => x.name === 'translateCaptions').args.lang, 'English');
 });
 
@@ -673,6 +674,38 @@ test('agent token meter shows usage and the prompt-cache share', async () => {
   await clickText('ابعت');
   await page.waitForFunction(() => /75% من الكاش/.test(document.querySelector('.row.usage').textContent));
   assert.match(await page.textContent('.row.usage'), /12\.0k in · 300 out · 75% من الكاش · \$0\.012/);
+});
+
+test('حركة الكلام: entrance grid with live previews, speed curve, my own speed, style presets', async () => {
+  await open('transcribe'); await clearCalls();
+  assert.equal(await page.locator('.anim-grid .tile').count(), 17);
+  await page.locator('.anim-grid .tile[data-anim="drop"]').click();
+  const curve0 = await page.locator('canvas.ease-curve').evaluate(c => c.toDataURL());
+  await page.locator('.seg button', { hasText: 'نطّات' }).click();
+  assert.notEqual(await page.locator('canvas.ease-curve').evaluate(c => c.toDataURL()), curve0, 'the curve redraws');
+  await page.locator('.seg button', { hasText: 'سريع ← بطيء' }).click();
+  assert.equal(await page.isVisible('text=سرعة ظهور الكلام'), false);
+  await page.locator('.seg button', { hasText: 'ورا بعض بسرعتي' }).click();
+  assert.ok(await page.isVisible('text=سرعة ظهور الكلام'));
+  await clickText('نزّل كابشن متحرك');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addAnimatedCaptions').args);
+  assert.equal(a.anim, 'drop'); assert.equal(a.ease, 'out'); assert.equal(a.timing, 'cascade'); assert.ok(a.wordGap > 0);
+  await page.locator('.anim-grid').scrollIntoViewIfNeeded();
+  await shot('33-caption-motion');
+  // drawing: "drop" starts above its resting place and settles fast-then-slow; "slideStart" comes from the right in Arabic
+  const r = await page.evaluate(() => {
+    const CS = window.EFCaptions, W = 480, H = 270, c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+    const cue = { start: 0, end: 2, words: [{ text: 'المونتاج', start: 0, end: 1 }, { text: 'بقى', start: 1, end: 2 }] };
+    function centroid(t, o) { CS.draw(ctx, cue, t, Object.assign({ position: 'center', size: 0.15 }, o), W, H); const d = ctx.getImageData(0, 0, W, H).data; let sx = 0, sy = 0, n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 128) { const p = (i - 3) / 4; sx += p % W; sy += Math.floor(p / W); n++; } return n ? { x: sx / n, y: sy / n, n } : null; }
+    const drop = [0.04, 0.12, 0.6].map(t => centroid(t, { anim: 'drop', animDur: 0.35, distance: 2, ease: 'out', strength: 3 }));
+    const slide = [0.04, 0.6].map(t => centroid(t, { anim: 'slideStart', animDur: 0.35, distance: 2 }));
+    const casc = [0.05, 0.25].map(t => centroid(t, { anim: 'fade', timing: 'cascade', wordGap: 0.2, animDur: 0.05 }).n);
+    return { drop, slide, casc };
+  });
+  assert.ok(r.drop[0].y < r.drop[1].y && r.drop[1].y < r.drop[2].y, 'falls into place: ' + JSON.stringify(r.drop));
+  assert.ok(r.drop[2].y - r.drop[1].y < r.drop[1].y - r.drop[0].y, 'fast at first, slow at the end');
+  assert.ok(r.slide[0].x > r.slide[1].x + 10, 'Arabic: enters from the right');
+  assert.ok(r.casc[1] > r.casc[0] * 1.2, 'cascade shows the 2nd word on my timing, before it is spoken');
 });
 
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

@@ -431,3 +431,5 @@ canvas.thumb-stage { display: block; width: 100%; aspect-ratio: 16/9; }
 .tile .thumb { position: relative; }
 .tile .thumb video.tpl-vid { position: absolute; inset: 0; pointer-events: none; animation: fadeIn .25s ease both; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ease-row { align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.ease-curve { width: 160px; height: 88px; flex: none; border-radius: 12px; background: rgba(8,7,16,.5); border: 1px solid var(--line); }

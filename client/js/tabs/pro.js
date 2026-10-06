@@ -1,12 +1,12 @@
 /* مشاهد Pro — Remotion: المخرج الذكي بيصمم، وانت تعدّل وتعاين وتنزّل. */
 (function () {
   var EF = window.EF, UI = EF.ui, h = UI.h;
-  var state = { spec: null, brief: '', overlay: false, duration: 6, style: '', editStyle: 'collage', editCount: 3, editBrief: '' };
+  var state = { spec: null, brief: '', overlay: false, duration: 6, style: '', editStyle: 'collage', editCount: 3, editBrief: '', editCaptions: true };
   var SWATCH = { collage: ['#F3EADB', '#E63946', '#FFD166'], '3d': ['#0B0B14', '#7C5CFF', '#22D3EE'], neon: ['#05010F', '#00F0FF', '#FF2BD6'], minimal: ['#F5F5F2', '#111111', '#FF5A1F'], cinematic: ['#080706', '#C8A15A', '#F2E3C6'], popart: ['#FFE135', '#FF3B6B', '#2B6CFF'], glass: ['#0B0A12', '#8B5CF6', '#EC4899'], social: ['#0A0F1F', '#2563EB', '#22C55E'] };
   function styleChips(packs, value, onchange, allowNone) {
     var wrap = h('div', { class: 'style-chips' });
     (allowNone ? [{ id: '', label: 'ستايلي' }] : []).concat(packs).forEach(function (p) {
-      var sw = SWATCH[p.id] || ['#2a2340', '#8B5CF6', '#FBBF24'];
+      var sw = SWATCH[p.id] || (p.theme ? [p.theme.background, p.theme.primary, p.theme.accent] : ['#2a2340', '#8B5CF6', '#FBBF24']);
       wrap.appendChild(h('button', { type: 'button', class: 'style-chip' + (p.id === value ? ' on' : ''), 'data-style': p.id, onclick: function () {
         Array.prototype.forEach.call(wrap.children, function (x) { x.classList.remove('on'); }); this.classList.add('on'); onchange(p.id);
       } }, h('span', { class: 'sw', style: { background: 'linear-gradient(135deg,' + sw[0] + ' 0 40%,' + sw[1] + ' 40% 70%,' + sw[2] + ' 70%)' } }), p.label));
@@ -106,14 +106,15 @@
       var eGo = UI.btn('مونتج الفيديو بالاستايل ده', function () {
         eProg.set(0);
         UI.safe('مونتاج بالاستايل', function () {
-          return S.styleEdit({ style: state.editStyle, brief: state.editBrief, count: state.editCount, onStep: function (m, p) { eLog.textContent = m; eProg.set(p); UI.status(m, 'busy'); } })
+          return S.styleEdit({ style: state.editStyle, brief: state.editBrief, count: state.editCount, captions: state.editCaptions, onStep: function (m, p) { eLog.textContent = m; eProg.set(p); UI.status(m, 'busy'); } })
             .then(function (r) { eProg.set(1); eLog.textContent = r.scenes.length + ' مشاهد ' + r.label + ' نزلت على التايملين — تراجع من تبويب المونتاج الذكي لو مش عاجبك'; UI.toast('خلص ✓'); });
         }, eGo);
       }, 'primary');
       view.appendChild(UI.card('مونتاج بالاستايل',
         styleChips(packs, state.editStyle, function (v) { state.editStyle = v; }),
         UI.field('عدد المشاهد', UI.slider(1, 8, 1, state.editCount, function (v) { return v; }, function (v) { state.editCount = v; })),
-        eBrief, UI.modelPicker('scene'), eProg, eLog, UI.row(eGo),
+        eBrief, UI.row(h('label', null, h('input', { type: 'checkbox', checked: state.editCaptions, onchange: function (e) { state.editCaptions = e.target.checked; } }), ' وكابشن متحرك بنفس الاستايل (لو الفيديو متفرّغ)')),
+        UI.modelPicker('scene'), eProg, eLog, UI.row(eGo),
         UI.hint('المخرج الذكي بيقرا كلام الفيديو ويشوف لقطاته ويخطط كل المشاهد في طلب واحد، وRemotion بيرندرها على جهازك (من غير توكنز) وتنزل فوق الفيديو في أماكنها.')));
       view.appendChild(UI.card('المخرج الذكي', brief,
         UI.field('الاستايل', styleChips(packs, state.style, function (v) { state.style = v; }, true)),

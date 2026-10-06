@@ -5,7 +5,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const POSITIONS = ['center', 'top', 'bottom', 'left', 'right', 'lowerThird', 'lowerThirdRight', 'topLeft', 'topRight'];
-const BACKGROUNDS = ['mesh', 'gradient', 'grid', 'particles', 'spotlight', 'paper', 'halftone', 'studio', 'solid', 'transparent'];
+const BACKGROUNDS = ['mesh', 'gradient', 'grid', 'particles', 'spotlight', 'paper', 'halftone', 'studio', 'speedlines', 'sunset', 'blueprint', 'chalkboard', 'grunge', 'flat', 'solid', 'transparent'];
+const FILTERS = ['bw', 'sepia', 'warm', 'cool', 'vivid', 'faded'];
+const OVERLAYS = ['vhs', 'glitch', 'scanlines', 'lightleak', 'ticker'];
 const packs = require('./stylePacks');
 
 // type → { label, props: {name: [type, default, description]} }
@@ -98,6 +100,10 @@ function normalize(spec, { width = 1920, height = 1080, fps = 30, style, media =
   if (s.background && Array.isArray(s.background.colors)) bg.colors = s.background.colors.filter(c => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 4);
   const flag = (k, d) => (s[k] === undefined ? (pack && pack[k] !== undefined ? !!pack[k] : d) : !!s[k]);
   const out = { width: Math.round(num(s.width, width)), height: Math.round(num(s.height, height)), fps: Math.round(num(s.fps, fps)), duration, theme, background: bg, elements, grain: flag('grain', true), vignette: flag('vignette', true), sweep: flag('sweep', false), letterbox: flag('letterbox', false) };
+  const pick = (k, list) => { const v = s[k] !== undefined ? s[k] : pack && pack[k]; return list.includes(v) ? v : undefined; };
+  const filter = pick('filter', FILTERS), overlay = pick('overlay', OVERLAYS);
+  if (filter) out.filter = filter;
+  if (overlay) { out.overlay = overlay; if (s.overlayText) out.overlayText = String(s.overlayText).slice(0, 80); }
   if (pack) out.style = s.style;
   return out;
 }
@@ -113,6 +119,7 @@ const DIRECTOR_SYSTEM = (styleId) => [
   'media[]: لو فيه لقطات متاحة من الفيديو اكتب "@رقمها" (مثلاً ["@0","@3"]).',
   styleId ? packs.guideText(styleId) : '',
   `الخلفيات: ${BACKGROUNDS.join(' | ')} (transparent لو المشهد هيتحط فوق فيديو).`,
+  `لون المشهد كله (اختياري) filter: ${FILTERS.join(' | ')}. طبقة لوك (اختياري) overlay: ${OVERLAYS.join(' | ')} + overlayText.`,
   `الأماكن position: ${POSITIONS.join(' | ')}.`,
   'قواعد الإخراج عشان المشهد يطلع جامد:',
   '1) عنصر أساسي واحد واضح في كل لحظة؛ ماتزحمش الكادر. لو فيه أكتر من عنصر مع بعض، حطهم في أماكن مختلفة (top/bottom) وصغّر الصورة (size 0.6).',
@@ -168,4 +175,4 @@ function render({ node, spec, out, still = false, frame, browserExecutable, gl, 
   });
 }
 
-module.exports = { CATALOG, POSITIONS, BACKGROUNDS, normalize, cleanProps, resolveMedia, catalogText, mediaText, DIRECTOR_SYSTEM, direct, engineInfo, render };
+module.exports = { CATALOG, POSITIONS, BACKGROUNDS, FILTERS, OVERLAYS, normalize, cleanProps, resolveMedia, catalogText, mediaText, DIRECTOR_SYSTEM, direct, engineInfo, render };

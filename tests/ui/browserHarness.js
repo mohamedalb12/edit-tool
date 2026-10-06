@@ -88,7 +88,7 @@
     thumbnailCandidates: function () { return rec('thumbnailCandidates', null, [{ time: 6.5, score: 2.4, image: '/tests/fixtures/face.png' }, { time: 1, score: 1.2, image: '/tests/fixtures/face.png' }]); },
     thumbnailIdeas: function () { return rec('thumbnailIdeas', null, { titles: [{ text: 'السر اللي محدش قالهولك', highlight: 'السر' }], best: 0 }); },
     saveThumbnail: function (b64, name) { return rec('saveThumbnail', { bytes: b64.length, name: name }, '/proj/EditFast Thumbnails/x.png'); },
-    addAnimatedCaptions: function (o) { if (o.onProgress) o.onProgress(1); return rec('addAnimatedCaptions', { style: o.style.style, position: o.style.position }, { clips: 5, cues: 5 }); },
+    addAnimatedCaptions: function (o) { if (o.onProgress) o.onProgress(1); return rec('addAnimatedCaptions', { style: o.style.style, position: o.style.position, anim: o.style.anim, ease: o.style.ease, timing: o.style.timing, animDur: o.style.animDur, wordGap: o.style.wordGap }, { clips: 5, cues: 5 }); },
     translateCaptions: function (o) { return rec('translateCaptions', o, { cues: 5, lang: o.lang }); },
     glassFrame: function () { return rec('glassFrame', null, null); },
     liquidGlass: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('liquidGlass', { params: o.params }, { track: 2, source: 'talk', duration: 4 }); },

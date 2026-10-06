@@ -911,7 +911,7 @@ class Services {
    * The AI plans `count` scenes in the chosen style across the video (one request), Remotion renders them,
    * and they land on the timeline above the footage.
    */
-  async styleEdit({ style, brief = '', count = 3, onStep } = {}) {
+  async styleEdit({ style, brief = '', count = 3, captions = false, onStep } = {}) {
     const packs = require('./stylePacks'), pro = require('./proScene');
     const id = packs.get(style) ? style : packs.detect(style || brief);
     if (!id) throw new Error('اختار استايل: ' + packs.list().map(p => p.label).join('، '));
@@ -949,8 +949,14 @@ class Services {
         placed.push({ time, duration: full.duration, overlay: !!sc.overlay, elements: full.elements.map(e => e.type), track: r.track, file: r.file });
       }
     });
+    // captions that match the look (e.g. Hormozi = yellow pop, noir = soft fade)
+    let cap = null;
+    if (captions && this.transcript && this.renderCaptionsImpl) {
+      step('كابشن بنفس الاستايل', 0.97);
+      cap = await this.addAnimatedCaptions({ style: { ...pack.captions } }).catch(e => ({ error: e.message }));
+    }
     step('خلص', 1);
-    return { style: id, label: pack.label, scenes: placed };
+    return { style: id, label: pack.label, scenes: placed, captions: cap };
   }
 
   /* ---------- مكتبة القوالب ---------- */

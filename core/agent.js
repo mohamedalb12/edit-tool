@@ -8,6 +8,7 @@ const vision = require('./vision');
 const packs = require('./stylePacks');
 const templates = require('./templates');
 const sfxPack = require('./sfxPack');
+const captionStyles = require('./captionStyles');
 
 const LEVELS = {
   strong: { label: 'قوي', feature: 'agent_strong', maxSteps: 24 },
@@ -34,7 +35,10 @@ const TOOLS = [
     start: { type: 'number' }, end: { type: 'number' }, title: { type: 'string', description: 'نص اختياري يظهر على الهوك' } }, ['start', 'end']),
   fn('add_captions', 'نزّل كابشن على التايملين من التفريغ. animated=true (الافتراضي) = كابشن متحرك متزامن مع كل كلمة بستايل؛ animated=false = SRT عادي يتعدّل من تبويب Text.', {
     max_words: { type: 'number' }, max_duration: { type: 'number' }, single_word: { type: 'boolean' }, animated: { type: 'boolean' },
-    style: { type: 'string', enum: ['karaoke', 'pop', 'box', 'bold', 'neon', 'gradient', 'minimal', 'typewriter'] }, position: { type: 'string', enum: ['bottom', 'center', 'top'] } }),
+    style: { type: 'string', enum: captionStyles.STYLES.map(x => x.id) }, position: { type: 'string', enum: ['bottom', 'center', 'top'] },
+    anim: { type: 'string', enum: captionStyles.ANIMS.map(x => x.id), description: 'دخول كل كلمة: drop نازلة من فوق، slideStart من الجنب…' },
+    ease: { type: 'string', enum: captionStyles.EASES.map(x => x.id), description: 'out = سريع في الأول وبطيء في الآخر' }, anim_speed: { type: 'number', description: 'مدة دخول الكلمة بالثواني (0.1-1.2)' },
+    timing: { type: 'string', enum: ['sync', 'cascade', 'line'] }, word_gap: { type: 'number', description: 'للـ cascade: ثواني بين كل كلمة' }, exit: { type: 'string', enum: captionStyles.EXITS.map(x => x.id) } }),
   fn('translate_captions', 'ترجم الكابشن للغة تانية (بنفس التوقيت) كتراك كابشن جديد.', { lang: { type: 'string', description: 'مثلاً English, French' } }, ['lang']),
   fn('apply_motion', 'طبّق قالب حركة (كي فريمز على Transform) على الكليب اللي عند وقت معين.', {
     preset: { type: 'string', enum: motion.PRESETS.map(p => p.id) }, level: { type: 'number', enum: [1, 2, 3] }, time: { type: 'number' }, track: { type: 'number' } }, ['preset', 'time']),
@@ -46,8 +50,8 @@ const TOOLS = [
   fn('pro_scene', 'مشهد موشن جرافيك احترافي بمحرك Remotion (أقوى بكتير من build_scene): عناوين حركية، أرقام، رسوم، قوائم، لوور ثيرد، لوجو، اشترك، كولاج، كاروسيل ثري دي، نص ثري دي، محادثة، إشعار، متصفح… اكتب brief والمخرج هيصممه (ولو فيه style بيستخدم لقطات من الفيديو).', {
     brief: { type: 'string', description: 'وصف المشهد (المحتوى والإحساس)' }, spec: { type: 'object', description: 'اختياري: مواصفات جاهزة {duration, style, background:{type}, elements:[{type, from, duration, position, props}]}' },
     style: { type: 'string', enum: Object.keys(packs.PACKS) }, duration: { type: 'number' }, overlay: { type: 'boolean', description: 'true = خلفية شفافة فوق الفيديو' }, time: { type: 'number' } }),
-  fn('style_edit', 'مونتاج بالاستايل: المخرج يخطط كذا مشهد بالاستايل المطلوب (كولاج آرت، ثري دي، نيون، مينيمال، سينمائي، بوب آرت، جلاس، سوشيال) من كلام الفيديو ولقطاته، وRemotion يرندرها ويحطها على التايملين. طلب واحد للذكاء الاصطناعي لكل المشاهد.', {
-    style: { type: 'string', enum: Object.keys(packs.PACKS) }, brief: { type: 'string', description: 'اللي المونتير عايزه (اختياري)' }, count: { type: 'number', description: 'عدد المشاهد 1-8' } }, ['style']),
+  fn('style_edit', 'مونتاج بالاستايل: المخرج يخطط كذا مشهد بالاستايل المطلوب (' + packs.list().map(p => p.label).join('، ') + ') من كلام الفيديو ولقطاته، وRemotion يرندرها ويحطها على التايملين. طلب واحد للذكاء الاصطناعي لكل المشاهد.', {
+    style: { type: 'string', enum: Object.keys(packs.PACKS) }, brief: { type: 'string', description: 'اللي المونتير عايزه (اختياري)' }, count: { type: 'number', description: 'عدد المشاهد 1-8' }, captions: { type: 'boolean', description: 'كابشن متحرك بنفس الاستايل' } }, ['style']),
   fn('add_template', 'حط قالب جاهز من مكتبة القوالب (نصوص، جلاس، واجهات، مشاهد، ثري دي، كولاج) بنصوصك.', {
     id: { type: 'string', enum: templates.TEMPLATES.map(t => t.id) }, values: { type: 'object', description: 'نصوص بالشكل {"0.text":"..."} (رقم العنصر.اسم الخاصية)' }, time: { type: 'number' }, duration: { type: 'number' } }, ['id']),
   fn('carousel_3d', 'كاروسيل ثري دي من لقطات الفيديو (أو ملفات): ring | coverflow | helix | stack.', {
@@ -156,7 +160,9 @@ class EditFastAgent {
       case 'add_captions': {
         const o = { maxWords: args.max_words, maxDuration: args.max_duration, singleWord: args.single_word };
         if (args.animated === false) return s.addCaptions(o);
-        return s.addAnimatedCaptions({ ...o, style: { style: args.style || (this.style && this.style.captionStyle) || 'bold', position: args.position } });
+        const st = { style: args.style || (this.style && this.style.captionStyle) || 'bold', position: args.position, anim: args.anim, ease: args.ease, animDur: args.anim_speed, timing: args.timing, wordGap: args.word_gap, exit: args.exit };
+        Object.keys(st).forEach(k => st[k] === undefined && delete st[k]);
+        return s.addAnimatedCaptions({ ...o, style: st });
       }
       case 'translate_captions': return s.translateCaptions({ lang: args.lang });
       case 'apply_motion': return s.applyMotion({ preset: args.preset, level: args.level || (this.style && +this.style.motion) || 2, time: args.time, track: args.track });
@@ -190,7 +196,7 @@ class EditFastAgent {
       case 'find_shorts': return s.findShorts({ count: args.count || 3 });
       case 'make_short': return s.makeShort({ start: args.start, end: args.end, title: args.title || 'Short' }, { reframe: args.reframe !== false, captions: args.captions !== false });
       case 'set_playhead': return s.setPlayhead(args.time);
-      case 'style_edit': { const r = await s.styleEdit({ style: args.style, brief: args.brief || '', count: args.count || 3 }); return { style: r.label, scenes: r.scenes.map(x => ({ time: x.time, duration: x.duration, overlay: x.overlay, elements: x.elements })) }; }
+      case 'style_edit': { const r = await s.styleEdit({ style: args.style, brief: args.brief || '', count: args.count || 3, captions: !!args.captions }); return { style: r.label, scenes: r.scenes.map(x => ({ time: x.time, duration: x.duration, overlay: x.overlay, elements: x.elements })) }; }
       case 'add_template': { const r = await s.addTemplate({ id: args.id, values: args.values || {}, time: args.time, duration: args.duration }); return { track: r.track, start: r.start, end: r.end }; }
       case 'carousel_3d': { const r = await s.carousel3D({ files: args.files || [], layout: args.layout || 'ring', speed: args.speed ?? 1, title: args.title || '', background: args.background || 'studio', duration: args.duration || 6, time: args.time }); return { track: r.track, start: r.start, end: r.end }; }
       case 'add_icon': {
