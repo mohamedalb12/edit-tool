@@ -23,7 +23,9 @@ else
 fi
 if command -v npm >/dev/null 2>&1; then
   echo "==> محرك المشاهد Pro (Remotion) — مرة واحدة"
-  (cd "$DEST/remotion" && rm -rf node_modules && npm install --no-audit --no-fund --omit=dev) || echo "!! ثبّته بعدين من تبويب مشاهد Pro"
+  # own npm cache: a root-owned ~/.npm (old npm bug) can't break the install
+  mkdir -p "$HOME/.editfast/npm-cache"
+  (cd "$DEST/remotion" && rm -rf node_modules && npm install --no-audit --no-fund --omit=dev --cache "$HOME/.editfast/npm-cache") || echo "!! ثبّته بعدين من تبويب مشاهد Pro"
 fi
 echo ""
 echo "خلصت ✓  افتح بريمير > Window > Extensions > EditFast"

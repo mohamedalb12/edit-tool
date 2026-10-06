@@ -8,7 +8,7 @@
 
 ## التثبيت
 
-1. نزّل `EditFast-1.3.0.zip` وفكّه.
+1. نزّل `EditFast-1.3.1.zip` وفكّه.
 2. **ويندوز:** دبل كليك على `scripts/install-windows.bat`
    **ماك:** دبل كليك على `scripts/install-mac.command` (لو اترفض: كليك يمين > Open)
 3. افتح بريمير ← `Window > Extensions > EditFast`

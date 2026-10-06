@@ -41,7 +41,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements; $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User') }
 }
 if (Get-Command npm -ErrorAction SilentlyContinue) {
-  Push-Location (Join-Path $dest 'remotion'); try { npm install --no-audit --no-fund --omit=dev } catch { Write-Warning 'ثبّت المحرك بعدين من تبويب مشاهد Pro' }; Pop-Location
+  Push-Location (Join-Path $dest 'remotion'); try { npm install --no-audit --no-fund --omit=dev --cache (Join-Path $env:USERPROFILE '.editfast\npm-cache') } catch { Write-Warning 'ثبّت المحرك بعدين من تبويب مشاهد Pro' }; Pop-Location
 } else { Write-Warning 'مفيش Node.js — ثبّته من nodejs.org وبعدين ثبّت المحرك من تبويب مشاهد Pro' }
 Write-Host ""
 Write-Host "خلصت ✓  افتح بريمير > Window > Extensions > EditFast"

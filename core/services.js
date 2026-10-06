@@ -550,7 +550,9 @@ class Services {
   async installProEngine(onLine) {
     const e = this.proEngine();
     if (!e.npm) throw new Error('مش لاقي npm — ثبّت Node.js (المثبّت بيعمله) وجرب تاني.');
-    await ff.run(e.npm, ['install', '--no-audit', '--no-fund', '--omit=dev'], { spawn: { cwd: e.root, shell: process.platform === 'win32' }, onStderr: onLine, onStdout: d => onLine && onLine(String(d)) });
+    // its own npm cache: a root-owned ~/.npm (EACCES, old npm bug) can't break the engine install
+    const cache = path.join(config.dataDir(), 'npm-cache'); fs.mkdirSync(cache, { recursive: true });
+    await ff.run(e.npm, ['install', '--no-audit', '--no-fund', '--omit=dev', '--cache', cache], { spawn: { cwd: e.root, shell: process.platform === 'win32' }, onStderr: onLine, onStdout: d => onLine && onLine(String(d)) });
     return this.proEngine();
   }
 

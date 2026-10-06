@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.editfast.panel" ExtensionBundleVersion="1.3.0" ExtensionBundleName="EditFast"
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.editfast.panel" ExtensionBundleVersion="1.3.1" ExtensionBundleName="EditFast"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.editfast.panel.main" Version="1.3.0" />
+    <Extension Id="com.editfast.panel.main" Version="1.3.1" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
