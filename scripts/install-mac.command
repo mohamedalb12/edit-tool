@@ -14,10 +14,11 @@ for v in 9 10 11 12 13; do defaults write "com.adobe.CSXS.$v" PlayerDebugMode 1;
 
 if command -v brew >/dev/null 2>&1; then
   echo "==> ffmpeg + whisper.cpp عن طريق Homebrew"
-  command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-  command -v whisper-cli >/dev/null 2>&1 || brew install whisper-cpp
-  command -v node >/dev/null 2>&1 || brew install node
-  command -v yt-dlp >/dev/null 2>&1 || brew install yt-dlp
+  command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg || true
+  command -v whisper-cli >/dev/null 2>&1 || brew install whisper-cpp || true
+  command -v node >/dev/null 2>&1 || brew install node || true
+  command -v yt-dlp >/dev/null 2>&1 || brew install yt-dlp || true
+  command -v deno >/dev/null 2>&1 || brew install deno || true   # YouTube needs a JS runtime for yt-dlp
 else
   echo "!! مفيش Homebrew — ثبّته من https://brew.sh وبعدين: brew install ffmpeg whisper-cpp yt-dlp"
 fi

@@ -38,7 +38,11 @@
     seq: function () { return Promise.resolve(seq); },
     setPlayhead: function (t) { return rec('setPlayhead', t, {}); },
     quickCutAnalyze: function (o) { return rec('quickCutAnalyze', o, { cuts: [{ start: 1, end: 1.6 }, { start: 5, end: 6.2 }], removedSeconds: 1.8 }); },
-    quickCut: function (o) { return rec('quickCut', o, { removedSeconds: 1.8, ranges: 2, sequence: 'Main - EditFast قص' }); },
+    quickCut: function (o) { var a = Object.assign({}, o); delete a.onProgress; if (o.onProgress) o.onProgress(1); return rec('quickCut', a, o.mode === 'markers' ? { markers: (o.cuts || []).length, ranges: (o.cuts || []).length } : { removedSeconds: 1.8, ranges: 2, sequence: 'Main - EditFast قص' }); },
+    findFillers: function (o) { return rec('findFillers', o, [{ start: 0.6, end: 1.0, text: 'اممم', kind: 'sound' }, { start: 2.1, end: 2.4, text: 'آآآ', kind: 'sound' }].concat((o.extra || []).indexOf('يعني') >= 0 ? [{ start: 3, end: 3.3, text: 'يعني', kind: 'word' }] : [])); },
+    cutRanges: function (o) { return rec('cutRanges', { ranges: o.ranges, mode: o.mode }, { ranges: o.ranges.length, removed: o.ranges.length, sequence: 'Main - EditFast قص' }); },
+    bleepWords: function (o) { return rec('bleepWords', o, { hits: 2, mode: o.mode }); },
+    youtubePack: function () { return rec('youtubePack', null, { titles: ['ازاي تمنتج أسرع ×10', 'سر المونتاج السريع'], description: 'سطر الخطاف\n\nفصول الفيديو:\n00:00 المقدمة', tags: ['مونتاج', 'editing'], chapters: '00:00 المقدمة', ai: true }); },
     autoEffectsSuggest: function (o) { return rec('autoEffectsSuggest', o, [{ time: 1.2, type: 'sfx', prompt: 'whoosh', reason: 'انتقال' }, { time: 3, type: 'motion', preset: 'punch-in', reason: 'تأكيد' }]); },
     autoEffectsApply: function (l, p) { if (p) p(0.5); return rec('autoEffectsApply', l, { applied: l.length, failed: [] }); },
     translateSfx: function (t) { return rec('translateSfx', t, 'fast whoosh then heavy impact'); },
@@ -103,6 +107,17 @@
     // ——— new batch: templates, carousel, icons, sfx pack, downloads, web search, safe zones, relink, styles ———
     // ——— client revisions ———
     _rev: { project: '', rounds: [] },
+    // ——— diagnostics ———
+    _log: [],
+    logError: function (e) { S._log.push(e); return e; },
+    selfTest: function (o) {
+      if (o && o.onStep) o.onStep('بيجرّب أوامر بريمير…');
+      var r = { at: 'now', panel: { node: '18.17.1', platform: 'darwin arm64' }, premiere: { env: { app: 'Premiere Pro', version: '25.2.0', os: 'Macintosh OS 14.5' }, probes: [{ id: 'import', ok: true, ms: 40 }, { id: 'placeStill', ok: true, ms: 30, detail: 'V2' }, { id: 'razor', ok: true, ms: 12 }, { id: 'transform', ok: false, ms: 20, detail: 'Transform effect not added' }, { id: 'captions', ok: true, ms: 80 }] },
+        tools: { ffmpeg: { ok: true, detail: 'ffmpeg version 7.1' }, whisper: { ok: true, detail: 'whisper-cli' }, whisperModel: { ok: true, detail: 'ggml-small.bin · 466 MB' }, ytdlp: { ok: false, detail: 'مش موجود' } }, network: { openrouter: { ok: true, detail: '200 · 120ms' } },
+        ready: { captions: { ok: true }, nativeCaptions: { ok: true }, cut: { ok: true }, audio: { ok: true }, motion: { ok: false, why: 'إضافة Transform مش شغالة (بريمير مش بالإنجليزي؟) — هيستخدم Motion بداله' }, download: { ok: false, why: 'yt-dlp مش متثبّت (تبويب التحميل)' }, reels: { ok: true }, graphics: { ok: false, why: 'محرك الجرافيك مش متثبّت' }, ai: { ok: true }, markers: { ok: true } } };
+      S.lastSelfTest = r; return rec('selfTest', null, r);
+    },
+    diagnosticReport: function () { return 'EditFast diagnostic report\n  NO transform\nLast errors:\n' + S._log.map(function (e) { return '  ' + e.action + ': ' + e.error; }).join('\n'); },
     // ——— spend counter ———
     _spend: [],
     spendSummary: function () {
@@ -140,6 +155,9 @@
     sfxPackInstall: function () { return rec('sfxPackInstall', null, { files: 30 }); },
     generateMusic: function (o) { return rec('generateMusic', { prompt: o.prompt, seconds: o.seconds, instrumental: o.instrumental }, { file: '/tmp/music.mp3', prompt: 'lofi chill' }); },
     ytdlpBin: function () { return settings.paths.ytdlp === 'none' ? null : '/usr/bin/yt-dlp'; },
+    _ytInstalled: true,
+    ytdlpStatus: function () { return Promise.resolve({ installed: S._ytInstalled, path: S._ytInstalled ? '/data/bin/yt-dlp_macos' : null, version: S._ytInstalled ? '2026.08.19' : '', jsRuntime: 'deno:/opt/homebrew/bin/deno', managed: true, cookiesFrom: settings.ytdlpCookies || null }); },
+    ytdlpInstall: function (o) { if (o && o.onProgress) o.onProgress(1); S._ytInstalled = true; return rec('ytdlpInstall', null, { file: '/data/bin/yt-dlp_macos', version: '2026.08.19' }); },
     downloadInfo: function (u) { return rec('downloadInfo', u, { id: 'abc', title: 'فيديو تجربة', duration: 212, thumbnail: '', uploader: 'EditFast', heights: [1080, 720, 480], platform: { id: 'youtube', label: 'يوتيوب' } }); },
     downloadMedia: function (o) { if (o.onProgress) o.onProgress(0.5); return rec('downloadMedia', { url: o.url, quality: o.quality, start: o.start, end: o.end, place: o.place }, { file: '/proj/EditFast Media/Downloads/x.mp4', type: 'video', placed: { track: 0 } }); },
     webSearch: function (o) { return rec('webSearch', { q: o.q, type: o.type, sources: o.sources }, { q: o.q, results: [{ id: 'openverse-1', source: 'openverse', type: 'photo', title: 'Cairo tower', url: 'https://x/1.jpg', thumb: '/tests/fixtures/face.png', width: 1600, height: 900, license: 'CC BY 2.0', credit: 'someone', page: 'https://x' }, { id: 'commons-2', source: 'commons', type: 'photo', title: 'Nile', url: 'https://x/2.jpg', thumb: '/tests/fixtures/face.png', width: 800, height: 1200, license: 'CC BY-SA 4.0' }], errors: [{ source: 'google', error: 'no key' }] }); },

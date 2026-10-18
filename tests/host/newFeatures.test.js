@@ -54,6 +54,7 @@ test('downloads: yt-dlp file lands next to the project and on the timeline; Pint
   const fake = path.join(TMP, 'yt-dlp-e2e');
   fs.writeFileSync(fake, `#!${process.execPath}
 const a = process.argv.slice(2), fs = require('fs');
+if (a[0] === '--version') { console.log('2026.08.19'); process.exit(0); }
 if (a.some(x => /pinterest|pin\\.it/.test(x))) { console.error('ERROR: [Pinterest] No video formats found'); process.exit(1); }
 const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'clip [x1]').replace('%(ext)s', 'mp4');
 console.log('EFPROG 100% 1MiB/s'); fs.writeFileSync(out, 'v'); console.log('EFFILE ' + out);
@@ -205,7 +206,7 @@ test('editable scenes: layers nested as a sequence, found again on the timeline,
   const reqs = [];
   const txt = c => (Array.isArray(c) ? c.map(p => p.text || '').join('') : c);
   const fetchImpl = async (url, o) => { const b = JSON.parse(o.body); b.messages = b.messages.map(m => ({ ...m, content: txt(m.content) })); reqs.push(b); const cur = JSON.parse(/ده مشهد موجود:\n(.*)\n/.exec(b.messages[1].content)[1]); cur.elements[0].props.text = 'عنوان جديد'; cur.theme = { primary: '#FF0000' }; return mockResponse({ choices: [{ message: { content: JSON.stringify(cur) } }] }); };
-  const { S, h, seq } = world({ clip, fetchImpl });
+  const { S, h, seq } = world({ clip, fetchImpl, settings: { layeredScenes: true } }); // layers are opt-in now
   S.proEngine = () => ({ installed: true, node: process.execPath, root: '/r' });
   const pro = require('../../core/proScene');
   const orig = pro.render, batches = [];
@@ -295,4 +296,27 @@ test('spend counter: every answered AI request is recorded (OpenRouter cost), th
   assert.ok(s.byModel.some(m => m.id === 'anthropic/claude-opus-5.5'));
   const e = S.costEstimate('hook');
   assert.ok(e.low > 0); assert.equal(e.what, 'اختيار الهوك');
+});
+
+test('self-test: every Premiere call on a throwaway sequence, cleaned up after; tools + readiness + a report without keys', async () => {
+  const fetchImpl = async () => mockResponse({ data: [] });
+  const { S, h } = world({ fetchImpl, clip: video('selftest-src.mp4', 4) });
+  const before = h.pr.project.seqs.length, active = h.pr.project.activeSeq;
+  const steps = [];
+  const r = await S.selfTest({ onStep: m => steps.push(m) });
+  const ids = r.premiere.probes.map(p => p.id);
+  for (const id of ['qe', 'import', 'newSequence', 'addTrack', 'placeStill', 'clipEnd', 'markers', 'razor', 'rippleDelete', 'transform', 'captions', 'clone', 'cleanup']) assert.ok(ids.includes(id), id);
+  const bad = r.premiere.probes.filter(p => !p.ok);
+  assert.deepEqual(bad, [], JSON.stringify(bad));
+  assert.equal(h.pr.project.seqs.length, before, 'test sequences deleted');
+  assert.equal(h.pr.project.activeSeq, active, 'back on the user\'s sequence');
+  assert.ok(!h.pr.project.root.kids.some(k => k.name === 'EditFast Self-Test'), 'test bin deleted');
+  assert.equal(r.premiere.env.app, 'Premiere Pro (mock)');
+  assert.ok(r.tools.ffmpeg.ok); assert.ok('ytdlp' in r.tools);
+  assert.ok(r.ready.cut.ok && r.ready.markers.ok, JSON.stringify(r.ready));
+  assert.ok(steps.length >= 2);
+  S.logError({ tab: 'download', action: 'بيحمّل', error: 'فشل مع مفتاح sk-or-abcdef123456' });
+  const rep = S.diagnosticReport();
+  assert.match(rep, /OK  razor/); assert.match(rep, /ready cut: yes/); assert.match(rep, /بيحمّل/);
+  assert.doesNotMatch(rep, /abcdef123456/, 'keys are redacted');
 });

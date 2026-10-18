@@ -8,7 +8,7 @@ const { parseClock, hash } = require('./util');
 const arabicFix = require('./arabicFix');
 
 const DIALECTS = [
-  { id: 'egyptian', label: 'مصري', lang: 'ar', prompt: 'ده فيديو باللهجة المصرية. إزيكم يا جماعة، النهارده هنتكلم عن حاجة مهمة أوي.' },
+  { id: 'egyptian', label: 'مصري', lang: 'ar', prompt: 'ده فيديو باللهجة المصرية. إزيكم يا جماعة، اممم، النهارده يعني هنتكلم عن، آآ، حاجة مهمة أوي.' },
   { id: 'gulf', label: 'خليجي / سعودي', lang: 'ar', prompt: 'هذا فيديو باللهجة الخليجية. هلا والله، اليوم بنتكلم عن شي مهم وايد.' },
   { id: 'levantine', label: 'شامي', lang: 'ar', prompt: 'هاد فيديو باللهجة الشامية. مرحبا يا جماعة، اليوم رح نحكي عن شغلة كتير مهمة.' },
   { id: 'iraqi', label: 'عراقي', lang: 'ar', prompt: 'هذا فيديو باللهجة العراقية. هلا بيكم، اليوم راح نحچي عن شغلة كلش مهمة.' },

@@ -22,22 +22,45 @@
     return new Promise(function (resolve) { window.__adobe_cep__.evalScript(script, resolve); });
   };
 
+  // host calls that can legitimately take minutes (cuts, many clips, keyframes); everything else answers in seconds
+  var LONG = { removeRanges: 1, multicamApply: 1, placeFiles: 1, buildLayeredScene: 1, applyKeyframes: 1, setVolumeKeys: 1, createSequenceFromClips: 1, relinkApply: 1, selfTest: 1, organizeApply: 1, createCaptions: 1 };
+  EF.hostLoaded = null; // null = not tried, true, or the load error text
+
   EF.host = function (name, args) {
     if (EF.test && EF.test.host) return EF.test.host(name, args);
     // non-ASCII (Arabic text, paths) is \u-escaped: evalScript can garble raw UTF-8 on some Premiere builds
     var payload = JSON.stringify(JSON.stringify(args || {})).replace(/[\u007f-\uffff]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); });
-    return EF.evalScript('ef_call(' + JSON.stringify(name) + ',' + payload + ')').then(function (res) {
+    var ms = LONG[name] ? 20 * 60000 : 3 * 60000, timer;
+    var call = EF.evalScript('ef_call(' + JSON.stringify(name) + ',' + payload + ')').then(function (res) {
+      clearTimeout(timer);
       var r;
-      try { r = JSON.parse(res); } catch (e) { throw new Error('رد غريب من بريمير: ' + String(res).slice(0, 200)); }
-      if (!r.ok) throw new Error(r.error || 'خطأ في بريمير');
+      try { r = JSON.parse(res); } catch (e) {
+        var why = EF.hostLoaded && EF.hostLoaded !== true ? ' — سكريبت الإضافة جوه بريمير ماتحمّلش: ' + EF.hostLoaded : (String(res) === 'EvalScript error.' ? ' — سكريبت الإضافة جوه بريمير مش شغال؛ اقفل اللوحة وافتحها تاني، ولو فضل كده شغّل "افحص بريمير بتاعي" من الإعدادات' : '');
+        throw hostErr(name, 'رد غريب من بريمير: ' + String(res).slice(0, 160) + why);
+      }
+      if (!r.ok) throw hostErr(name, (r.error || 'خطأ في بريمير'), r.line);
       return r.data;
     });
+    var timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { reject(hostErr(name, 'بريمير مارجّعش رد بعد ' + Math.round(ms / 60000) + ' دقيقة — ممكن يكون فيه رسالة مفتوحة في بريمير مستنياك، أو العملية تقيلة. بُص على بريمير.')); }, ms);
+    });
+    return Promise.race([call, timeout]);
   };
+  function hostErr(fn, msg, line) {
+    var e = new Error(msg);
+    e.hostFn = fn; e.hostLine = line;
+    return e;
+  }
 
+  /** load host.jsx and report a readable reason when it fails (syntax error, wrong path, ExtendScript off) */
   EF.loadHostScript = function () {
     if (!EF.isCEP) return Promise.resolve();
     var p = (EF.extRoot + '/host/host.jsx').replace(/\\/g, '/');
-    return EF.evalScript('$.evalFile("' + p + '")');
+    return EF.evalScript('(function(){try{$.evalFile("' + p + '");return typeof ef_call==="function"?"ok":"ef_call missing";}catch(e){return "ERR "+e.message+" (line "+e.line+")";}})()').then(function (r) {
+      EF.hostLoaded = r === 'ok' ? true : String(r || 'no answer');
+      if (EF.hostLoaded !== true) throw new Error('سكريبت الإضافة جوه بريمير ماتحمّلش: ' + EF.hostLoaded);
+      return true;
+    });
   };
 
   EF.pickFolder = function (title) {

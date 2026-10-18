@@ -34,6 +34,37 @@
       }, 'primary');
       view.appendChild(UI.card('دوّر في الكلام', UI.row(q, UI.btn('دوّر', doSearch, 'primary')), res));
       view.appendChild(UI.card('فصول يوتيوب', UI.modelPicker('chapters'), UI.row(UI.btn('طلّع الفصول (AI)', function () { chapters(false); }, 'primary'), UI.btn('أوفلاين', function () { chapters(true); })), chap));
+      // ——— باقة النشر: عناوين + وصف بالفصول + تاجات ———
+      function copyText(t) { var ta = h('textarea', { style: { position: 'fixed', opacity: 0 } }); ta.value = t; document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} ta.remove(); if (!ok && navigator.clipboard) navigator.clipboard.writeText(t); UI.toast('اتنسخ ✓'); }
+      var pack = h('div');
+      var packBtn = UI.btn('اعمل باقة النشر', function () {
+        UI.safe('بيكتب باقة النشر', function () {
+          return S.youtubePack({}).then(function (r) {
+            UI.empty(pack);
+            if (r.titles.length) {
+              var tl = h('div', { class: 'list' });
+              r.titles.forEach(function (t) { tl.appendChild(h('div', { class: 'item click', title: 'دوس تنسخ', onclick: function () { copyText(t); } }, h('bdi', { class: 'grow' }, t), h('span', { class: 'hint' }, t.length + ' حرف'))); });
+              pack.appendChild(h('h4', null, 'عناوين (دوس تنسخ)')); pack.appendChild(tl);
+            }
+            var desc = h('textarea', { rows: 8, class: 'yt-desc' }); desc.value = r.description;
+            pack.appendChild(h('h4', null, 'الوصف')); pack.appendChild(desc);
+            pack.appendChild(UI.row(UI.btn('انسخ الوصف', function () { copyText(desc.value); }, 'small'), r.tags.length ? UI.btn('انسخ التاجات (' + r.tags.length + ')', function () { copyText(r.tags.join(', ')); }, 'small') : null));
+            if (!r.ai) pack.appendChild(UI.hint('من غير مفتاح OpenRouter: الوصف فيه الفصول بس. حط المفتاح من الإعدادات للعناوين والتاجات.'));
+          });
+        }, packBtn);
+      }, 'primary');
+      view.appendChild(UI.card('باقة النشر على يوتيوب', UI.hint('5 عناوين + وصف بلهجة الفيديو + فصول جاهزة + تاجات — كله من كلام الفيديو.'), UI.row(packBtn), pack));
+      // ——— بيب على كلام معيّن (شتيمة، اسم، رقم تليفون…) ———
+      var bl = h('input', { class: 'grow', placeholder: 'الكلمات مفصولة بفاصلة… مثلاً: اسم الشركة, رقم', value: (S.settings.bleepWords || []).join(', ') });
+      var bMode = 'beep';
+      var bBtn = UI.btn('نفّذ', function () {
+        var list = bl.value.split(/[,،\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+        if (!list.length) return UI.toast('اكتب الكلمات الأول', true);
+        S.saveSettings({ bleepWords: list });
+        UI.safe('بيدوّر', function () { return S.bleepWords({ list: list, mode: bMode }).then(function (r) { UI.toast(r.hits ? r.hits + ' مكان ✓' + (bMode === 'markers' ? ' (ماركرز)' : '') : 'مالقيتش الكلمات دي في الكلام'); }); }, bBtn);
+      }, 'primary');
+      view.appendChild(UI.card('بيب على كلام', UI.hint('بيلاقي الكلمات في التفريغ: "بيب" بيكتم الصوت تحتها ويحط صفارة على تراك لوحده، "كتم" بيكتم بس، "ماركرز" يعلّمها تراجعها.'),
+        bl, UI.field('الطريقة', UI.seg([{ value: 'beep', label: 'بيب' }, { value: 'mute', label: 'كتم' }, { value: 'markers', label: 'ماركرز' }], bMode, function (v) { bMode = v; })), UI.row(bBtn)));
       view.appendChild(UI.card('ماركرز على الإيقاع (أوفلاين)', UI.hint('بيحلل آخر تراك صوت فيه موسيقى ويحط ماركر على كل بيت.'),
         UI.field('كل', UI.seg([{ value: 1, label: 'بيت' }, { value: 2, label: '2' }, { value: 4, label: '4 (بار)' }], 1, function (v) { every = v; })), UI.row(beatBtn)));
     }

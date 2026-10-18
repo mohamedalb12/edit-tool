@@ -28,6 +28,11 @@ const TOOLS = [
   fn('look_at_frames', 'شوف صور من الفيديو نفسه (فريمات) عشان تحكم على الصورة: أحسن تيك، اللقطة مضلمة/مهزوزة، فين حد بيضحك، مكان الـ B-Roll، الألوان… الصور بتوصلك في الرسالة اللي بعدها.', {
     times: { type: 'array', items: { type: 'number' }, description: 'أوقات على التايملين (لحد 12). فاضي = عينة من اللقطات' }, count: { type: 'number' } }),
   fn('get_transcript', 'هات التفريغ (جمل بتوقيتها) لفترة معينة أو للكل.', { from: { type: 'number' }, to: { type: 'number' } }),
+  fn('remove_fillers', 'شيل كلمات الحشو (اممم، آآآ، uh) من الكلام — وممكن كلمات زي "يعني" لو المونتير عايز — على نسخة.', {
+    extra: { type: 'array', items: { type: 'string' }, description: 'كلمات إضافية تتشال كحشو (اختياري)' }, markers_only: { type: 'boolean', description: 'ماركرز بس من غير قص' } }),
+  fn('bleep_words', 'بيب أو كتم أو ماركرز على كلمات معيّنة في الكلام (شتيمة، اسم، رقم).', {
+    words: { type: 'array', items: { type: 'string' } }, mode: { type: 'string', enum: ['beep', 'mute', 'markers'] } }, ['words']),
+  fn('youtube_pack', 'اكتب باقة النشر: 5 عناوين ووصف بالفصول وتاجات من كلام الفيديو (نص يرجع للمونتير، مش بيغيّر التايملين).'),
   fn('remove_silences', 'شيل السكتات وقفل الفراغات (على نسخة من السيكوينس افتراضيًا).', {
     sensitivity: { type: 'number', description: '1..10 (أعلى = يقص أكتر)' }, crossfade: { type: 'boolean' } }),
   fn('remove_repeats', 'شيل التكرار وإعادات التيك والتهتهة من التفريغ.', { dry_run: { type: 'boolean' } }),
@@ -157,6 +162,9 @@ class EditFastAgent {
         return { frames: frames.length, times: frames.map(f => f.time), note: 'الصور جاية في الرسالة الجاية' };
       }
       case 'get_transcript': return s.transcriptSentences(args.from, args.to);
+      case 'remove_fillers': { const list = await s.findFillers({ extra: args.extra || [] }); if (!list.length) return { removed: 0, note: 'مفيش حشو' }; return s.cutRanges({ ranges: list, mode: args.markers_only ? 'markers' : 'remove' }); }
+      case 'bleep_words': return s.bleepWords({ list: args.words || [], mode: args.mode || 'beep' });
+      case 'youtube_pack': return s.youtubePack({});
       case 'remove_silences': return s.quickCut({ sensitivity: args.sensitivity, crossfade: args.crossfade !== false });
       case 'remove_repeats': return s.removeRepeats({ dryRun: !!args.dry_run });
       case 'make_hook': return s.makeHook(args);

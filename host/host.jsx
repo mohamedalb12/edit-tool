@@ -1,4 +1,4 @@
-/* EditFast — ExtendScript host for Adobe Premiere Pro.
+/* EditFast \u2014 ExtendScript host for Adobe Premiere Pro.
  * ES3 only (ExtendScript): no let/const, arrow functions, Array.indexOf, JSON, String.trim.
  * Every public function goes through ef_call(name, jsonArgs) and returns a JSON string {ok, data|error}.
  */
@@ -51,7 +51,7 @@ EF.json = {
 /* ---------------- helpers ---------------- */
 EF.seq = function () {
   var s = app.project.activeSequence;
-  if (!s) throw new Error('افتح سيكوينس الأول'); // افتح سيكوينس الأول
+  if (!s) throw new Error('\u0627\u0641\u062a\u062d \u0633\u064a\u0643\u0648\u064a\u0646\u0633 \u0627\u0644\u0623\u0648\u0644'); // \u0627\u0641\u062a\u062d \u0633\u064a\u0643\u0648\u064a\u0646\u0633 \u0627\u0644\u0623\u0648\u0644
   return s;
 };
 
@@ -213,14 +213,54 @@ EF.ensureBin = function (path) {
   return cur;
 };
 
-EF.importFile = function (path, binPath) {
-  var item = EF.findByPath(path);
-  if (item) return item;
-  var bin = EF.ensureBin(binPath || 'EditFast');
-  app.project.importFiles([path], true, bin, false);
-  item = EF.findByPath(path);
-  if (!item) throw new Error('import failed: ' + path);
-  return item;
+/* macOS can store Arabic letters with hamza/madda decomposed (NFD): compose them so path compares match */
+EF.normPath = function (p) {
+  return String(p || '').replace(/\\/g, '/').toLowerCase()
+    .replace(/\u0627\u0653/g, '\u0622').replace(/\u0627\u0654/g, '\u0623').replace(/\u0648\u0654/g, '\u0624')
+    .replace(/\u0627\u0655/g, '\u0625').replace(/\u064a\u0654/g, '\u0626').replace(/\u06d5\u0654/g, '\u06c0');
+};
+EF.baseName = function (p) { var s = String(p || '').replace(/\\/g, '/'); return s.substring(s.lastIndexOf('/') + 1); };
+
+/** an already imported item for this file inside one bin (no project-wide scan) */
+EF.findInBin = function (bin, path) {
+  var i, ch, norm = EF.normPath(path);
+  for (i = 0; i < bin.children.numItems; i++) {
+    ch = bin.children[i];
+    if (ch && ch.type !== ProjectItemType.BIN && EF.normPath(EF.mediaPath(ch)) === norm) return ch;
+  }
+  return null;
+};
+
+/**
+ * Import files into a bin in ONE importFiles call and return the items in the same order.
+ * Existing items in that bin are reused; new ones are found among the bin's new children (by path, then by name),
+ * so a path written in a different Unicode form or with different case never turns into a false "import failed".
+ */
+EF.importMany = function (paths, binPath) {
+  var bin = EF.ensureBin(binPath || 'EditFast'), out = [], need = [], i, j, ch, before = bin.children.numItems;
+  for (i = 0; i < paths.length; i++) { out.push(EF.findInBin(bin, paths[i])); if (!out[i]) need.push(paths[i]); }
+  if (!need.length) return out;
+  app.project.importFiles(need, true, bin, false);
+  var fresh = [];
+  for (j = before; j < bin.children.numItems; j++) { ch = bin.children[j]; if (ch && ch.type !== ProjectItemType.BIN) fresh.push(ch); }
+  for (i = 0; i < paths.length; i++) {
+    if (out[i]) continue;
+    var norm = EF.normPath(paths[i]), name = EF.normPath(EF.baseName(paths[i])), hit = null;
+    for (j = 0; j < fresh.length && !hit; j++) if (EF.normPath(EF.mediaPath(fresh[j])) === norm) hit = fresh[j];
+    for (j = 0; j < fresh.length && !hit; j++) if (EF.normPath(fresh[j].name) === name || EF.normPath(EF.baseName(EF.mediaPath(fresh[j]))) === name) hit = fresh[j];
+    if (!hit) hit = EF.findInBin(bin, paths[i]);
+    if (!hit) throw new Error('\u0628\u0631\u064a\u0645\u064a\u0631 \u0645\u0627\u0639\u0631\u0641\u0634 \u064a\u0633\u062a\u0648\u0631\u062f \u0627\u0644\u0645\u0644\u0641 \u062f\u0647 (\u0635\u064a\u063a\u062a\u0647 \u0645\u0634 \u0645\u062f\u0639\u0648\u0645\u0629 \u0623\u0648 \u0645\u0634 \u0645\u0648\u062c\u0648\u062f): ' + EF.baseName(paths[i]));
+    out[i] = hit;
+  }
+  return out;
+};
+
+EF.importFile = function (path, binPath) { return EF.importMany([path], binPath)[0]; };
+
+/** the source length of a project item in seconds (0 when unknown, e.g. a still with no length yet) */
+EF.itemDuration = function (item) {
+  try { var d = EF.sec(item.getOutPoint()) - EF.sec(item.getInPoint()); if (d > 0) return d; } catch (e) {}
+  return 0;
 };
 
 /* ---------------- public API ---------------- */
@@ -251,25 +291,39 @@ EFAPI.sequenceInfo = function () {
 EFAPI.setPlayhead = function (a) { var seq = EF.seq(); seq.setPlayerPosition(EF.secToTicks(a.time)); return { time: a.time }; };
 
 EFAPI.cloneSequence = function (a) {
-  var seq = EF.seq(), before = app.project.sequences.numSequences, i, s, newest = null;
+  var seq = EF.seq(), ids = {}, i, s, newest = null, tries;
+  for (i = 0; i < app.project.sequences.numSequences; i++) ids[app.project.sequences[i].sequenceID] = 1;
   seq.clone();
-  for (i = 0; i < app.project.sequences.numSequences; i++) {
-    s = app.project.sequences[i];
-    if (s.sequenceID !== seq.sequenceID && s.name.indexOf(seq.name) === 0) newest = s;
+  for (tries = 0; tries < 30 && !newest; tries++) {
+    for (i = 0; i < app.project.sequences.numSequences; i++) { s = app.project.sequences[i]; if (!ids[s.sequenceID]) newest = s; }
+    if (!newest) $.sleep(100);
   }
-  if (!newest && app.project.sequences.numSequences > before) newest = app.project.sequences[app.project.sequences.numSequences - 1];
-  if (!newest) throw new Error('clone failed');
+  if (!newest) throw new Error('\u0645\u0627\u0642\u062f\u0631\u062a\u0634 \u0623\u0639\u0645\u0644 \u0646\u0633\u062e\u0629 \u0645\u0646 \u0627\u0644\u0633\u064a\u0643\u0648\u0646\u0633');
   if (a && a.name) { try { newest.name = a.name; } catch (e) {} }
   app.project.openSequence(newest.sequenceID);
+  // make sure the copy is the active one before anything gets cut
+  for (tries = 0; tries < 30; tries++) {
+    if (app.project.activeSequence && app.project.activeSequence.sequenceID === newest.sequenceID) break;
+    try { app.project.activeSequence = newest; } catch (e2) {}
+    $.sleep(100);
+  }
+  if (!app.project.activeSequence || app.project.activeSequence.sequenceID !== newest.sequenceID) throw new Error('\u0627\u0644\u0646\u0633\u062e\u0629 \u0627\u062a\u0639\u0645\u0644\u062a \u0628\u0633 \u0628\u0631\u064a\u0645\u064a\u0631 \u0645\u0627\u0641\u062a\u062d\u0647\u0627\u0634 \u2014 \u0627\u0641\u062a\u062d\u0647\u0627 \u0628\u0625\u064a\u062f\u0643 \u0648\u062c\u0631\u0651\u0628 \u062a\u0627\u0646\u064a: ' + newest.name);
   return { name: newest.name, id: newest.sequenceID };
 };
 
 /** Razor every unlocked track at time s. */
-EF.razorAll = function (seq, qseq, s) {
+EF.razorAll = function (seq, qseq, s, keep) {
   var tc = EF.timecode(seq, s), i, n = 0;
-  for (i = 0; i < seq.videoTracks.numTracks; i++) if (!EF.isLocked(seq.videoTracks[i])) { qseq.getVideoTrackAt(i).razor(tc); n++; }
-  for (i = 0; i < seq.audioTracks.numTracks; i++) if (!EF.isLocked(seq.audioTracks[i])) { qseq.getAudioTrackAt(i).razor(tc); n++; }
+  for (i = 0; i < seq.videoTracks.numTracks; i++) if (!EF.isLocked(seq.videoTracks[i]) && !EF.kept(keep, 'video', i)) { qseq.getVideoTrackAt(i).razor(tc); n++; }
+  for (i = 0; i < seq.audioTracks.numTracks; i++) if (!EF.isLocked(seq.audioTracks[i]) && !EF.kept(keep, 'audio', i)) { qseq.getAudioTrackAt(i).razor(tc); n++; }
   return n;
+};
+/** tracks the user asked us not to cut (e.g. the music bed): keep = { audio:[i], video:[i] } */
+EF.kept = function (keep, kind, i) {
+  var list = keep && keep[kind], j;
+  if (!list) return false;
+  for (j = 0; j < list.length; j++) if (list[j] === i) return true;
+  return false;
 };
 
 /**
@@ -284,9 +338,9 @@ EFAPI.removeRanges = function (a) {
     r = { start: EF.snap(a.ranges[i].start, fps), end: EF.snap(a.ranges[i].end, fps) };
     if (r.end - r.start >= 1 / fps) rs.push(r);
   }
-  rs.sort(function (x, y) { return y.start - x.start; }); // from the end → earlier times stay valid
+  rs.sort(function (x, y) { return y.start - x.start; }); // from the end \u2192 earlier times stay valid
   // 1) razor at every boundary
-  for (i = 0; i < rs.length; i++) { EF.razorAll(seq, qseq, rs[i].end); EF.razorAll(seq, qseq, rs[i].start); }
+  for (i = 0; i < rs.length; i++) { EF.razorAll(seq, qseq, rs[i].end, a.keep); EF.razorAll(seq, qseq, rs[i].start, a.keep); }
   // 2) remove + ripple, range by range from the end
   var kinds = ['video', 'audio'], cutPoints = [];
   for (i = 0; i < rs.length; i++) {
@@ -296,7 +350,7 @@ EFAPI.removeRanges = function (a) {
       var tracks = EF.tracks(seq, kinds[k]);
       for (j = 0; j < tracks.numTracks; j++) {
         var tr = tracks[j];
-        if (EF.isLocked(tr)) continue;
+        if (EF.isLocked(tr) || EF.kept(a.keep, kinds[k], j)) continue;
         var victims = [], later = [], c, ci;
         for (ci = 0; ci < tr.clips.numItems; ci++) {
           c = tr.clips[ci];
@@ -306,7 +360,7 @@ EFAPI.removeRanges = function (a) {
         if (victims.length) {
           for (ci = victims.length - 1; ci >= 0; ci--) { victims[ci].remove(true, true); removed++; }
         } else if (later.length) {
-          // nothing to delete on this track (gap) → shift later clips left so tracks stay in sync
+          // nothing to delete on this track (gap) \u2192 shift later clips left so tracks stay in sync
           for (ci = 0; ci < later.length; ci++) { try { later[ci].move(EF.timeObj(-len)); } catch (e) {} }
         }
       }
@@ -315,11 +369,11 @@ EFAPI.removeRanges = function (a) {
   }
   // 3) tiny audio crossfades at the joins so cuts don't click
   var fades = 0;
-  if (a.crossfadeFrames && a.crossfadeFrames > 0) fades = EF.addAudioFades(seq, cutPoints, a.crossfadeFrames, rs);
+  if (a.crossfadeFrames && a.crossfadeFrames > 0) fades = EF.addAudioFades(seq, cutPoints, a.crossfadeFrames, rs, a.keep);
   return { removed: removed, ranges: rs.length, crossfades: fades, sequence: cloneInfo ? cloneInfo.name : seq.name };
 };
 
-EF.addAudioFades = function (seq, cutPointsOriginal, frames, rangesDesc) {
+EF.addAudioFades = function (seq, cutPointsOriginal, frames, rangesDesc, keep) {
   var qseq = EF.qeSeq(), tr, n = 0, i, j, t, it;
   var trans = null;
   try { trans = qe.project.getAudioTransitionByName('Constant Power'); } catch (e) {}
@@ -333,7 +387,7 @@ EF.addAudioFades = function (seq, cutPointsOriginal, frames, rangesDesc) {
   }
   var durTc = EF.timecode(seq, frames / EF.fps(seq));
   for (i = 0; i < seq.audioTracks.numTracks; i++) {
-    if (EF.isLocked(seq.audioTracks[i])) continue;
+    if (EF.isLocked(seq.audioTracks[i]) || EF.kept(keep, 'audio', i)) continue;
     tr = qseq.getAudioTrackAt(i);
     for (j = 0; j < tr.numItems; j++) {
       it = tr.getItemAt(j);
@@ -347,6 +401,10 @@ EF.addAudioFades = function (seq, cutPointsOriginal, frames, rangesDesc) {
   return n;
 };
 
+/* Premiere marker colours: 0 green 1 red 2 purple 3 orange 4 yellow 5 white 6 blue 7 cyan */
+EF.MARKER_COLORS = { green: 0, red: 1, purple: 2, magenta: 2, orange: 3, yellow: 4, white: 5, blue: 6, cyan: 7 };
+EF.markerColor = function (c) { if (typeof c === 'number') return c; var v = EF.MARKER_COLORS[String(c).toLowerCase()]; return v === undefined ? 0 : v; };
+
 EFAPI.addMarkers = function (a) {
   var seq = EF.seq(), i, m, mk, n = 0;
   for (i = 0; i < a.markers.length; i++) {
@@ -355,7 +413,7 @@ EFAPI.addMarkers = function (a) {
     if (m.name) mk.name = m.name;
     if (m.comment) mk.comments = m.comment;
     if (m.duration) { try { mk.end = EF.timeObj(m.time + m.duration); } catch (e) {} }
-    if (m.color !== undefined) { try { mk.setColorByIndex(m.color, 0); } catch (e2) {} }
+    if (m.color !== undefined && m.color !== null) { try { mk.setColorByIndex(EF.markerColor(m.color), 0); } catch (e2) {} }
     n++;
   }
   return { added: n };
@@ -370,15 +428,68 @@ EF.trackFree = function (track, a, b) {
   return true;
 };
 
-EF.pickTrack = function (seq, kind, a, b, minIndex) {
-  var tracks = EF.tracks(seq, kind), i;
-  for (i = minIndex; i < tracks.numTracks; i++) if (!EF.isLocked(tracks[i]) && EF.trackFree(tracks[i], a, b)) return i;
-  try { // add a new track on top
-    var q = EF.qeSeq();
-    if (kind === 'video') q.addTracks(1, tracks.numTracks, 0); else q.addTracks(0, 0, 1, 1, tracks.numTracks);
-  } catch (e) {}
+/** add one track on top. QE's addTracks has an undocumented signature, so try the known forms and check the count. */
+EF.addTrack = function (seq, kind) {
+  var n = EF.tracks(seq, kind).numTracks, q = null, k;
+  try { q = EF.qeSeq(); } catch (e) {}
+  if (!q) return false;
+  var tries = kind === 'video' ? [
+    function () { q.addTracks(1, n, 0, 1, 0, 0, 1, 0); }, function () { q.addTracks(1, n, 0, 0, 0); },
+    function () { q.addTracks(1, n, 0); }, function () { q.addTracks(1, n); }, function () { q.addTracks(1); }
+  ] : [
+    function () { q.addTracks(0, 0, 1, 1, n, 0, 1, 0); }, function () { q.addTracks(0, 0, 1, 1, n); },
+    function () { q.addTracks(0, 0, 1, 0, n); }, function () { q.addTracks(0, 0, 1); }
+  ];
+  for (k = 0; k < tries.length; k++) {
+    try { tries[k](); } catch (e2) {}
+    if (EF.tracks(seq, kind).numTracks > n) return true;
+  }
+  return false;
+};
+
+/** a free unlocked track for [a,b] from minIndex up; adds a track when none is free. Never returns a busy track. */
+EF.pickTrack = function (seq, kind, a, b, minIndex, ranges) {
+  var tracks = EF.tracks(seq, kind), i, j, ok;
+  minIndex = minIndex || 0;
+  for (i = minIndex; i < tracks.numTracks; i++) {
+    if (EF.isLocked(tracks[i])) continue;
+    ok = EF.trackFree(tracks[i], a, b);
+    if (ok && ranges) for (j = 0; j < ranges.length && ok; j++) ok = EF.trackFree(tracks[i], ranges[j][0], ranges[j][1]);
+    if (ok) return i;
+  }
+  while (EF.tracks(seq, kind).numTracks <= minIndex) if (!EF.addTrack(seq, kind)) break;
+  if (EF.tracks(seq, kind).numTracks > minIndex && EF.addTrack(seq, kind)) return EF.tracks(seq, kind).numTracks - 1;
+  // adding failed: an empty track at/above minIndex is still safe
   tracks = EF.tracks(seq, kind);
-  return Math.max(minIndex, tracks.numTracks - 1);
+  for (i = minIndex; i < tracks.numTracks; i++) if (!EF.isLocked(tracks[i]) && tracks[i].clips.numItems === 0) return i;
+  throw new Error(kind === 'video'
+    ? '\u0645\u0641\u064a\u0634 \u062a\u0631\u0627\u0643 \u0641\u064a\u062f\u064a\u0648 \u0641\u0627\u0636\u064a \u0648\u0645\u0627\u0642\u062f\u0631\u062a\u0634 \u0623\u0632\u0648\u0651\u062f \u0648\u0627\u062d\u062f \u2014 \u0632\u0648\u0651\u062f \u062a\u0631\u0627\u0643 \u0641\u064a\u062f\u064a\u0648 \u0641\u0627\u0636\u064a \u0641\u0648\u0642 (\u0643\u0644\u064a\u0643 \u064a\u0645\u064a\u0646 > Add Track) \u0648\u062c\u0631\u0651\u0628 \u062a\u0627\u0646\u064a'
+    : '\u0645\u0641\u064a\u0634 \u062a\u0631\u0627\u0643 \u0635\u0648\u062a \u0641\u0627\u0636\u064a \u0648\u0645\u0627\u0642\u062f\u0631\u062a\u0634 \u0623\u0632\u0648\u0651\u062f \u0648\u0627\u062d\u062f \u2014 \u0632\u0648\u0651\u062f \u062a\u0631\u0627\u0643 \u0635\u0648\u062a \u0641\u0627\u0636\u064a \u0648\u062c\u0631\u0651\u0628 \u062a\u0627\u0646\u064a');
+};
+
+/** the clip just placed: same item, start within a frame of t */
+EF.placedClip = function (track, item, t, fps) {
+  var i, c, best = null, bd = 1e9, tol = 1.5 / (fps || 25);
+  for (i = 0; i < track.clips.numItems; i++) {
+    c = track.clips[i];
+    var d = Math.abs(EF.sec(c.start) - t);
+    if (d <= tol && d < bd && (!c.projectItem || !item || c.projectItem.nodeId === item.nodeId)) { best = c; bd = d; }
+  }
+  return best;
+};
+
+/** lay one item at t for dur seconds on track ti, without the full source length ever covering later clips */
+EF.layItem = function (seq, item, kind, ti, t, dur, fps) {
+  var tracks = EF.tracks(seq, kind), setIO = false;
+  if (dur > 0) {
+    var src = EF.itemDuration(item);
+    if (!src || dur < src - 0.001) { try { item.setInPoint(0, 4); item.setOutPoint(dur, 4); setIO = true; } catch (e) {} }
+  }
+  tracks[ti].overwriteClip(item, t);
+  if (setIO) { try { item.clearInPoint(); item.clearOutPoint(); } catch (e2) {} }
+  var clip = EF.placedClip(tracks[ti], item, t, fps);
+  if (clip && dur > 0 && Math.abs(EF.sec(clip.end) - (t + dur)) > 0.5 / fps) { try { clip.end = EF.timeObj(t + dur); } catch (e3) {} }
+  return clip;
 };
 
 /**
@@ -386,22 +497,45 @@ EF.pickTrack = function (seq, kind, a, b, minIndex) {
  * a: { path, time, kind: 'video'|'audio', track (-1 auto), duration, bin }
  */
 EFAPI.placeFile = function (a) {
-  var seq = EF.seq(), item = EF.importFile(a.path, a.bin || 'EditFast'), kind = a.kind || 'video';
-  var t = a.time === undefined || a.time === null ? EF.sec(seq.getPlayerPosition()) : a.time;
-  var dur = a.duration || 5;
-  var ti = (a.track === undefined || a.track === null || a.track < 0) ? EF.pickTrack(seq, kind, t, t + dur, a.minTrack || 1) : a.track;
-  var tracks = EF.tracks(seq, kind);
-  tracks[ti].overwriteClip(item, t);
-  var clip = EF.clipAt(tracks[ti], t + 0.01);
-  if (clip && a.duration) { try { clip.end = EF.timeObj(t + a.duration); } catch (e) {} }
+  var seq = EF.seq(), fps = EF.fps(seq), item = EF.importFile(a.path, a.bin || 'EditFast'), kind = a.kind || 'video';
+  var t = EF.snap(a.time === undefined || a.time === null ? EF.sec(seq.getPlayerPosition()) : a.time, fps);
+  var dur = a.duration || EF.itemDuration(item) || 5;
+  var ti = (a.track === undefined || a.track === null || a.track < 0) ? EF.pickTrack(seq, kind, t, t + dur, a.minTrack === undefined ? 1 : a.minTrack) : a.track;
+  var clip = EF.layItem(seq, item, kind, ti, t, a.duration || 0, fps);
   return { track: ti, start: t, end: clip ? EF.sec(clip.end) : t + dur, name: item.name };
 };
 
+/**
+ * Many files in one call (captions, scenes, SFX): one import, one track for all of them when they don't overlap.
+ * a: { items:[{path,time,duration}], kind, bin, minTrack, sameTrack }
+ */
+EFAPI.placeFiles = function (a) {
+  var seq = EF.seq(), fps = EF.fps(seq), kind = a.kind || 'video', list = a.items || [], i, paths = [];
+  if (!list.length) return { placed: 0 };
+  for (i = 0; i < list.length; i++) paths.push(list[i].path);
+  var items = EF.importMany(paths, a.bin || 'EditFast'), ranges = [], lo = 1e12, hi = 0, t;
+  for (i = 0; i < list.length; i++) {
+    t = EF.snap(list[i].time, fps);
+    var d = list[i].duration || EF.itemDuration(items[i]) || 5;
+    ranges.push([t, t + d]); if (t < lo) lo = t; if (t + d > hi) hi = t + d;
+  }
+  var minT = a.minTrack === undefined ? 1 : a.minTrack;
+  var ti = a.sameTrack === false ? -1 : EF.pickTrack(seq, kind, lo, lo, minT, ranges), placed = 0, tracks = [];
+  for (i = 0; i < list.length; i++) {
+    var tt = ti >= 0 ? ti : EF.pickTrack(seq, kind, ranges[i][0], ranges[i][1], minT);
+    EF.layItem(seq, items[i], kind, tt, ranges[i][0], list[i].duration || 0, fps);
+    placed++; tracks.push(tt);
+  }
+  return { placed: placed, track: ti, tracks: tracks };
+};
+
 EFAPI.createCaptions = function (a) {
-  var seq = EF.seq(), item = EF.importFile(a.srtPath, 'EditFast/Captions');
-  var fmt = (typeof Sequence !== 'undefined' && Sequence.CAPTION_FORMAT_SUBTITLE) ? Sequence.CAPTION_FORMAT_SUBTITLE : 'Subtitle Default';
-  seq.createCaptionTrack(item, a.start || 0, fmt);
-  return { ok: true, item: item.name };
+  var seq = EF.seq(), item = EF.importFile(a.srtPath, 'EditFast/Captions'), res;
+  var fmt = (typeof Sequence !== 'undefined' && Sequence.CAPTION_FORMAT_SUBTITLE !== undefined) ? Sequence.CAPTION_FORMAT_SUBTITLE : 'Subtitle Default';
+  if (typeof seq.createCaptionTrack !== 'function') throw new Error('\u0646\u0633\u062e\u0629 \u0628\u0631\u064a\u0645\u064a\u0631 \u062f\u064a \u0645\u0627\u0628\u062a\u0633\u0645\u062d\u0634 \u0628\u0625\u0636\u0627\u0641\u0629 \u0643\u0627\u0628\u0634\u0646 \u0645\u0646 \u0633\u0643\u0631\u064a\u0628\u062a \u2014 \u0627\u0633\u062a\u062e\u062f\u0645 \u0627\u0644\u0643\u0627\u0628\u0634\u0646 \u0627\u0644\u062b\u0627\u0628\u062a \u0628\u0627\u0644\u0634\u0643\u0644 \u0623\u0648 \u0627\u0633\u062d\u0628 \u0645\u0644\u0641 \u0627\u0644\u0640 SRT \u0645\u0646 bin \u0627\u0644\u0640 Captions \u0644\u0644\u062a\u0627\u064a\u0645\u0644\u064a\u0646');
+  res = seq.createCaptionTrack(item, a.start || 0, fmt);
+  if (res === false) throw new Error('\u0628\u0631\u064a\u0645\u064a\u0631 \u0631\u0641\u0636 \u064a\u0639\u0645\u0644 \u062a\u0631\u0627\u0643 \u0627\u0644\u0643\u0627\u0628\u0634\u0646 \u2014 \u0627\u0633\u062d\u0628 \u0645\u0644\u0641 \u0627\u0644\u0640 SRT \u0645\u0646 bin \u0627\u0644\u0640 EditFast/Captions \u0644\u0644\u062a\u0627\u064a\u0645\u0644\u064a\u0646 \u0628\u0625\u064a\u062f\u0643');
+  return { ok: true, item: item.name, result: res === undefined ? null : String(res) };
 };
 
 /* ---------------- keyframes ---------------- */
@@ -468,7 +602,7 @@ EFAPI.applyKeyframes = function (a) {
   var seq = EF.seq(), t = (a.time === undefined || a.time === null) ? EF.sec(seq.getPlayerPosition()) : a.time;
   var clip = a.useSelection ? EF.selectedClip(seq) : null;
   if (!clip) clip = EF.findVideoClip(seq, t, a.track);
-  if (!clip) throw new Error('مفيش كليب فيديو عند الوقت ده'); // مفيش كليب فيديو عند الوقت ده
+  if (!clip) throw new Error('\u0645\u0641\u064a\u0634 \u0643\u0644\u064a\u0628 \u0641\u064a\u062f\u064a\u0648 \u0639\u0646\u062f \u0627\u0644\u0648\u0642\u062a \u062f\u0647'); // \u0645\u0641\u064a\u0634 \u0643\u0644\u064a\u0628 \u0641\u064a\u062f\u064a\u0648 \u0639\u0646\u062f \u0627\u0644\u0648\u0642\u062a \u062f\u0647
   var trackIndex = (a.track !== undefined && a.track !== null && a.track >= 0) ? a.track : EF.trackIndexOf(seq, clip);
   var cs = EF.sec(clip.start), ce = EF.sec(clip.end), dur = a.duration || 0.5;
   var anchor = a.mode === 'in' ? cs : a.mode === 'out' ? Math.max(cs, ce - dur) : Math.max(cs, Math.min(t, ce - 0.04));
@@ -477,7 +611,7 @@ EFAPI.applyKeyframes = function (a) {
   if (!comp) throw new Error('no Transform/Motion component');
   var w = 1920, h = 1080;
   try { var st = seq.getSettings(); w = st.videoFrameWidth; h = st.videoFrameHeight; } catch (e) {}
-  var mediaOffset = EF.sec(clip.inPoint) - cs; // timeline → clip media time
+  var mediaOffset = EF.sec(clip.inPoint) - cs; // timeline \u2192 clip media time
   var interp = a.interpolation === 'hold' ? 4 : 0, written = 0, key, keys, p, i, base, isNorm, v, kt;
   var uni = EF.prop(comp, map, 'uniform');
   if (uni && a.props.scale) { try { uni.setValue(true, true); } catch (e1) {} }
@@ -500,8 +634,9 @@ EFAPI.applyKeyframes = function (a) {
       else if (key === 'scale' && usingMotion) v = keys[i].v * (typeof base === 'number' ? base : 100) / 100;
       else v = keys[i].v;
       p.addKey(kt);
-      p.setValueAtKey(kt, v, true);
-      try { p.setInterpolationTypeAtKey(kt, interp, true); } catch (e3) {}
+      // redraw Premiere's UI once at the end, not on every key (hundreds of redraws froze it)
+      p.setValueAtKey(kt, v, i === keys.length - 1);
+      try { p.setInterpolationTypeAtKey(kt, keys[i].interp !== undefined ? keys[i].interp : interp, i === keys.length - 1); } catch (e3) {}
       written++;
     }
   }
@@ -512,7 +647,7 @@ EFAPI.applyKeyframes = function (a) {
 EFAPI.readKeyframes = function (a) {
   var seq = EF.seq(), clip = EF.selectedClip(seq);
   if (!clip) clip = EF.findVideoClip(seq, (a && a.time !== undefined) ? a.time : EF.sec(seq.getPlayerPosition()), a && a.track);
-  if (!clip) throw new Error('اختار كليب الأول'); // اختار كليب الأول
+  if (!clip) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628 \u0627\u0644\u0623\u0648\u0644'); // \u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628 \u0627\u0644\u0623\u0648\u0644
   var off = EF.sec(clip.start) - EF.sec(clip.inPoint), out = [], i, j, k, comp, p, keys;
   for (i = 0; i < clip.components.numItems; i++) {
     comp = clip.components[i];
@@ -586,7 +721,7 @@ EF.setMgtText = function (clip, text, opts) {
         if (opts && opts.font) obj.fontEditValue = [opts.font];
         p.setValue(EF.json.stringify(obj), true); set++;
       } catch (e3) {}
-    } else if (set === 0 && /text|title|نص/i.test(p.displayName)) {
+    } else if (set === 0 && /text|title|\u0646\u0635/i.test(p.displayName)) {
       try { p.setValue(text, true); set++; } catch (e4) {}
     }
     if (set > 0 && !(opts && opts.all)) break;
@@ -655,13 +790,23 @@ EFAPI.openSequence = function (a) {
 };
 
 /** Remove the clip we placed (matched by track + start + media path), no ripple. */
+/** undo for placeFiles: remove the clips of those files on one track (a: {kind, track, paths}) */
+EFAPI.removeClips = function (a) {
+  var seq = EF.seq(), tracks = EF.tracks(seq, a.kind || 'video'), want = {}, i, c, n = 0, tr;
+  if (a.track < 0 || a.track >= tracks.numTracks) return { removed: 0 };
+  for (i = 0; i < a.paths.length; i++) want[EF.normPath(a.paths[i])] = 1;
+  tr = tracks[a.track];
+  for (i = tr.clips.numItems - 1; i >= 0; i--) { c = tr.clips[i]; if (want[EF.normPath(EF.mediaPath(c.projectItem))]) { c.remove(false, false); n++; } }
+  return { removed: n };
+};
+
 EFAPI.removeClip = function (a) {
-  var seq = EF.seq(), tracks = EF.tracks(seq, a.kind || 'video'), tr, i, c, norm = String(a.path || '').replace(/\\/g, '/').toLowerCase();
+  var seq = EF.seq(), tracks = EF.tracks(seq, a.kind || 'video'), tr, i, c, norm = EF.normPath(a.path || '');
   if (a.track >= tracks.numTracks) return { removed: 0 };
   tr = tracks[a.track];
   for (i = tr.clips.numItems - 1; i >= 0; i--) {
     c = tr.clips[i];
-    if (Math.abs(EF.sec(c.start) - a.start) < 0.02 && (!norm || String(EF.mediaPath(c.projectItem)).replace(/\\/g, '/').toLowerCase() === norm)) { c.remove(false, false); return { removed: 1 }; }
+    if (Math.abs(EF.sec(c.start) - a.start) < 0.02 && (!norm || EF.normPath(EF.mediaPath(c.projectItem)) === norm)) { c.remove(false, false); return { removed: 1 }; }
   }
   return { removed: 0 };
 };
@@ -687,7 +832,7 @@ EFAPI.muteTrack = function (a) {
   return { track: a.track, mute: !!a.mute };
 };
 
-// Premiere's Volume › Level value ↔ dB (0 dB = 0.1778…)
+// Premiere's Volume \u203a Level value \u2194 dB (0 dB = 0.1778\u2026)
 EF.levelToDb = function (v) { return 20 * Math.log(Math.max(v, 1e-6)) / Math.LN10 + 15; };
 EF.dbToLevel = function (db) { return Math.pow(10, (db - 15) / 20); };
 
@@ -704,14 +849,22 @@ EFAPI.setVolumeKeys = function (a) {
       if (p) break;
     }
   }
-  if (!p) throw new Error('Volume › Level not found');
-  var baseDb = EF.levelToDb(p.isTimeVarying() ? p.getValueAtKey(p.getKeys()[0]) : p.getValue());
+  if (!p) throw new Error('Volume \u203a Level not found');
+  var baseLevel = p.getValue(), ks, k2, v2;
+  if (p.isTimeVarying()) {
+    // ducked before: the loudest key is the music's real level. Clear the old keys so ducking twice doesn't stack.
+    ks = p.getKeys(); baseLevel = null;
+    for (k2 = 0; ks && k2 < ks.length; k2++) { v2 = p.getValueAtKey(ks[k2]); if (baseLevel === null || v2 > baseLevel) baseLevel = v2; }
+    if (baseLevel === null) baseLevel = p.getValue();
+    try { p.setTimeVarying(false, false); p.setValue(baseLevel, false); } catch (e0) {}
+  }
+  var baseDb = EF.levelToDb(baseLevel);
   var off = EF.sec(clip.inPoint) - EF.sec(clip.start), kt;
-  if (!p.isTimeVarying()) p.setTimeVarying(true, true);
+  if (!p.isTimeVarying()) p.setTimeVarying(true, false);
   for (i = 0; i < a.keys.length; i++) {
     kt = a.keys[i].t + off;
     p.addKey(kt);
-    p.setValueAtKey(kt, EF.dbToLevel(baseDb + a.keys[i].db), true);
+    p.setValueAtKey(kt, EF.dbToLevel(baseDb + a.keys[i].db), i === a.keys.length - 1);
   }
   return { keys: a.keys.length, baseDb: Math.round(baseDb * 10) / 10 };
 };
@@ -740,13 +893,14 @@ EFAPI.relinkMedia = function (a) {
 };
 
 EFAPI.projectPath = function () { return { path: app.project.path || '' }; };
-EFAPI.importFiles = function (a) { var i, n = 0; for (i = 0; i < a.paths.length; i++) { EF.importFile(a.paths[i], a.bin || 'EditFast'); n++; } return { imported: n }; };
+EFAPI.importFiles = function (a) { return { imported: EF.importMany(a.paths, a.bin || 'EditFast').length }; };
 
 /* ---------------- reels ---------------- */
-/** New sequence from rendered files (its size comes from the first file, e.g. 1080×1920). a: {name, items:[{path,time}], bin} */
+/** New sequence from rendered files (its size comes from the first file, e.g. 1080\u00d71920). a: {name, items:[{path,time}], bin} */
 EFAPI.createSequenceFromClips = function (a) {
-  var bin = EF.ensureBin(a.bin || 'EditFast'), items = [], i, seq;
-  for (i = 0; i < a.items.length; i++) items.push(EF.importFile(a.items[i].path, a.bin || 'EditFast'));
+  var bin = EF.ensureBin(a.bin || 'EditFast'), items, i, seq, paths = [];
+  for (i = 0; i < a.items.length; i++) paths.push(a.items[i].path);
+  items = EF.importMany(paths, a.bin || 'EditFast');
   seq = app.project.createNewSequenceFromClips(a.name, [items[0]], bin);
   if (!seq) throw new Error('createNewSequenceFromClips failed');
   app.project.openSequence(seq.sequenceID);
@@ -764,7 +918,8 @@ EFAPI.buildLayeredScene = function (a) {
   var main = EF.seq(), mainId = main.sequenceID, i, j, k, tr, items = [];
   var t = a.time === undefined || a.time === null ? EF.sec(main.getPlayerPosition()) : a.time;
   var binPath = a.bin || 'EditFast/Pro Scenes';
-  for (i = 0; i < a.layers.length; i++) items.push(EF.importFile(a.layers[i].path, binPath + '/' + a.name));
+  var lpaths = []; for (i = 0; i < a.layers.length; i++) lpaths.push(a.layers[i].path);
+  items = EF.importMany(lpaths, binPath + '/' + a.name);
   var nest = app.project.createNewSequenceFromClips(a.name, [items[0]], EF.ensureBin(binPath));
   if (!nest) throw new Error('createNewSequenceFromClips failed');
   app.project.openSequence(nest.sequenceID);
@@ -775,21 +930,18 @@ EFAPI.buildLayeredScene = function (a) {
     for (i = 0; i < all.numTracks; i++) { tr = all[i]; for (j = tr.clips.numItems - 1; j >= 0; j--) tr.clips[j].remove(false, false); }
   }
   var vt = EF.tracks(nest, 'video');
-  if (vt.numTracks < a.layers.length) { try { EF.qeSeq().addTracks(a.layers.length - vt.numTracks, vt.numTracks, 0); } catch (e) {} vt = EF.tracks(nest, 'video'); }
+  while (vt.numTracks < a.layers.length) { if (!EF.addTrack(nest, 'video')) break; vt = EF.tracks(nest, 'video'); }
+  var nfps = EF.fps(nest);
   for (i = 0; i < a.layers.length; i++) {
-    var L = a.layers[i], ti = Math.min(i, vt.numTracks - 1);
-    vt[ti].overwriteClip(items[i], L.start);
-    var c = EF.clipAt(vt[ti], L.start + 0.01);
-    if (c && L.duration) { try { c.end = EF.timeObj(L.start + L.duration); } catch (e2) {} }
+    var L = a.layers[i], ti = i < vt.numTracks ? i : EF.pickTrack(nest, 'video', L.start, L.start + (L.duration || 5), 0);
+    EF.layItem(nest, items[i], 'video', ti, L.start, L.duration || 0, nfps);
   }
   var nestId = nest.sequenceID, nestItem = nest.projectItem;
   app.project.openSequence(mainId);
   main = app.project.activeSequence;
   var dur = a.duration || 5;
   var mi = EF.pickTrack(main, 'video', t, t + dur, a.minTrack || 1);
-  EF.tracks(main, 'video')[mi].overwriteClip(nestItem, t);
-  var placed = EF.clipAt(EF.tracks(main, 'video')[mi], t + 0.01);
-  if (placed) { try { placed.end = EF.timeObj(t + dur); } catch (e3) {} }
+  var placed = EF.layItem(main, nestItem, 'video', mi, t, dur, EF.fps(main));
   return { track: mi, start: t, end: placed ? EF.sec(placed.end) : t + dur, name: a.name, sequenceId: nestId, layers: a.layers.length };
 };
 
@@ -798,11 +950,94 @@ EFAPI.placeSequence = function (a) {
   var seq = EF.seq(), i, item = null;
   for (i = 0; i < app.project.sequences.numSequences; i++) if (app.project.sequences[i].sequenceID === a.id) item = app.project.sequences[i].projectItem;
   if (!item) throw new Error('sequence not found: ' + a.id);
-  var dur = a.duration || 5, ti = a.track >= 0 ? a.track : EF.pickTrack(seq, 'video', a.time, a.time + dur, a.minTrack || 1);
-  EF.tracks(seq, 'video')[ti].overwriteClip(item, a.time);
-  var c = EF.clipAt(EF.tracks(seq, 'video')[ti], a.time + 0.01);
-  if (c && a.duration) { try { c.end = EF.timeObj(a.time + a.duration); } catch (e) {} }
+  var dur = a.duration || EF.itemDuration(item) || 5, ti = a.track >= 0 ? a.track : EF.pickTrack(seq, 'video', a.time, a.time + dur, a.minTrack || 1);
+  EF.layItem(seq, item, 'video', ti, a.time, a.duration || 0, EF.fps(seq));
   return { track: ti, start: a.time };
+};
+
+
+/* ---------------- self-test: every Premiere call the extension depends on, on a throwaway sequence ---------------- */
+/** a: { video, still, srt }  \u2192 { env, probes:[{id, ok, ms, detail}] } \u2014 the user's own sequences are not touched */
+EFAPI.selfTest = function (a) {
+  var out = [], env = {}, orig = app.project.activeSequence, origId = orig ? orig.sequenceID : null, bin = null, seq = null, items = null, q = null, k;
+  function probe(id, fn) {
+    var t0 = new Date().getTime(), r = { id: id, ok: false };
+    try { var d = fn(); r.ok = d !== false; if (d !== undefined && d !== true && d !== false) r.detail = String(d); }
+    catch (e) { r.ok = false; r.detail = String(e && e.message ? e.message : e) + (e && e.line ? ' (line ' + e.line + ')' : ''); }
+    r.ms = new Date().getTime() - t0; out.push(r); return r.ok;
+  }
+  env.app = app.name || ''; env.version = app.version || '';
+  try { env.os = $.os; } catch (e0) {}
+  try { env.build = app.build || ''; } catch (e1) {}
+  env.project = app.project.path || '';
+  env.hasSequence = !!orig;
+  probe('qe', function () { app.enableQE(); return typeof qe !== 'undefined' && !!qe.project; });
+  probe('bin', function () { bin = EF.ensureBin('EditFast Self-Test'); return !!bin; });
+  probe('import', function () { items = EF.importMany([a.video, a.still, a.srt], 'EditFast Self-Test'); return items.length === 3; });
+  probe('newSequence', function () {
+    seq = app.project.createNewSequenceFromClips('EditFast Self-Test', [items[0]], bin);
+    if (!seq) return false;
+    app.project.openSequence(seq.sequenceID);
+    for (k = 0; k < 20 && (!app.project.activeSequence || app.project.activeSequence.sequenceID !== seq.sequenceID); k++) $.sleep(100);
+    seq = app.project.activeSequence;
+    return seq && seq.videoTracks[0].clips.numItems > 0;
+  });
+  if (seq) {
+    var fps = EF.fps(seq);
+    probe('settings', function () { var st = seq.getSettings(); return st.videoFrameWidth + 'x' + st.videoFrameHeight + ' @ ' + Math.round(fps * 100) / 100; });
+    probe('addTrack', function () { var n = seq.videoTracks.numTracks; return EF.addTrack(seq, 'video') ? (n + ' -> ' + seq.videoTracks.numTracks) : false; });
+    probe('placeStill', function () {
+      var ti = EF.pickTrack(seq, 'video', 0.4, 1.4, 1), c = EF.layItem(seq, items[1], 'video', ti, 0.4, 1, fps);
+      if (!c) return false;
+      var d = EF.sec(c.end) - EF.sec(c.start);
+      if (Math.abs(d - 1) > 1.5 / fps) throw new Error('still lasted ' + Math.round(d * 100) / 100 + 's instead of 1s');
+      return 'V' + (ti + 1);
+    });
+    probe('clipEnd', function () { var c = seq.videoTracks[0].clips[0], e = EF.sec(c.end); c.end = EF.timeObj(e - 0.2); var ok = Math.abs(EF.sec(c.end) - (e - 0.2)) < 1.5 / fps; c.end = EF.timeObj(e); return ok; });
+    probe('markers', function () { var m = seq.markers.createMarker(0.5); m.name = 'EF test'; m.setColorByIndex(4, 0); return seq.markers.numMarkers > 0; });
+    probe('razor', function () {
+      q = EF.qeSeq();
+      var before = seq.videoTracks[0].clips.numItems;
+      q.getVideoTrackAt(0).razor(EF.timecode(seq, EF.snap(1, fps)));
+      return seq.videoTracks[0].clips.numItems > before ? true : 'clips: ' + before + ' -> ' + seq.videoTracks[0].clips.numItems;
+    });
+    probe('rippleDelete', function () {
+      var tr = seq.videoTracks[0];
+      if (tr.clips.numItems < 2) return false;
+      var second = EF.sec(tr.clips[1].start); tr.clips[0].remove(true, true);
+      return EF.sec(tr.clips[0].start) < second - 0.01;
+    });
+    probe('transform', function () {
+      var c = seq.videoTracks[0].clips[0], comp = EF.ensureTransform(seq, c, 0);
+      if (!comp) throw new Error('Transform effect not added (non-English Premiere? effect name differs)');
+      var p = EF.prop(comp, EF.PROPS.transform, 'scale');
+      p.setTimeVarying(true, false); p.addKey(EF.sec(c.inPoint) + 0.1); p.setValueAtKey(EF.sec(c.inPoint) + 0.1, 120, true);
+      return true;
+    });
+    probe('audioTransition', function () { return !!qe.project.getAudioTransitionByName('Constant Power'); });
+    probe('captions', function () {
+      if (typeof seq.createCaptionTrack !== 'function') throw new Error('createCaptionTrack missing');
+      var r = seq.createCaptionTrack(items[2], 0, Sequence.CAPTION_FORMAT_SUBTITLE);
+      return r === false ? false : true;
+    });
+    probe('clone', function () {
+      var n = app.project.sequences.numSequences; seq.clone();
+      for (k = 0; k < 20 && app.project.sequences.numSequences === n; k++) $.sleep(100);
+      return app.project.sequences.numSequences > n;
+    });
+  }
+  // clean up: test sequences + bin, then back to where the user was
+  probe('cleanup', function () {
+    var i, s2, gone = 0;
+    for (i = app.project.sequences.numSequences - 1; i >= 0; i--) {
+      s2 = app.project.sequences[i];
+      if (s2 && String(s2.name).substring(0, 18) === 'EditFast Self-Test') { try { app.project.deleteSequence(s2); gone++; } catch (e) {} }
+    }
+    if (bin) { try { bin.deleteBin(); } catch (e2) {} }
+    if (origId) app.project.openSequence(origId);
+    return gone + ' removed';
+  });
+  return { env: env, probes: out };
 };
 
 /* ---------------- dispatcher ---------------- */
@@ -812,6 +1047,6 @@ function ef_call(name, jsonArgs) {
     var data = EFAPI[name](EF.json.parse(jsonArgs));
     return EF.json.stringify({ ok: true, data: data });
   } catch (e) {
-    return EF.json.stringify({ ok: false, error: String(e && e.message ? e.message : e), line: e && e.line });
+    return EF.json.stringify({ ok: false, error: String(e && e.message ? e.message : e), line: e && e.line, fn: name });
   }
 }

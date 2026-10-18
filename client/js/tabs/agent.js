@@ -129,6 +129,8 @@
       var seeBar = h('div', { class: 'seebar', title: 'المونتير الذكي بياخد صورة حية من السيكوينس مع كل رسالة' }, h('span', { class: 'eye' }), seeTxt);
       function refreshSee() {
         if (!document.body.contains(seeBar)) { clearInterval(seeTimer); return; }
+        // reading the whole sequence costs Premiere time: not while a job runs, not while the panel is hidden
+        if (document.hidden || /busy/.test((document.getElementById('status') || {}).className || '')) return;
         S.seq().then(function (sq) {
           var clips = sq.video.concat(sq.audio).reduce(function (n, t) { return n + t.clips.length; }, 0);
           var tr = S.transcript && S.transcript.seqId === sq.id ? ' · تفريغ ' + S.transcript.words.length + ' كلمة' : ' · من غير تفريغ';
@@ -140,7 +142,7 @@
         }).catch(function () { seeTxt.textContent = 'مفيش سيكوينس مفتوحة'; seeBar.classList.remove('live'); });
       }
       view.appendChild(seeBar);
-      var seeTimer = setInterval(refreshSee, 3000); refreshSee();
+      var seeTimer = setInterval(refreshSee, 15000); refreshSee();
       view.appendChild(styleWrap);
       view.appendChild(UI.card(null, chat,
         h('div', { class: 'chips' }, suggestions.map(function (s) { return h('button', { class: 'chip', type: 'button', onclick: function () { input.value = s; input.focus(); } }, s); })),

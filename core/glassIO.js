@@ -37,7 +37,9 @@ function decodeFrames(ffmpeg, { mediaPath, start = 0, duration, width, height, f
 /** Raw RGBA frames in → ProRes 4444 with alpha out. */
 function startRawEncoder(ffmpeg, { width, height, fps, out }) {
   const args = ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${width}x${height}`, '-r', String(fps), '-i', '-',
-    '-c:v', 'prores_ks', '-profile:v', '4444', '-pix_fmt', 'yuva444p10le', '-vendor', 'apl0', out];
+    // tag as Rec.709 (the matrix too): untagged RGB→YUV made the glass/captions a shade off against the footage
+    '-vf', 'scale=out_color_matrix=bt709:out_range=tv', '-c:v', 'prores_ks', '-profile:v', '4444', '-pix_fmt', 'yuva444p10le', '-vendor', 'apl0',
+    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', out];
   const child = spawn(ffmpeg, args, { windowsHide: true });
   let err = '';
   child.stderr.on('data', d => { err += d; });

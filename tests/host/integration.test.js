@@ -102,13 +102,13 @@ test('قوالب الحركة + التايتلات (MOGRT) + المشاهد ال
   const { S, seq } = world({ clipFile: f, clipLen: 5, settings: { paths: { ...config.DEFAULTS.paths, whisper: FAKE_WHISPER, whisperModel: MODEL, baseMogrt: mogrt } } });
   seq.player = 1;
   const m = await S.applyMotion({ preset: 'zoom-in-reveal', level: 3 });
-  assert.equal(m.component, 'Transform'); assert.ok(m.keys > 5); assert.equal(m.start, 0);
+  assert.equal(m.component, 'Transform'); assert.ok(m.keys >= 2 && m.keys <= 8, 'a few editable keys, not one per frame: ' + m.keys); assert.equal(m.start, 0);
   const t = await S.addTitle({ template: 'lower-third', text: 'محمد أيمن', duration: 3 });
   assert.equal(t.mode, 'mogrt'); assert.equal(t.editable, true);
   const gclip = seq.v[t.track].items.find(c => c._start === 1);
   assert.equal(JSON.parse(gclip.mgtComp.props[0].value).textEditValue, 'محمد أيمن');
   const motionComp = gclip.comps.find(c => c.matchName === 'AE.ADBE Geometry2');
-  assert.ok(motionComp.props.find(p => p.displayName === 'Position').keys.length >= 4, 'in + out keys');
+  assert.ok(motionComp.props.find(p => p.displayName === 'Position').keys.length >= 2, 'in + out keys');
   // no base MOGRT → rendered transparent video fallback
   S.saveSettings({ paths: { baseMogrt: '' } });
   S.findBaseMogrt = () => null;
@@ -373,7 +373,7 @@ test('one-click auto edit: runs the approved steps in order, AI picks the hook, 
   assert.deepEqual(Object.keys(res).filter(k => res[k].ok), ['transcribe', 'repeats', 'silences', 'hook', 'zooms', 'captions'], JSON.stringify(res));
   assert.ok(events.indexOf('transcribe:ok') < events.indexOf('hook:run'));
   assert.ok(events.includes('broll:skip'));
-  assert.match(h.pr.project.activeSeq.name, /هوك/);
+  assert.ok(h.pr.project.activeSeq.markerList.some(m => m.name === 'هوك مقترح'), 'the hook is suggested as a marker, the timeline is not rearranged');
   assert.ok(S.history.every(e => e.group === 'مونتاج تلقائي'));
   const u = await S.undoLast();
   assert.equal(u.group, 'مونتاج تلقائي');
@@ -435,8 +435,9 @@ test('animated captions + translation: cards rendered with word timings, placed 
   const capTrack = seq.v.findIndex(t => t.items.some(c => /cap-/.test(c.projectItem.mediaPath)));
   assert.ok(capTrack >= 2, 'above the topmost used track (V2)');
   assert.ok(S.history.every(e => e.group === 'كابشن متحرك'));
+  assert.equal(seq.v[capTrack].items.filter(c => /cap-/.test(c.projectItem.mediaPath)).length, r.clips, 'all on ONE track');
   const u = await S.undoLast();
-  assert.equal(u.undone, r.clips); assert.ok(!seq.v.some(t => t.items.some(c => /cap-/.test(c.projectItem.mediaPath))), 'all caption cards removed');
+  assert.ok(u.undone >= 1); assert.ok(!seq.v.some(t => t.items.some(c => /cap-/.test(c.projectItem.mediaPath))), 'all caption cards removed');
   const tr = await S.translateCaptions({ lang: 'English' });
   assert.match(fs.readFileSync(tr.file, 'utf8'), /EN: \d+/); assert.equal(seq.captionTracks.length, 1);
   delete process.env.FAKE_WHISPER_WORDS;
@@ -486,4 +487,75 @@ test('thumbnails: candidates prefer sharp well-lit frames over blurry/dark ones;
   const file = await S.saveThumbnail(Buffer.from('PNGDATA').toString('base64'), 'السر اللي محدش قالهولك');
   assert.match(file, /EditFast Thumbnails/); assert.equal(fs.readFileSync(file, 'utf8'), 'PNGDATA');
   assert.ok(calls.includes('importFiles'));
+});
+
+test('fillers: اممم/آآآ found from the transcript (+ يعني when asked), cut on a copy; the music track is never cut', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'النهارده اممم هنتكلم آآآ عن يعني المونتاج السريع';
+  const f = makeAudio('fill.wav', [{ tone: 220, dur: 8 }]);
+  const { S, h, seq } = world({ clipFile: f, clipLen: 8 });
+  const music = h.pr.project.importOne(makeAudio('bed.wav', [{ tone: 440, dur: 8, amp: 0.2 }]), h.pr.project.root);
+  seq.a[1].add({ projectItem: music, start: 0, end: 8, inPoint: 0 });
+  const base = await S.findFillers({});
+  assert.deepEqual(base.map(x => x.text), ['اممم', 'آآآ']);
+  const more = await S.findFillers({ extra: ['يعني'] });
+  assert.equal(more.length, 3);
+  S.saveSettings({ quickCut: { ...S.settings.quickCut, keepAudio: [1] } }); // "ماتقصّش A2" ticked
+  const r = await S.cutRanges({ ranges: more });
+  const cur = h.pr.project.activeSeq;
+  assert.notEqual(cur, seq, 'on a copy'); assert.match(cur.name, /EditFast قص/);
+  assert.ok(r.removed >= 3);
+  const bed = cur.a[1].items;
+  assert.equal(bed.length, 1, 'music not razored'); assert.equal(bed[0]._start, 0); assert.ok(bed[0]._end > 7.9, 'music kept its length');
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('quick cut "markers" mode: red markers on every silence, nothing cut; cuts are sent in batches from the end', async () => {
+  const f = makeAudio('mk.wav', [{ tone: 200, dur: 2 }, { silence: 1 }, { tone: 200, dur: 2 }, { silence: 1 }, { tone: 200, dur: 2 }]);
+  const { S, seq, calls } = world({ clipFile: f, clipLen: 8 });
+  const r = await S.quickCut({ mode: 'markers', sensitivity: 5 });
+  assert.equal(r.markers, 2); assert.equal(seq.markerList.length, 2); assert.equal(seq.markerList[0].color, 1, 'red');
+  assert.equal(seq.v[0].items.length, 1, 'nothing cut');
+  const many = Array.from({ length: 95 }, (_, i) => ({ start: 0.05 + i * 0.08, end: 0.08 + i * 0.08 }));
+  calls.length = 0;
+  const prog = [];
+  await S.quickCut({ cuts: many, onCopy: false, crossfade: false, onProgress: p => prog.push(p) });
+  assert.equal(calls.filter(c => c === 'removeRanges').length, 3, '95 cuts → 3 host calls of ≤40');
+  assert.equal(prog.at(-1), 1);
+});
+
+test('bleep: the word is muted on the voice and a tone lands on its own track; publish pack from the transcript', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'اتصل على الرقم ده وقول اسم الشركة';
+  const f = makeAudio('bleep.wav', [{ tone: 220, dur: 6 }]);
+  const fetchImpl = async (url, opts) => {
+    const sys = txt(JSON.parse(opts.body).messages[0].content);
+    if (/مسؤول نشر/.test(sys)) return mockResponse({ choices: [{ message: { content: JSON.stringify({ titles: ['عنوان 1', 'عنوان 2'], description: 'سطر أول', tags: ['مونتاج', 'editing'] }) } }] });
+    if (/فصول/.test(sys)) return mockResponse({ choices: [{ message: { content: '{"chapters":[{"time":0,"title":"البداية"}]}' } }] });
+    return mockResponse({ choices: [{ message: { content: '{"words":[]}' } }] });
+  };
+  const { S, seq } = world({ clipFile: f, clipLen: 6, fetchImpl });
+  const r = await S.bleepWords({ list: ['الشركة'], mode: 'beep' });
+  assert.equal(r.hits, 1);
+  const lvl = seq.a[0].items[0].comps[0].props.find(p => p.displayName === 'Level');
+  assert.ok(lvl.varying && lvl.keys.length === 4, 'voice dips under the word');
+  assert.ok(seq.a.some((t, i) => i > 0 && t.items.some(c => /beep-/.test(c.projectItem.mediaPath))), 'tone on another audio track');
+  const m = await S.bleepWords({ list: ['الرقم'], mode: 'markers' });
+  assert.equal(m.hits, 1); assert.ok(seq.markerList.some(x => x.name === 'بيب'));
+  const p = await S.youtubePack({});
+  assert.deepEqual(p.titles, ['عنوان 1', 'عنوان 2']); assert.match(p.description, /سطر أول[\s\S]*00:00 البداية/); assert.deepEqual(p.tags, ['مونتاج', 'editing']);
+  delete process.env.FAKE_WHISPER_WORDS;
+});
+
+test('transcription: one whisper run per source file even after the timeline is cut into pieces', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'كلام واحد اتنين تلاتة اربعة خمسة ستة';
+  const f = makeAudio('pieces.wav', [{ tone: 220, dur: 9 }]);
+  const { S, h, seq } = world();
+  const item = h.pr.project.importOne(f, h.pr.project.root);
+  [[0, 2, 0], [2, 4, 3], [4, 6, 6]].forEach(([a, b, inP]) => seq.a[0].add({ projectItem: item, start: a, end: b, inPoint: inP }));
+  const T = require('../../core/transcribe'), orig = T.transcribe; let runs = 0;
+  T.transcribe = async o => { runs++; return orig(o); };
+  try {
+    const t = await S.transcribe({});
+    assert.equal(runs, 1, 'one run for the 3 pieces');
+    assert.ok(t.words.length > 0 && t.words.every(w => w.start >= 0 && w.end <= 6.01));
+  } finally { T.transcribe = orig; delete process.env.FAKE_WHISPER_WORDS; }
 });

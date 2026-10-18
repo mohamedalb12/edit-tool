@@ -41,7 +41,11 @@ function nodeFetch(url, opts = {}) {
         const out = fs.createWriteStream(tmp);
         res.on('data', d => { got += d.length; if (onProgress && total) onProgress(got / total); });
         res.pipe(out);
-        out.on('finish', () => { fs.renameSync(tmp, toFile); resolve(makeResponse(res, Buffer.alloc(0), url)); });
+        out.on('finish', () => {
+          // a dropped connection still "finishes" the file: never accept a truncated download as good
+          if (total && got < total) { try { fs.unlinkSync(tmp); } catch (_) {} return reject(new Error(`التحميل اتقطع (${Math.round(got / 1e6)} من ${Math.round(total / 1e6)} ميجا) — جرّب تاني`)); }
+          fs.renameSync(tmp, toFile); resolve(makeResponse(res, Buffer.alloc(0), url));
+        });
         out.on('error', reject); res.on('error', reject);
         return;
       }

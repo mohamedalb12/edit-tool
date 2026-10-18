@@ -71,11 +71,16 @@ class ProjectItem {
   canChangeMediaPath() { return !this._isSeq && this.type !== 2; }
   changeMediaPath(p) { this.mediaPath = p; this.offline = false; return true; }
   createBin(name) { const b = new ProjectItem({ name, type: 2, parent: this }); this.kids.push(b); return b; }
+  deleteBin() { if (this.parent) this.parent.kids = this.parent.kids.filter(k => k !== this); }
   moveBin(bin) { this.parent.kids = this.parent.kids.filter(k => k !== this); this.parent = bin; bin.kids.push(this); }
   setInPoint(s) { this.inPoint = s; }
   setOutPoint(s) { this.outPoint = s; }
   clearInPoint() { this.inPoint = null; }
   clearOutPoint() { this.outPoint = null; }
+  /** source length: stills get Premiere's default 5 s, media its own duration (10 s unless the test says) */
+  get srcLen() { return /\.(png|jpg)$/i.test(this.mediaPath) ? 5 : (this.duration || 10); }
+  getInPoint() { return T(this.inPoint ?? 0); }
+  getOutPoint() { return T(this.outPoint ?? this.srcLen); }
 }
 
 class TrackItem {
@@ -118,7 +123,8 @@ class Track {
     c._end = s; this.items.push(right);
   }
   overwriteClip(item, t) {
-    const len = item.mediaPath.match(/\.(png|jpg)$/i) ? 5 : (item.duration || 10);
+    // like Premiere: the source in/out points decide how much lands on the timeline
+    const len = (item.outPoint ?? item.srcLen) - (item.inPoint ?? 0);
     const a = EF_sec(t), b = a + len;
     this.items = this.items.filter(c => !(c._start >= a - EPS && c._end <= b + EPS));
     const c = this.add({ projectItem: item, start: a, end: b, inPoint: 0 });
@@ -194,7 +200,8 @@ function createPremiere() {
         project.seqs.push(s); s.v[0].add({ projectItem: items[0], start: 0, end: items[0].duration || 10 }); s.a[0].add({ projectItem: items[0], start: 0, end: items[0].duration || 10 });
         return s;
       },
-      openSequence(id) { project.activeSeq = project.seqs.find(s => s.sequenceID === id); return !!project.activeSeq; }
+      openSequence(id) { project.activeSeq = project.seqs.find(s => s.sequenceID === id); return !!project.activeSeq; },
+      deleteSequence(s) { project.seqs = project.seqs.filter(x => x !== s); if (project.activeSeq === s) project.activeSeq = null; const pi = s.projectItem; if (pi && pi.parent) pi.parent.kids = pi.parent.kids.filter(k => k !== pi); return true; }
     }
   };
   const transformFx = { name: 'Transform' };
@@ -228,7 +235,7 @@ function createPremiere() {
 /** Load host.jsx into a fresh VM context wired to a fresh mock. Returns {call, pr}. */
 function loadHost() {
   const pr = createPremiere();
-  const ctx = vm.createContext({ app: pr.app, qe: pr.qe, Time: pr.Time, ProjectItemType: pr.ProjectItemType, Sequence: pr.Sequence });
+  const ctx = vm.createContext({ app: pr.app, qe: pr.qe, Time: pr.Time, ProjectItemType: pr.ProjectItemType, Sequence: pr.Sequence, $: { sleep() {} } });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'host.jsx'), 'utf8'), ctx, { filename: 'host.jsx' });
   const raw = (name, args) => JSON.parse(ctx.ef_call(name, JSON.stringify(args || {})));
   const call = (name, args) => { const r = raw(name, args); if (!r.ok) throw new Error(r.error); return r.data; };

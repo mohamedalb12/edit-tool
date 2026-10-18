@@ -62,7 +62,10 @@
    * Returns { duration, kind, props: { scale:[{t,v}], pos:[{t,v:[dx,dy]}], rotation, opacity, skew } }
    * t is seconds from the preset start. `fps` controls baking density of the easing.
    */
-  function generate(id, level = 2, { fps = 30, duration } = {}) {
+  // eases Premiere's own Bezier keyframes reproduce well: two keys you can still edit by hand
+  const SMOOTH = /^(linear|ease|easeIn|easeOut|easeInOut|in|out|inOut|sine|quad|cubic|quart|quint|expo|circ)/i;
+  const WILD = /elastic|back|bounce|spring|wobble|overshoot/i;
+  function generate(id, level = 2, { fps = 30, duration, editable = true } = {}) {
     const p = P.find(x => x.id === id);
     if (!p) throw new Error('قالب حركة مش موجود: ' + id);
     const L = LEVELS[level] || LEVELS[2];
@@ -88,13 +91,22 @@
       const keys = p.props[prop].map(k => ({ t: k[0] * dur, v: scaleValue(prop, k[1], L.amp), ease: k[2] }));
       const baked = [];
       for (let i = 0; i < keys.length - 1; i++) {
-        const seg = curves.bake([keys[i], keys[i + 1]], keys[i].ease || 'linear', { fps });
+        const ease = keys[i].ease || 'linear';
+        let seg;
+        if (editable && SMOOTH.test(ease) && !WILD.test(ease)) {
+          // 2 keys with Bezier (5) / linear (0) interpolation instead of one key per frame
+          const it = /^linear/i.test(ease) ? 0 : 5;
+          seg = [{ t: keys[i].t, v: keys[i].v, interp: it }, { t: keys[i + 1].t, v: keys[i + 1].v, interp: it }];
+        } else {
+          // overshoot/bounce shapes can't be one Bezier: a few keys per segment (not one per frame)
+          seg = curves.bake([keys[i], keys[i + 1]], ease, { fps: editable ? Math.min(fps, 12) : fps }).map(k => ({ ...k, interp: 0 }));
+        }
         if (i > 0) seg.shift();
         baked.push(...seg);
       }
       // the first key of a segment that doesn't start at 0 needs a "rest" key at 0
-      if (keys[0].t > 0) baked.unshift({ t: 0, v: keys[0].v });
-      out[prop] = baked.map(k => ({ t: +k.t.toFixed(4), v: Array.isArray(k.v) ? k.v.map(x => +x.toFixed(5)) : +k.v.toFixed(4) }));
+      if (keys[0].t > 0) baked.unshift({ t: 0, v: keys[0].v, interp: 0 });
+      out[prop] = baked.map(k => ({ t: +k.t.toFixed(4), v: Array.isArray(k.v) ? k.v.map(x => +x.toFixed(5)) : +k.v.toFixed(4), interp: k.interp }));
     }
     return { id, duration: dur, kind: p.kind, hold: !!p.hold, interpolation: 'linear', props: out };
   }

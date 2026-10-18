@@ -58,11 +58,44 @@
         UI.safe('بيجرّب', function () { return S.llm.text({ model: S.model('sfx_translate'), user: 'رد بكلمة واحدة: تمام', maxTokens: 20 }).then(function (t) { UI.toast('شغّال ✓ — ' + t); }); }, testBtn);
       }, 'small');
 
+      // ——— الفحص: أول حاجة تعملها لو حاجة مش شغالة ———
+      var PROBE = { qe: 'أوامر بريمير الداخلية (QE)', bin: 'عمل فولدر في المشروع', 'import': 'استيراد ملفات', newSequence: 'عمل سيكوينس جديدة', settings: 'قراءة إعدادات السيكوينس', addTrack: 'إضافة تراك', placeStill: 'وضع كليب بمدة مضبوطة', clipEnd: 'تعديل طول كليب', markers: 'الماركرز بالألوان', razor: 'القص (Razor)', rippleDelete: 'الحذف وسحب اللي بعده', transform: 'إضافة Transform وكي فريم', audioTransition: 'انتقال الصوت', captions: 'تراك كابشن بريمير', clone: 'نسخ السيكوينس', cleanup: 'مسح سيكوينس التجربة' };
+      var TOOLS = { ffmpeg: 'ffmpeg', ffprobe: 'ffprobe', whisper: 'whisper.cpp', whisperModel: 'موديل Whisper', ytdlp: 'yt-dlp', deno: 'deno (ليوتيوب)', node: 'Node.js', proEngine: 'محرك الجرافيك' };
+      var READY = { captions: 'الكابشن بالشكل', nativeCaptions: 'كابشن بريمير', cut: 'القص', audio: 'الصوت', motion: 'الحركة', download: 'التحميل', reels: 'ريلز', graphics: 'الجرافيك', ai: 'الذكاء الاصطناعي', markers: 'الماركرز والتعديلات' };
+      var diagBox = h('div', { class: 'diag-res' }), diagStep = h('span', { class: 'hint' });
+      function line(ok, name, detail) { return h('div', { class: 'diag-line' + (ok ? ' ok' : ' bad') }, h('span', { class: 'dot' }), h('span', { class: 'grow' }, name), detail ? h('span', { class: 'hint ltr' }, detail) : null); }
+      function drawDiag(r) {
+        UI.empty(diagBox); if (!r) return;
+        var bad = Object.keys(r.ready).filter(function (k) { return !r.ready[k].ok; });
+        diagBox.appendChild(h('div', { class: 'diag-sum' + (bad.length ? ' bad' : ' ok') }, bad.length ? bad.length + ' أدوات مش هتشتغل عندك دلوقتي — السبب جنب كل واحدة' : 'كل حاجة جاهزة ✓'));
+        Object.keys(READY).forEach(function (k) { var v = r.ready[k]; if (v) diagBox.appendChild(line(v.ok, READY[k], v.ok ? 'جاهزة' : v.why)); });
+        var det = h('details', { class: 'diag-det' }, h('summary', null, 'التفاصيل'));
+        if (r.premiere && r.premiere.error) det.appendChild(line(false, 'بريمير', r.premiere.error));
+        if (r.premiere && r.premiere.env) det.appendChild(h('div', { class: 'hint ltr' }, (r.premiere.env.app || '') + ' ' + (r.premiere.env.version || '') + ' · ' + (r.premiere.env.os || '') + ' · Node ' + (r.panel.node || '')));
+        ((r.premiere && r.premiere.probes) || []).forEach(function (p) { det.appendChild(line(p.ok, PROBE[p.id] || p.id, (p.detail || '') + ' · ' + p.ms + 'ms')); });
+        Object.keys(r.tools).forEach(function (k) { det.appendChild(line(r.tools[k].ok, TOOLS[k] || k, r.tools[k].detail)); });
+        Object.keys(r.network).forEach(function (k) { det.appendChild(line(r.network[k].ok, 'النت: ' + k, r.network[k].detail)); });
+        diagBox.appendChild(det);
+      }
+      var runDiag = UI.btn('افحص بريمير بتاعي', function () {
+        UI.safe('بيفحص', function () { return S.selfTest({ onStep: function (m) { diagStep.textContent = m; } }).then(function (r) { diagStep.textContent = ''; drawDiag(r); }); }, runDiag);
+      }, 'primary');
+      var report = UI.btn('انسخ تقرير المشكلة', function () {
+        var txt = S.diagnosticReport(), ta = h('textarea', { class: 'ltr', style: { position: 'fixed', opacity: 0 } }, txt);
+        ta.value = txt; document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+        ta.remove();
+        if (!ok && navigator.clipboard) navigator.clipboard.writeText(txt);
+        UI.toast('التقرير اتنسخ ✓ — الصقه في رسالة وابعتهولي (مفيهوش مفاتيحك)');
+      });
+      var diagCard = UI.card('الفحص', UI.hint('بيجرّب كل أمر الإضافة بتستخدمه على سيكوينس تجربة (وبيمسحها بعدها)، وبيدوّر على البرامج والنت. لو أداة مش شغالة هيقولك ليه. لو حاجة وقعت معاك دوس "انسخ تقرير المشكلة" وابعتهولي.'),
+        UI.row(runDiag, report, diagStep), diagBox);
+      diagCard.id = 'diag';
+      view.appendChild(diagCard);
+      if (S.lastSelfTest) drawDiag(S.lastSelfTest);
       view.appendChild(UI.card('المفاتيح', UI.hint('بتتحفظ على جهازك بس (~/.editfast). كل الذكاء الاصطناعي بيعدّي من OpenRouter بمفتاحك.'),
         keyInput('openrouter', 'OpenRouter', 'https://openrouter.ai/keys'), UI.row(testBtn),
         keyInput('elevenlabs', 'ElevenLabs (SFX)', 'https://elevenlabs.io/app/settings/api-keys'),
-        keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/'),
-        keyInput('google', 'Google Custom Search (بحث الصور)', 'https://developers.google.com/custom-search/v1/introduction'), keyInput('googleCx', 'Google Search Engine ID (cx)', 'https://programmablesearchengine.google.com/')));
+        keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/')));
       var testBox = h('div', { class: 'list', style: { display: 'none' } });
       var testAll = UI.btn('اختبر كل الموديلات', function () {
         UI.empty(testBox); testBox.style.display = '';
@@ -77,7 +110,7 @@
         }, testAll);
       }, 'primary');
       view.appendChild(UI.card('الموديلات لكل ميزة', UI.hint('دوس على أي خانة تظهرلك كل موديلات OpenRouter (بتدوّر بالاسم، وجنب كل موديل سعره لكل مليون توكن وهل بيستخدم أدوات 🛠 وبيشوف صور 👁). النقطة جنب الخانة بتخضر لما تختبرها.'),
-        UI.row(testAll, loadBtn, listInfo), testBox, modelsBox));
+        UI.row(testAll, loadBtn, listInfo), testBox, h('details', { class: 'adv' }, h('summary', null, 'متقدّم: موديل لكل ميزة (13)'), modelsBox)));
       view.appendChild(UI.card('البرامج المحلية (أوفلاين)', pathInput('ffmpeg', 'ffmpeg'), pathInput('whisper', 'whisper.cpp'), pathInput('whisperModel', 'موديل Whisper'),
         UI.row(wsel, dlBtn), prog, pathInput('baseMogrt', 'MOGRT أساسي للتايتلات'), pathInput('node', 'Node.js (للمشاهد Pro)'), pathInput('chrome', 'Chrome للـ Remotion (اختياري)'), pathInput('ytdlp', 'yt-dlp (التحميل من اللينكات)'), stBox));
       // ——— التحديثات ———

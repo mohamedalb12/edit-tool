@@ -40,14 +40,27 @@ test.after(async () => { await browser?.close(); server?.close(); });
 
 const calls = () => page.evaluate(() => window.__calls.map(c => c.name));
 const clearCalls = () => page.evaluate(() => { window.__calls.length = 0; });
-async function open(id) { await page.click(`#nav button[data-id="${id}"]`); await page.waitForTimeout(150); }
+// any screen by its id: the tool around it opens with that screen picked in its switcher
+async function open(id) {
+  const group = await page.evaluate(i => (EF.GROUPS.find(g => g.members.includes(i)) || {}).id, id);
+  await page.click(`#nav button[data-id="${group}"]`);
+  if (group !== id || (await page.locator(`.subnav .chip[data-sub="${id}"]`).count())) {
+    const sub = page.locator(`.subnav .chip[data-sub="${id}"]`);
+    if (await sub.count()) await sub.click();
+  }
+  await page.waitForTimeout(150);
+}
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 28 tools in the sidebar, RTL Arabic, connected to host, no errors', async () => {
+test('boots: 11 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'auto', 'revisions', 'quickcut', 'autofx', 'sfx', 'audio', 'transcribe', 'multicam', 'reels', 'safezones', 'organize', 'relink', 'curves', 'library', 'motion', 'titles', 'glass', 'pro', 'templates', 'carousel', 'icons', 'thumb', 'search', 'broll', 'websearch', 'download', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 28);
+  assert.deepEqual(ids, ['agent', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'download', 'revisions', 'relink', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 11);
+  // every screen still exists inside some tool, except the removed "organize"
+  const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
+  assert.equal(members.length, 27); assert.ok(!members.includes('organize'));
+  assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
   assert.deepEqual(errors, []);
@@ -93,10 +106,29 @@ test('القص السريع: analyse → list → cut', async () => {
   await open('quickcut'); await clearCalls();
   await clickText('حلّل السكتات');
   await page.waitForFunction(() => [...document.querySelectorAll('.stat b')].map(b => b.textContent).join('|') === '2|1.8');
-  await clickText('قص وقفّل الفراغات');
-  const c = await page.evaluate(() => window.__calls);
-  const qc = c.find(x => x.name === 'quickCut').args;
-  assert.equal(qc.cuts.length, 2); assert.equal(qc.onCopy, true); assert.equal(qc.crossfadeFrames, 2);
+  // keep the music track, untick one silence (a pause I like)
+  await page.locator('.keep-tracks label', { hasText: 'A2' }).locator('input').check();
+  await page.locator('#view .list .item input[type=checkbox]').nth(1).uncheck();
+  await page.locator('button', { hasText: 'نفّذ' }).first().click(); await page.waitForTimeout(250);
+  let qc = await page.evaluate(() => window.__calls.find(c => c.name === 'quickCut').args);
+  assert.equal(qc.cuts.length, 1, 'the unticked silence stays'); assert.equal(qc.onCopy, true); assert.equal(qc.crossfadeFrames, 2);
+  assert.deepEqual(qc.keepAudio, [1]); assert.equal(qc.mode, 'remove');
+  // markers first, cut later
+  await clearCalls();
+  await page.locator('.seg button', { hasText: 'ماركرز بس' }).click();
+  await clickText('حلّل السكتات');
+  await page.locator('button', { hasText: 'نفّذ' }).first().click(); await page.waitForTimeout(250);
+  qc = await page.evaluate(() => window.__calls.find(c => c.name === 'quickCut').args);
+  assert.equal(qc.mode, 'markers');
+  await page.locator('.seg button', { hasText: 'قص وقفّل الفراغات' }).click();
+  // fillers: اممم / آآآ, + "يعني" when ticked
+  await clearCalls();
+  await page.locator('.chips label', { hasText: 'يعني' }).locator('input').check();
+  await clickText('دوّر على الحشو');
+  await page.waitForSelector('text=3 مكان');
+  await clickText('شيل المعلّم');
+  const cr = await page.evaluate(() => window.__calls.find(c => c.name === 'cutRanges').args);
+  assert.equal(cr.ranges.length, 3); assert.equal(cr.mode, 'remove');
   await shot('02-quickcut');
 });
 
@@ -131,7 +163,7 @@ test('التفريغ والكابشن: 7 dialects, transcribe, clickable words, 
   await page.waitForSelector('.words span >> text=المونتاج');
   await page.click('.words span >> text=المونتاج');
   await page.locator('.row', { hasText: 'كلمة في الكارت' }).locator('input[type=checkbox]').check();
-  await clickText('نزّل SRT عادي');
+  await clickText('كابشن بريمير');
   const c = await page.evaluate(() => window.__calls);
   assert.equal(c.find(x => x.name === 'transcribe').args.dialect, 'gulf');
   assert.equal(c.find(x => x.name === 'setPlayhead').args, 3);
@@ -149,15 +181,6 @@ test('المالتي كام: tracks mapping, plan review, edit a shot, apply', a
   const plan = await page.evaluate(() => window.__calls.find(c => c.name === 'multicamApply').args.plan);
   assert.equal(plan[0].trackIndex, 1);
   await shot('06-multicam');
-});
-
-test('تنظيم المشروع: shows the plan first, then applies', async () => {
-  await open('organize'); await clearCalls();
-  await clickText('امسح المشروع');
-  await page.waitForSelector('text=📁 فيديو (1)');
-  assert.ok(!(await calls()).includes('organizeApply'));
-  await clickText('نفّذ الخطة');
-  assert.ok((await calls()).includes('organizeApply'));
 });
 
 test('محرر المنحنيات: read keyframes, pick easing, apply to property', async () => {
@@ -275,7 +298,7 @@ test('text motion: titles/card headings/AI replies reveal word by word, splash l
   await open('quickcut');
   assert.ok(await page.locator('#tab-title.wordfx .w').count() >= 2);
   assert.ok(await page.locator('.card h3.wordfx .w').count() >= 1);
-  assert.equal(await page.textContent('#tab-title'), 'القص السريع (أوفلاين)');
+  assert.equal(await page.textContent('#tab-title'), 'القص · سكتات وتكرار');
   await open('agent');
   assert.ok(await page.locator('.msg.ai.wordfx .w').count() >= 3);
 });
@@ -573,24 +596,28 @@ test('أيقونات: organised categories, search in Arabic, animated preview, 
   await shot('26-icons');
 });
 
-test('مؤثرات ترند + مزيكا AI: offline pack places on click, music generation', async () => {
+test('مؤثرات ترند: offline pack places on click (a double click places once); AI music is gone', async () => {
   await open('sfx'); await clearCalls();
   assert.equal(await page.locator('.sfx-item').count(), 3);
-  await page.locator('.sfx-item', { hasText: 'إمباكت' }).click();
-  await page.waitForTimeout(200);
+  await page.locator('.sfx-item', { hasText: 'إمباكت' }).dblclick();
+  await page.waitForTimeout(300);
   await clickText('ضيف الباقة لمكتبتي');
-  await page.fill('textarea[placeholder^="اوصف المزيكا"]', 'لو فاي هادية');
-  await clickText('ولّد المزيكا');
   const c = await page.evaluate(() => window.__calls);
+  assert.equal(c.filter(x => x.name === 'placeSfx').length, 1, 'double click → one sound');
   assert.deepEqual(c.find(x => x.name === 'placeSfx').args, { id: 'impact' });
   assert.ok(c.find(x => x.name === 'sfxPackInstall'));
-  assert.deepEqual(c.find(x => x.name === 'generateMusic').args, { prompt: 'لو فاي هادية', seconds: 30, instrumental: true });
-  assert.equal(await page.locator('audio[controls]').count(), 1);
+  assert.equal(await page.locator('textarea[placeholder^="اوصف المزيكا"]').count(), 0);
 });
 
 test('تحميل: analyse a link, qualities from the video, start/end, download onto the timeline', async () => {
   await open('download'); await clearCalls();
-  await page.fill('input[placeholder^="https://"]', 'https://youtu.be/abc');
+  await page.waitForSelector('.dl-tool');
+  assert.match(await page.textContent('.dl-tool'), /yt-dlp 2026\.08\.19/);
+  await clickText('حدّث yt-dlp');
+  assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'ytdlpInstall')));
+  await page.locator('.dl-tool + .row select').selectOption('chrome');
+  assert.equal(await page.evaluate(() => EF.services.settings.ytdlpCookies), 'chrome');
+  await page.fill('textarea.dl-urls', 'https://youtu.be/abc');
   assert.equal(await page.locator('.chip', { hasText: 'يوتيوب' }).count(), 1);
   await clickText('حلّل اللينك');
   await page.waitForSelector('.dl-info');
@@ -609,6 +636,14 @@ test('تحميل: analyse a link, qualities from the video, start/end, download 
   const a = await page.evaluate(() => window.__calls.find(x => x.name === 'downloadMedia').args);
   assert.deepEqual(a, { url: 'https://youtu.be/abc', quality: '720', start: '1:10', end: '1:40', place: true });
   await shot('27-download');
+  // several links at once: one after the other (no range)
+  await clearCalls();
+  await page.fill('textarea.dl-urls', 'https://youtu.be/one\nhttps://www.tiktok.com/@x/video/2');
+  assert.equal(await page.locator('.chip', { hasText: '2 لينكات' }).count(), 1);
+  await clickText('نزّل');
+  const all = await page.evaluate(() => window.__calls.filter(x => x.name === 'downloadMedia').map(x => x.args.url));
+  assert.deepEqual(all, ['https://youtu.be/one', 'https://www.tiktok.com/@x/video/2']);
+  assert.ok(await page.evaluate(() => window.__calls.filter(x => x.name === 'downloadMedia').every(x => x.args.start === undefined)));
 });
 
 test('بحث النت: sources, organised results (source + shape filters), place or import, Pinterest link', async () => {
@@ -780,11 +815,13 @@ test('التحديث التلقائي: banner with notes and a countdown, instal
 
 test('كابشن ثابت: no animation at all, full card from the first frame; frameKey only changes when pixels do', async () => {
   await open('transcribe'); await clearCalls();
-  const still = page.locator('.still-toggle input');
-  await still.check();
-  await clickText('نزّل كابشن متحرك');
+  await clickText('ثابت بالشكل اللي تحت');
   const a = await page.evaluate(() => window.__calls.find(x => x.name === 'addAnimatedCaptions').args);
   assert.equal(a.still, true);
+  await clearCalls();
+  await clickText('نزّل كابشن متحرك');
+  assert.equal(await page.evaluate(() => window.__calls.find(x => x.name === 'addAnimatedCaptions').args.still), false, 'the animated button always animates');
+  assert.ok(await page.isVisible('text=العربي ظاهر حروف مفككة'), 'Arabic text-engine guide');
   const r = await page.evaluate(() => {
     const CS = window.EFCaptions, W = 320, H = 180, c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
     const cue = { start: 0, end: 2, words: [{ text: 'كلام', start: 0, end: 1 }, { text: 'ثابت', start: 1, end: 2 }] };
@@ -799,7 +836,6 @@ test('كابشن ثابت: no animation at all, full card from the first frame; 
   assert.ok(r.k[0] === r.k[1] && r.k[1] === r.k[2], 'one frame for the whole cue');
   assert.ok(r.same, 'identical pixels from start to end');
   assert.ok(r.animSame && r.animDiff);
-  await still.uncheck();
 });
 
 test('التعديلات: paste the client message → tasks with times → tick done → Egyptian reply to copy', async () => {
@@ -878,6 +914,68 @@ test('الصرف: estimate next to every AI model (changes with the model), toda
   await page.mouse.click(5, 790);
   assert.equal(await page.locator('.spend-pop').count(), 0, 'closes on outside click');
   await page.evaluate(() => { EF.services.saveSettings({ spendAlert: 0, models: {} }); });
+});
+
+test('الفحص: runs every Premiere check, says which tool is blocked and why, copies a report; errors go to the log', async () => {
+  await open('settings'); await clearCalls();
+  await clickText('افحص بريمير بتاعي');
+  await page.waitForSelector('.diag-sum');
+  assert.match(await page.textContent('.diag-sum'), /3 أدوات مش هتشتغل/);
+  assert.equal(await page.locator('.diag-res > .diag-line.bad').count(), 3);
+  assert.match(await page.textContent('.diag-res'), /yt-dlp مش متثبّت/);
+  await page.locator('.diag-det summary').click();
+  assert.ok(await page.locator('.diag-det .diag-line').count() >= 6);
+  await clickText('انسخ تقرير المشكلة');
+  assert.ok(await page.isVisible('text=التقرير اتنسخ'));
+  await shot('40-diagnostics');
+  // a failing action lands in the log, and the error toast leads here
+  await page.evaluate(() => { EF.services._failNext = true; return EF.ui.safe('تجربة', function () { return Promise.reject(Object.assign(new Error('بريمير رفض'), { hostFn: 'placeFile', hostLine: 12 })); }); });
+  const last = await page.evaluate(() => EF.services._log.at(-1));
+  assert.equal(last.error, 'بريمير رفض'); assert.equal(last.hostFn, 'placeFile'); assert.equal(last.action, 'تجربة');
+  for (let i = errors.length - 1; i >= 0; i--) if (/بريمير رفض/.test(errors[i])) errors.splice(i, 1); // that one was on purpose
+});
+
+test('tools with several screens: a switcher on top, each screen keeps its place', async () => {
+  await page.click('#nav button[data-id="templates"]');
+  const subs = await page.locator('.subnav .chip').allTextContents();
+  assert.deepEqual(subs, ['القوالب', 'تايتلات', 'أيقونات', 'كاروسيل 3D', 'ليكويد جلاس', 'ثامبنيل', 'مشاهد AI (متقدّم)']);
+  await page.locator('.subnav .chip', { hasText: 'أيقونات' }).click();
+  assert.match(await page.textContent('#tab-title'), /الجرافيك · أيقونات/);
+  await page.click('#nav button[data-id="audio"]');
+  await page.click('#nav button[data-id="templates"]');
+  assert.equal(await page.locator('.subnav .chip.on').textContent(), 'أيقونات', 'came back to the last screen');
+  await shot('41-tools');
+});
+
+test('القص بالكلام: strike words in the transcript → those parts are cut (on a copy)', async () => {
+  await open('transcribe'); await clearCalls();
+  await clickText('فرّغ الكلام');
+  await page.waitForSelector('.words span >> text=المونتاج');
+  await clickText('✂ القص بالكلام');
+  await page.click('.words span >> text=المونتاج');
+  assert.equal(await page.locator('.words span.struck').count(), 1);
+  assert.match(await page.textContent('#view'), /1 جزء/);
+  await clickText('قص المشطوب');
+  const r = await page.evaluate(() => window.__calls.find(c => c.name === 'cutRanges').args.ranges);
+  assert.equal(r.length, 1); assert.ok(r[0].end > r[0].start);
+  assert.equal(await page.evaluate(() => window.__calls.filter(c => c.name === 'setPlayhead').length), 0, 'in cut mode a click strikes, it does not seek');
+  await clickText('✂ القص بالكلام');
+});
+
+test('باقة النشر + بيب: titles to copy, description with chapters, tags; bleep words in 3 modes', async () => {
+  await open('search'); await clearCalls();
+  await clickText('اعمل باقة النشر');
+  await page.waitForSelector('.yt-desc');
+  assert.equal(await page.locator('#view h4', { hasText: 'عناوين' }).count(), 1);
+  assert.match(await page.inputValue('.yt-desc'), /00:00 المقدمة/);
+  await page.locator('.item', { hasText: 'سر المونتاج السريع' }).click();
+  assert.ok(await page.isVisible('text=اتنسخ'));
+  await page.fill('input[placeholder^="الكلمات مفصولة"]', 'اسم الشركة، رقم');
+  await page.locator('.seg button', { hasText: 'ماركرز' }).last().click();
+  await page.locator('button', { hasText: 'نفّذ' }).last().click(); await page.waitForTimeout(250);
+  const b = await page.evaluate(() => window.__calls.find(c => c.name === 'bleepWords').args);
+  assert.deepEqual(b, { list: ['اسم الشركة', 'رقم'], mode: 'markers' });
+  await shot('42-publish');
 });
 
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

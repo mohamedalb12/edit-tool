@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
+require('./env'); // Homebrew dirs on PATH for every child process (Premiere from the Dock has a bare PATH)
 
 const IS_WIN = process.platform === 'win32';
 const EXT = IS_WIN ? '.exe' : '';
@@ -39,7 +40,7 @@ function resolveTools(settings = {}) {
   const p = settings.paths || {};
   const ffmpeg = findBinary('ffmpeg', p.ffmpeg);
   const ffprobe = findBinary('ffprobe', p.ffprobe, ffmpeg ? [path.dirname(ffmpeg)] : []);
-  const whisper = findBinary(['whisper-cli', 'whisper-cpp', 'main', 'whisper'], p.whisper);
+  const whisper = findBinary(['whisper-cli', 'whisper-cpp', 'main'], p.whisper); // not 'whisper': that's usually the Python one, different arguments
   return { ffmpeg, ffprobe, whisper };
 }
 

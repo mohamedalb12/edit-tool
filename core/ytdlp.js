@@ -40,14 +40,61 @@ function parseTime(v) {
   return parts.reduce((a, b) => a * 60 + b, 0);
 }
 
+/** the official standalone build for this OS (no Python, no Homebrew needed) */
+function assetName(platform = process.platform) { return platform === 'darwin' ? 'yt-dlp_macos' : platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp_linux'; }
+const RELEASE_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/';
+function managedPath(dataDir, platform = process.platform) { return path.join(dataDir, 'bin', assetName(platform)); }
+
+/** download (or replace with the latest) the standalone yt-dlp into the extension's data folder */
+async function installManaged(dataDir, { fetchImpl, onProgress } = {}) {
+  const fetch = fetchImpl || require('./http').nodeFetch;
+  const out = managedPath(dataDir);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const tmp = out + '.new';
+  const r = await fetch(RELEASE_URL + assetName(), { toFile: tmp, onProgress, timeout: 300000 });
+  if (!r.ok) throw new Error('مقدرتش أنزّل yt-dlp من GitHub (' + r.status + ')');
+  fs.chmodSync(tmp, 0o755);
+  fs.renameSync(tmp, out);
+  if (process.platform === 'darwin') { try { require('child_process').execFileSync('xattr', ['-d', 'com.apple.quarantine', out], { stdio: 'ignore' }); } catch (_) {} }
+  return { file: out, version: await version(out).catch(() => '') };
+}
+
+function version(bin) {
+  return new Promise((resolve, reject) => execFile(bin, ['--version'], { timeout: 30000, windowsHide: true }, (err, so) => (err ? reject(err) : resolve(String(so).trim()))));
+}
+/** yt-dlp ≥ 2025.11 solves YouTube's JS challenges with an outside runtime (deno, or node) */
+function needsJsRuntime(ver) { const m = /^(\d{4})\.(\d{2})/.exec(ver || ''); return !!m && (+m[1] > 2025 || (+m[1] === 2025 && +m[2] >= 11)); }
+
+/** turn yt-dlp's last ERROR line into what to do, in Arabic */
+function friendlyError(msg) {
+  const m = String(msg || '');
+  if (/Sign in to confirm|not a bot|cookies/i.test(m)) return 'يوتيوب طالب تسجيل دخول (فاكر إنك بوت). من الإعدادات اختار "كوكيز المتصفح" (Chrome أو Safari أو Firefox اللي فاتح فيه يوتيوب) وجرّب تاني.';
+  if (/Private video|members-only|This video is private/i.test(m)) return 'الفيديو خاص أو للأعضاء بس — لازم كوكيز حساب عنده صلاحية (من الإعدادات).';
+  if (/Video unavailable|has been removed|not available in your country/i.test(m)) return 'الفيديو مش متاح (اتشال أو مقفول في بلدك).';
+  if (/Unsupported URL/i.test(m)) return 'اللينك ده مش مدعوم — اتأكد إنه لينك الفيديو نفسه مش صفحة.';
+  if (/HTTP Error 403|Forbidden/i.test(m)) return 'الموقع رفض التحميل (403). دوس "حدّث yt-dlp" وجرّب تاني — غالبًا الموقع غيّر حاجة ونسخة أحدث بتحلها.';
+  if (/JavaScript|js runtime|challenge|n challenge|nsig|EJS/i.test(m)) return 'يوتيوب محتاج برنامج JavaScript (deno أو node) عشان التحميل. دوس "حدّث yt-dlp"، ولو فضلت المشكلة ثبّت deno: افتح Terminal واكتب brew install deno';
+  if (/ffmpeg|ffprobe/i.test(m) && /not found|not installed|exited/i.test(m)) return 'المشكلة في ffmpeg أثناء الدمج أو القص: ' + m.slice(-160);
+  if (/Requested format is not available/i.test(m)) return 'الجودة دي مش موجودة للفيديو ده — اختار جودة تانية أو "أعلى جودة".';
+  if (/proxy|Tunnel connection failed|CONNECT tunnel/i.test(m)) return 'مش قادر يوصل للموقع (بروكسي أو VPN بيمنع، أو النت) — جرّب من غير VPN.';
+  if (/timed out|Connection reset|Unable to download|getaddrinfo/i.test(m)) return 'النت فصل أو بطيء أثناء التحميل — جرّب تاني.';
+  return m;
+}
+
 /** yt-dlp arguments (pure — tested without the network). */
-function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true }) {
+function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true, jsRuntime, cookiesFrom, simple = false }) {
   const args = ['--no-playlist', '--newline', '--no-colors', '--windows-filenames', '--no-mtime', '--progress',
     '--progress-template', 'download:EFPROG %(progress._percent_str)s %(progress._speed_str)s',
     '--no-simulate', '--print', 'after_move:EFFILE %(filepath)s'];
   if (ffmpeg) args.push('--ffmpeg-location', ffmpeg);
+  if (jsRuntime) args.push('--js-runtimes', jsRuntime);
+  if (cookiesFrom) args.push('--cookies-from-browser', cookiesFrom);
   if (quality === 'audio') args.push('-f', 'ba/b', '-x', '--audio-format', 'mp3');
-  else {
+  else if (simple || !ffmpeg) {
+    // no ffmpeg (or merging failed): one ready-made file with picture + sound, no merge step
+    const h = /^\d+$/.test(String(quality)) ? +quality : 0;
+    args.push('-f', h ? `b[height<=${h}][ext=mp4]/b[height<=${h}]/b[ext=mp4]/b` : 'b[ext=mp4]/b');
+  } else {
     const h = /^\d+$/.test(String(quality)) ? +quality : 0;
     args.push('-f', h ? `bv*[height<=${h}]+ba/b[height<=${h}]/bv*+ba/b` : 'bv*+ba/b');
     // H.264 + AAC first: Premiere opens it everywhere (AV1/VP9 can fail on older versions)
@@ -64,19 +111,24 @@ function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, se
   return args;
 }
 
-function runJson(bin, args, timeout = 60000) {
+function runJson(bin, args, timeout = 150000) {
   return new Promise((resolve, reject) => {
     execFile(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout, windowsHide: true }, (err, stdout, stderr) => {
-      if (err) return reject(new Error('yt-dlp: ' + (String(stderr || err.message).trim().split('\n').pop() || 'فشل')));
+      if (err) {
+        const lines = String(stderr || err.message).trim().split('\n');
+        const last = lines.filter(x => /ERROR/.test(x)).pop() || lines.pop() || 'فشل';
+        return reject(new Error(err.killed ? 'yt-dlp خد وقت أكتر من اللازم — النت بطيء أو الموقع مش بيرد' : friendlyError(last.replace(/^ERROR:\s*/, ''))));
+      }
       try { resolve(JSON.parse(stdout)); } catch (e) { reject(new Error('yt-dlp رجّع رد مش مفهوم')); }
     });
   });
 }
 
 /** Title, length, thumbnail, available heights. */
-async function info(bin, url) {
-  if (!bin) throw new Error('محتاج yt-dlp على الجهاز (المثبّت بيثبّته) أو حدد مكانه من الإعدادات.');
-  const j = await runJson(bin, ['-J', '--no-playlist', '--no-warnings', String(url).trim()]);
+async function info(bin, url, { jsRuntime, cookiesFrom } = {}) {
+  if (!bin) throw new Error('yt-dlp مش متثبّت — دوس "ثبّت yt-dlp" فوق.');
+  const extra = [...(jsRuntime ? ['--js-runtimes', jsRuntime] : []), ...(cookiesFrom ? ['--cookies-from-browser', cookiesFrom] : [])];
+  const j = await runJson(bin, ['-J', '--no-playlist', '--no-warnings', ...extra, String(url).trim()]);
   const heights = Array.from(new Set((j.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))).sort((a, b) => b - a);
   return { id: j.id, title: j.title || j.id, duration: j.duration || null, thumbnail: j.thumbnail || null, uploader: j.uploader || j.channel || '', heights, platform: platformOf(url), extractor: j.extractor_key || j.extractor };
 }
@@ -94,7 +146,7 @@ function trim(ffmpeg, file, { start, end, audioOnly, out }) {
 
 /** Download with progress → { file }. */
 function download(bin, opts, onProgress) {
-  if (!bin) return Promise.reject(new Error('محتاج yt-dlp على الجهاز (المثبّت بيثبّته) أو حدد مكانه من الإعدادات.'));
+  if (!bin) return Promise.reject(new Error('yt-dlp مش متثبّت — دوس "ثبّت yt-dlp" فوق.'));
   fs.mkdirSync(opts.outDir, { recursive: true });
   const args = buildArgs(opts);
   return new Promise((resolve, reject) => {
@@ -110,9 +162,12 @@ function download(bin, opts, onProgress) {
     child.on('close', code => {
       if (buf) line(buf);
       if (code === 0 && file && fs.existsSync(file)) resolve({ file });
-      else reject(new Error('التحميل فشل: ' + (err.trim().split('\n').filter(x => /ERROR/.test(x)).pop() || err.trim().split('\n').pop() || 'exit ' + code)));
+      else {
+        const last = (err.trim().split('\n').filter(x => /ERROR/.test(x)).pop() || err.trim().split('\n').pop() || 'exit ' + code).replace(/^ERROR:\s*/, '');
+        const e = new Error('التحميل فشل: ' + friendlyError(last)); e.raw = last; reject(e);
+      }
     });
   });
 }
 
-module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim };
+module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim, assetName, managedPath, installManaged, version, needsJsRuntime, friendlyError, RELEASE_URL };

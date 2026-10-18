@@ -55,7 +55,7 @@
       });
       view.appendChild(UI.card(null, UI.row(q, UI.btn('دوّر', go, 'primary')),
         UI.seg([{ value: 'image', label: 'صور' }, { value: 'video', label: 'فيديو' }, { value: 'audio', label: 'صوت' }], o.type, function (v) { o.type = v; }),
-        UI.row(cb('openverse'), cb('commons'), cb('google'), cb('pexels'), cb('pixabay')),
+        UI.row(cb('openverse'), cb('commons'), k.google && k.googleCx ? cb('google') : null, cb('pexels'), cb('pixabay')),
         UI.row(UI.btn('افتح في Google', function () { if (o.q.trim()) EF.openUrl(S.webSearchPage('google', o.q)); }, 'small'), UI.btn('افتح في Pinterest', function () { if (o.q.trim()) EF.openUrl(S.webSearchPage('pinterest', o.q)); }, 'small')),
         UI.hint('Openverse وWikimedia مجانيين ومن غير مفتاح (رخص Creative Commons). Google جوه الأداة محتاج مفتاح Custom Search مجاني (100 بحث/يوم). Pinterest مالوش بحث مفتوح: افتحه في المتصفح والصق لينك الـ Pin هنا.')));
       view.appendChild(UI.card('من لينك', UI.row(link, imp)));

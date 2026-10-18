@@ -170,7 +170,9 @@
   UI.toast = function (msg, isErr) {
     var t = document.getElementById('toast');
     UI.wordFx(t, msg, { step: 25 }); t.className = 'show wordfx' + (isErr ? ' err' : '');
-    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.className = ''; }, isErr ? 6000 : 3000);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.className = ''; }, isErr ? 12000 : 3000);
+    t.onclick = isErr ? function () { t.className = ''; EF.show('settings'); setTimeout(function () { var d = document.getElementById('diag'); if (d) d.scrollIntoView({ behavior: 'smooth' }); }, 200); } : null;
+    t.title = isErr ? 'دوس هنا تشوف السجل وتنسخ تقرير المشكلة' : '';
   };
 
   UI.status = function (msg, kind) {
@@ -184,7 +186,10 @@
     if (btn) btn.disabled = true;
     return Promise.resolve().then(fn).then(function (r) { UI.status('جاهز'); return r; }, function (e) {
       var msg = (e && e.message) || String(e);
-      UI.status('خطأ', 'err'); UI.toast(msg, true); console.error(e); throw e;
+      UI.status('خطأ', 'err'); UI.toast(msg, true); console.error(e);
+      UI.lastError = { label: label, message: msg };
+      try { if (EF.services && EF.services.logError) EF.services.logError({ tab: EF.currentTab || '', action: label, error: msg, hostFn: e && e.hostFn, hostLine: e && e.hostLine, stack: e && e.stack ? String(e.stack).split('\n').slice(0, 4).join(' | ') : '' }); } catch (e2) {}
+      throw e;
     }).finally(function () { if (btn) btn.disabled = false; if (EF.spend) EF.spend.refresh(); });
   };
   UI.safe = function (label, fn, btn) { return UI.run(label, fn, btn).catch(function () {}); };

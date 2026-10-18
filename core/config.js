@@ -16,8 +16,12 @@ const DEFAULTS = {
   captions: { maxWords: 4, maxDuration: 2.5, singleWord: false },
   libraryDirs: [],
   favorites: {},
-  layeredScenes: true, // Pro scenes land as a nested sequence with one track per layer
+  layeredScenes: false, // Pro scenes land as one clip; on = a nested sequence with one track per layer (slower)
   autoUpdate: true,
+  ytdlpCookies: '', // browser to borrow cookies from when YouTube asks to sign in ('' = none)
+  fillerExtra: [],
+  bleepWords: [], // optional filler words the editor wants cut too (يعني، بص…)
+  speechTrack: null, // audio track index the speech is on (null = first track with clips)
   spendAlert: 0, // $ في اليوم: تنبيه لو الصرف على الذكاء الاصطناعي عدّاه (0 = من غير)
   updateUrl: ''
 };

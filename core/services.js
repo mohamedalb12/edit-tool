@@ -50,6 +50,110 @@ class Services {
     this.brollCache = new Map();
   }
 
+  /* ---------- الفحص: كل اللي الإضافة محتاجاه، على بريمير والجهاز بتوعك ---------- */
+  /** test media for the self-test: a short video (if ffmpeg is there), a PNG and an Arabic SRT */
+  async selfTestMedia() {
+    const dir = config.cacheDir('selftest');
+    const png = path.join(dir, 'ef-test.png'), srt = path.join(dir, 'ef-test-captions.srt'), mp4 = path.join(dir, 'ef-test.mp4');
+    if (!fs.existsSync(png)) fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAYAAADhAJiYAAAAPklEQVR42u3PAQkAAAgDIN8/9K3hQOGTgkxPRxAREREREREREREREREREREREREREREREREREREREREREREREZ2uWDzKj0GL04v8AAAAAElFTkSuQmCC', 'base64'));
+    fs.writeFileSync(srt, '\ufeff1\n00:00:00,000 --> 00:00:01,000\nاختبار الكابشن\n', 'utf8');
+    let video = png;
+    if (this.tools.ffmpeg) {
+      if (!fs.existsSync(mp4)) {
+        try { await ff.run(this.tools.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=25:d=3', '-f', 'lavfi', '-i', 'sine=f=440:d=3', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', mp4]); } catch (_) {}
+      }
+      if (fs.existsSync(mp4)) video = mp4;
+    }
+    return { video, still: png, srt };
+  }
+
+  /** check one external tool: found? version? */
+  async toolCheck(bin, args = ['-version']) {
+    if (!bin) return { ok: false, detail: 'مش موجود' };
+    try {
+      const out = await new Promise((res, rej) => require('child_process').execFile(bin, args, { timeout: 20000, windowsHide: true }, (e, so, se) => (e && !so ? rej(e) : res(String(so || se)))));
+      return { ok: true, path: bin, detail: out.split('\n')[0].slice(0, 90) };
+    } catch (e) { return { ok: false, path: bin, detail: (e.code === 'EACCES' || /quarantine|not permitted/i.test(e.message) ? 'macOS مانع تشغيله (Gatekeeper) — ' : '') + String(e.message).slice(0, 140) }; }
+  }
+
+  /**
+   * Self-test: Premiere's own API on a throwaway sequence + the tools on this computer + network.
+   * Each tool then reads as ready or blocked, with the reason.
+   */
+  async selfTest({ onStep } = {}) {
+    const step = m => onStep && onStep(m);
+    const out = { at: new Date().toISOString(), panel: {}, premiere: null, tools: {}, network: {}, ready: {} };
+    try { out.panel = { node: process.versions.node, platform: process.platform + ' ' + process.arch, version: require('./updater').currentVersion ? require('./updater').currentVersion(path.join(__dirname, '..')) : '', path: (process.env.PATH || '').split(':').slice(0, 8).join(':') }; } catch (_) {}
+    step('بيجرّب أوامر بريمير على سيكوينس تجربة…');
+    try { out.premiere = await this.hostRaw('selfTest', await this.selfTestMedia()); } catch (e) { out.premiere = { error: e.message, probes: [] }; }
+    step('بيدوّر على البرامج اللي على الجهاز…');
+    const T = this.tools, ff2 = ff.findBinary;
+    out.tools.ffmpeg = await this.toolCheck(T.ffmpeg);
+    out.tools.ffprobe = await this.toolCheck(T.ffprobe);
+    out.tools.whisper = await this.toolCheck(T.whisper, ['--help']);
+    if (out.tools.whisper.ok) out.tools.whisper.detail = path.basename(T.whisper);
+    const model = this.settings.paths.whisperModel;
+    out.tools.whisperModel = model && fs.existsSync(model) ? { ok: fs.statSync(model).size > 30e6, detail: path.basename(model) + ' · ' + Math.round(fs.statSync(model).size / 1e6) + ' MB' } : { ok: false, detail: 'مش متحمّل — حمّله من الإعدادات' };
+    out.tools.ytdlp = await this.toolCheck(this.ytdlpBin(), ['--version']);
+    out.tools.deno = await this.toolCheck(ff2('deno', null, [path.join(require('os').homedir(), '.deno', 'bin')]), ['--version']);
+    out.tools.node = await this.toolCheck(ff2('node', this.settings.paths.node), ['--version']);
+    try { const e = require('./proScene').engineInfo ? require('./proScene').engineInfo() : null; out.tools.proEngine = e && e.installed ? { ok: true, detail: e.version || 'متثبّت' } : { ok: false, detail: 'مش متثبّت (تبويب الجرافيك)' }; } catch (_) { out.tools.proEngine = { ok: false, detail: 'مش متثبّت' }; }
+    step('بيجرّب النت…');
+    const ping = async (id, url) => { const t0 = Date.now(); try { const r = await this.fetch(url, { timeout: 10000 }); out.network[id] = { ok: r.status < 500, detail: r.status + ' · ' + (Date.now() - t0) + 'ms' }; } catch (e) { out.network[id] = { ok: false, detail: e.message.slice(0, 100) }; } };
+    await ping('openrouter', 'https://openrouter.ai/api/v1/models');
+    await ping('github', 'https://github.com/yt-dlp/yt-dlp/releases');
+    out.keys = { openrouter: !!this.settings.keys.openrouter, elevenlabs: /^sk_/.test(this.settings.keys.elevenlabs || ''), pexels: !!this.settings.keys.pexels };
+    out.ready = this.readiness(out);
+    try { this.logError({ kind: 'selftest', summary: Object.entries(out.ready).map(([k, v]) => k + ':' + (v.ok ? 'ok' : 'NO')).join(' ') }); } catch (_) {}
+    this.lastSelfTest = out;
+    return out;
+  }
+
+  /** which tool works on this computer, and if not why (from a self-test result) */
+  readiness(r) {
+    const P = {}; ((r.premiere && r.premiere.probes) || []).forEach(p => { P[p.id] = p; });
+    const t = r.tools || {}, why = [];
+    const need = (list) => { const miss = list.filter(([ok]) => !ok).map(([, m]) => m); return miss.length ? { ok: false, why: miss.join('، ') } : { ok: true }; };
+    const prem = !(r.premiere && r.premiere.error) && !!P.import;
+    const place = [[prem && P.import && P.import.ok, 'الاستيراد في بريمير مش شغال'], [P.placeStill && P.placeStill.ok, 'وضع الكليبات على التايملين مش شغال']];
+    void why;
+    return {
+      captions: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [t.whisper && t.whisper.ok, 'whisper ناقص'], [t.whisperModel && t.whisperModel.ok, 'موديل Whisper ناقص']]),
+      nativeCaptions: need([[P.captions && P.captions.ok, 'بريمير مش بيقبل كابشن من سكريبت'], [t.whisper && t.whisper.ok, 'whisper ناقص']]),
+      cut: need([[t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [P.razor && P.razor.ok, 'القص (razor) مش شغال'], [P.rippleDelete && P.rippleDelete.ok, 'الحذف مع سحب الكليبات مش شغال'], [P.clone && P.clone.ok, 'نسخ السيكوينس مش شغال']]),
+      audio: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص']]),
+      motion: need([[P.transform && P.transform.ok, 'إضافة Transform مش شغالة (بريمير مش بالإنجليزي؟) — هيستخدم Motion بداله']]),
+      download: need([[t.ytdlp && t.ytdlp.ok, 'yt-dlp مش متثبّت (تبويب التحميل)'], [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص (للدمج والقص)'], ...place]),
+      reels: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [P.newSequence && P.newSequence.ok, 'عمل سيكوينس جديدة مش شغال']]),
+      graphics: need([...place, [t.node && t.node.ok, 'Node.js ناقص'], [t.proEngine && t.proEngine.ok, 'محرك الجرافيك مش متثبّت']]),
+      ai: need([[r.keys && r.keys.openrouter, 'مفيش مفتاح OpenRouter'], [r.network && r.network.openrouter && r.network.openrouter.ok, 'مش واصل لـ OpenRouter']]),
+      markers: need([[P.markers && P.markers.ok, 'الماركرز مش شغالة']])
+    };
+  }
+
+  /** plain-text report to paste in a message: self-test + last errors (keys never included) */
+  diagnosticReport() {
+    const r = this.lastSelfTest, L = [];
+    L.push('EditFast diagnostic report — ' + new Date().toISOString());
+    if (r) {
+      L.push('Panel: ' + JSON.stringify(r.panel));
+      if (r.premiere) {
+        L.push('Premiere: ' + JSON.stringify(r.premiere.env || {}) + (r.premiere.error ? ' ERROR ' + r.premiere.error : ''));
+        (r.premiere.probes || []).forEach(p => L.push(`  ${p.ok ? 'OK ' : 'NO '} ${p.id} ${p.ms}ms ${p.detail || ''}`));
+      }
+      Object.entries(r.tools).forEach(([k, v]) => L.push(`  tool ${k}: ${v.ok ? 'OK' : 'NO'} ${v.detail || ''}${v.path ? ' @ ' + v.path : ''}`));
+      Object.entries(r.network).forEach(([k, v]) => L.push(`  net ${k}: ${v.ok ? 'OK' : 'NO'} ${v.detail || ''}`));
+      Object.entries(r.ready).forEach(([k, v]) => L.push(`  ready ${k}: ${v.ok ? 'yes' : 'NO — ' + v.why}`));
+    } else L.push('(no self-test run yet)');
+    L.push('Last errors:');
+    this.logTail(40).forEach(e => L.push(`  ${e.at} [${e.tab || ''}] ${e.action || e.kind || ''}: ${e.error || e.summary || ''}${e.hostFn ? ' (host ' + e.hostFn + (e.hostLine ? ' line ' + e.hostLine : '') + ')' : ''}`));
+    return require('./log').redact(L.join('\n'));
+  }
+
+  /* ---------- سجل الأخطاء ---------- */
+  logError(entry) { return require('./log').append(config.dataDir(), entry); }
+  logTail(n) { return require('./log').tail(config.dataDir(), n); }
+
   /* ---------- السجل والتراجع ---------- */
   /** Group the timeline changes of one user-level action under a label. */
   async op(label, fn) {
@@ -63,10 +167,11 @@ class Services {
     let before = null;
     if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
     const r = await this.hostRaw(name, args);
-    const LABELS = { buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
+    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
     if (!LABELS[name]) return r;
     const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
     if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
+    else if (name === 'placeFiles') e.undo = { kind: 'removeClips', args: { kind: args.kind || 'video', track: r.track, paths: args.items.map(x => x.path) } };
     else if (name === 'buildLayeredScene') e.undo = { kind: 'removeClip', args: { kind: 'video', track: r.track, start: r.start, path: '' } };
     else if (name === 'addMarkers') e.undo = { kind: 'removeMarkers', args: { markers: args.markers.map(m => ({ time: m.time, name: m.name })) } };
     else if (willClone && before && before.id) e.undo = { kind: 'openSequence', args: { id: before.id }, note: `رجوع لـ "${before.name}"` };
@@ -100,7 +205,7 @@ class Services {
       { id: 'transcribe', label: 'تفريغ الكلام', on: true },
       { id: 'repeats', label: 'شيل التكرار وإعادات التيك', on: true },
       { id: 'silences', label: 'شيل السكتات', on: true },
-      { id: 'hook', label: 'هوك قوي في الأول (الذكاء الاصطناعي يختار)', on: true, ai: true },
+      { id: 'hook', label: 'ماركر على أقوى جملة تنفع هوك (أنت تحطها)', on: false, ai: true },
       { id: 'cleanAudio', label: 'تنضيف الصوت', on: has('cleanAudio') },
       { id: 'zooms', label: 'زووم وحركة على اللحظات المهمة', on: true, ai: true },
       { id: 'broll', label: 'B-Roll على الكلام', on: !!(this.settings.keys.pexels || this.settings.keys.pixabay), ai: true },
@@ -143,7 +248,7 @@ class Services {
             case 'transcribe': d = (await this.transcribe({})).words.length + ' كلمة'; break;
             case 'repeats': { const r = await this.removeRepeats(); d = (r.found || 0) + ' تكرار'; break; }
             case 'silences': { const r = await this.quickCut({}); d = (r.removedSeconds || 0) + ' ثانية'; break; }
-            case 'hook': { const h = await this.pickHook(); await this.makeHook(h); d = `${h.start.toFixed(1)}–${h.end.toFixed(1)}s`; break; }
+            case 'hook': { const h = await this.pickHook(); await this.host('addMarkers', { markers: [{ time: h.start, duration: h.end - h.start, name: 'هوك مقترح', comment: h.reason || '', color: 'orange' }] }); d = `ماركر ${h.start.toFixed(1)}–${h.end.toFixed(1)}s`; break; }
             case 'cleanAudio': { const r = await this.cleanAudio({}); d = r.clips + ' كليب'; break; }
             case 'zooms': { const list = (await this.autoEffectsSuggest({ density: 'medium' })).filter(e => e.type === 'motion'); const r = await this.autoEffectsApply(list); d = r.applied + ' حركة'; break; }
             case 'broll': { const ms = await this.brollMoments(); let n = 0; for (const m of ms) { try { const r = await this.brollSearch({ q: m.query, type: 'video' }); if (r.results[0]) { await this.brollPlace({ item: r.results[0], time: m.time, duration: m.duration || 3 }); n++; } } catch (_) {} } d = n + ' لقطة'; break; }
@@ -321,12 +426,16 @@ class Services {
   /** audio clips used for analysis: the given audio track, or the first track that has clips */
   async audioClips(trackIndex) {
     const s = await this.seq();
-    let tr = trackIndex !== undefined && trackIndex !== null ? s.audio[trackIndex] : s.audio.find(t => t.clips.length);
+    if ((trackIndex === undefined || trackIndex === null) && Number.isInteger(this.settings.speechTrack) && s.audio[this.settings.speechTrack] && s.audio[this.settings.speechTrack].clips.length) trackIndex = this.settings.speechTrack;
+    const usable = t => t && t.clips.some(c => c.mediaPath && !c.disabled);
+    let tr = trackIndex !== undefined && trackIndex !== null ? s.audio[trackIndex] : (s.audio.find(usable) || s.audio.find(t => t.clips.length));
     if (!tr || !tr.clips.length) {
-      tr = s.video.find(t => t.clips.length); // video-only media (audio inside the file)
+      tr = s.video.find(usable) || s.video.find(t => t.clips.length); // video-only media (audio inside the file)
       if (!tr) throw new Error('السيكوينس فاضية.');
     }
-    return { seq: s, clips: tr.clips.filter(c => c.mediaPath && !c.disabled) };
+    const clips = tr.clips.filter(c => c.mediaPath && !c.disabled);
+    if (!clips.length) throw new Error(`الكليبات على ${tr.name || 'التراك ده'} مالهاش ملف أصلي (Nested أو Multicam أو جرافيك). اختار تراك الصوت الأصلي من "تراك الكلام"، أو اعمل للكليب Multi-Camera > Flatten.`);
+    return { seq: s, clips, track: tr };
   }
 
   /* ---------- القص السريع ---------- */
@@ -342,25 +451,105 @@ class Services {
     if (!res.cuts.length) return { removed: 0, message: 'مفيش سكتات تستاهل تتشال' };
     const crossfade = opts.crossfade === false ? 0 : (opts.crossfadeFrames ?? q.crossfadeFrames);
     const s = await this.seq();
-    const out = await this.host('removeRanges', { ranges: res.cuts, clone: opts.onCopy ?? q.onCopy, cloneName: `${s.name} - EditFast قص`, crossfadeFrames: crossfade });
+    const keep = { audio: (opts.keepAudio ?? q.keepAudio ?? []).filter(Number.isInteger) };
+    // "markers" mode: nothing is cut — a marker on every silence to review first
+    if ((opts.mode || q.mode) === 'markers') {
+      const r = await this.host('addMarkers', { markers: res.cuts.map(c => ({ time: c.start, duration: c.end - c.start, name: 'سكتة', comment: (c.end - c.start).toFixed(2) + 's', color: 'red' })) });
+      return { markers: r.added, ranges: res.cuts.length, removedSeconds: 0, sequence: s.name };
+    }
+    // from the end backwards, in batches: each host call stays short (no frozen Premiere), and earlier times stay valid
+    const cuts = res.cuts.slice().sort((a, b) => b.start - a.start), total = { removed: 0, ranges: 0, crossfades: 0, sequence: s.name };
+    for (let i = 0; i < cuts.length; i += 40) {
+      const out = await this.host('removeRanges', { ranges: cuts.slice(i, i + 40), clone: i === 0 && (opts.onCopy ?? q.onCopy), cloneName: `${s.name} - EditFast قص`, crossfadeFrames: crossfade, keep });
+      total.removed += out.removed || 0; total.ranges += out.ranges || 0; total.crossfades += out.crossfades || 0; total.sequence = out.sequence || total.sequence;
+      if (opts.onProgress) opts.onProgress(Math.min(1, (i + 40) / cuts.length));
+    }
     this.transcript = null; // timeline changed
-    return { ...out, removedSeconds: +res.cuts.reduce((a, c) => a + c.end - c.start, 0).toFixed(2) };
+    return { ...total, removedSeconds: +res.cuts.reduce((a, c) => a + c.end - c.start, 0).toFixed(2) };
+  }
+
+  /* ---------- كلمات الحشو + القص بالكلام + البيب ---------- */
+  /** "اممم / آآآ / uh" (and optional words like يعني) from the transcript → ranges to cut */
+  async findFillers({ extra = [] } = {}) {
+    const t = await this.ensureTranscript();
+    return require('./fillers').find(t.words, { extra });
+  }
+  /** cut ranges picked from the transcript (fillers, or words struck out in the text) — same safe path as silence cuts */
+  async cutRanges({ ranges, mode, onProgress } = {}) {
+    if (!ranges || !ranges.length) return { removed: 0, message: 'مفيش حاجة متعلّمة' };
+    return this.quickCut({ cuts: ranges.map(r => ({ start: r.start, end: r.end })), mode, onProgress, onCopy: true });
+  }
+  /** words from a list → bleep (a 1 kHz tone on its own track + the voice muted under it) or mute only, or markers */
+  async bleepWords({ list = [], mode = 'beep' } = {}) {
+    const t = await this.ensureTranscript();
+    const hits = require('./fillers').findWords(t.words, list);
+    if (!hits.length) return { hits: 0 };
+    if (mode === 'markers') { await this.host('addMarkers', { markers: hits.map(x => ({ time: x.start, duration: x.end - x.start, name: 'بيب', comment: x.text, color: 'red' })) }); return { hits: hits.length, mode }; }
+    const { clips, track } = await this.audioClips();
+    const ti = clips[0] && clips[0].kind === 'audio' ? track.index : -1; // voice inside a video-only clip can't get volume keys
+    await this.op('بيب', async () => {
+      // mute the voice under each hit (one call per clip: its keys are rewritten together)
+      for (const c of clips) {
+        const mine = hits.filter(x => x.end > c.start && x.start < c.end);
+        if (!mine.length || ti < 0) continue;
+        const keys = [];
+        mine.forEach(x => keys.push({ t: Math.max(c.start, x.start - 0.01), db: 0 }, { t: Math.max(c.start, x.start), db: -60 }, { t: Math.min(c.end, x.end), db: -60 }, { t: Math.min(c.end, x.end + 0.01), db: 0 }));
+        await this.host('setVolumeKeys', { track: ti, clipStart: c.start, keys });
+      }
+      if (mode === 'beep') {
+        const items = [];
+        for (const x of hits) {
+          const d = +(x.end - x.start).toFixed(2), f = path.join(config.cacheDir('sfx'), `beep-${d}.wav`);
+          if (!fs.existsSync(f)) await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `sine=f=1000:d=${d}`, '-af', 'volume=0.35,afade=t=in:d=0.01,afade=t=out:st=' + Math.max(0, d - 0.01) + ':d=0.01', f]);
+          items.push({ path: f, time: x.start, duration: d });
+        }
+        await this.host('placeFiles', { items, kind: 'audio', bin: 'EditFast/SFX', minTrack: 0 });
+      }
+    });
+    return { hits: hits.length, mode, words: hits.map(x => x.text) };
+  }
+
+  /** publish pack: titles, description with chapters, tags — from the transcript */
+  async youtubePack({ lang } = {}) {
+    const ch = await this.chapters({});
+    const t = await this.ensureTranscript();
+    const text = transcribeMod.sentences(t.words).map(x => x.text).join(' ').slice(0, 12000);
+    if (!this.settings.keys.openrouter) {
+      return { titles: [], description: 'فصول الفيديو:\n' + ch.youtube, tags: [], chapters: ch.youtube, ai: false };
+    }
+    const r = await this.llm.json({ model: this.model('chapters'), maxTokens: 1800,
+      system: 'أنت مسؤول نشر قناة يوتيوب. من كلام الفيديو اكتب: 5 عناوين قوية مختلفة (أقل من 70 حرف، من غير كذب ولا مبالغة)، وصف (3-5 سطور بنفس لهجة الفيديو، أول سطر هو الخطاف)، و15 تاج (عربي وإنجليزي). رجّع {"titles":[...],"description":"...","tags":[...]}',
+      user: `${lang ? 'اللغة المطلوبة: ' + lang + '\n' : ''}كلام الفيديو:\n${text}` });
+    const titles = (Array.isArray(r.titles) ? r.titles : []).map(String).slice(0, 5);
+    const tags = (Array.isArray(r.tags) ? r.tags : []).map(String).slice(0, 20);
+    const description = String(r.description || '').trim() + '\n\nفصول الفيديو:\n' + ch.youtube;
+    return { titles, description, tags, chapters: ch.youtube, ai: true };
   }
 
   /* ---------- التفريغ ---------- */
   async transcribe({ dialect, trackIndex, onProgress } = {}) {
     const d = dialect || this.settings.dialect;
     const { seq, clips } = await this.audioClips(trackIndex);
-    const all = [];
-    for (const clip of clips) {
+    // one whisper run per SOURCE file (the span its clips use), not one per clip: after a silence cut the timeline has
+    // hundreds of pieces of the same file, and they all reuse that one cached result
+    const spans = new Map();
+    for (const c of clips) {
+      const a = c.inPoint, b = c.inPoint + (c.end - c.start), sp = spans.get(c.mediaPath);
+      if (!sp) spans.set(c.mediaPath, { file: c.mediaPath, a, b }); else { sp.a = Math.min(sp.a, a); sp.b = Math.max(sp.b, b); }
+    }
+    const list = [...spans.values()], words = new Map();
+    for (let i = 0; i < list.length; i++) {
+      const sp = list[i], tag = list.length > 1 ? `ملف ${i + 1} من ${list.length}: ` : '';
       const r = await transcribeMod.transcribe({
         ffmpeg: this.ffmpeg(), whisper: this.tools.whisper, model: this.settings.paths.whisperModel,
-        file: clip.mediaPath, start: clip.inPoint, duration: clip.end - clip.start, dialectId: d,
+        file: sp.file, start: Math.max(0, Math.floor(sp.a)), duration: Math.ceil(sp.b) - Math.max(0, Math.floor(sp.a)), dialectId: d,
         cacheDir: config.cacheDir('transcripts'), llm: this.settings.keys.openrouter ? this.llm : null,
-        spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null, onProgress
+        spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null, onProgress: onProgress && (m => onProgress(tag + m))
       });
-      all.push(...transcribeMod.wordsToTimeline(r.words, clip));
+      words.set(sp.file, r.words);
     }
+    const all = [];
+    for (const clip of clips) all.push(...transcribeMod.wordsToTimeline(words.get(clip.mediaPath) || [], clip));
     all.sort((a, b) => a.start - b.start);
     this.transcript = { seqId: seq.id, words: all, dialect: d };
     return this.transcript;
@@ -402,10 +591,18 @@ class Services {
     const cues = captions.buildCues(t.words, c);
     if (!cues.length) throw new Error('مفيش كلام اتفرّغ');
     const key = hash(JSON.stringify({ cues, st, w: s.width, h: s.height, fps: s.fps }));
-    const clips = await this.renderCaptionsImpl({ cues, width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: st, outDir: config.cacheDir('captions'), ffmpeg: this.ffmpeg(), hash: key, onProgress });
+    // still captions are PNGs drawn in the panel: no ffmpeg needed
+    const clips = await this.renderCaptionsImpl({ cues, width: s.width, height: s.height, fps: Math.round(s.fps) || 30, style: st, outDir: config.cacheDir('captions'), ffmpeg: st.still ? this.tools.ffmpeg : this.ffmpeg(), hash: key, onProgress: onProgress && (p => onProgress(p * 0.8)) });
     const top = s.video.reduce((m, tr, i) => (tr.clips.length ? i : m), 0);
-    await this.op('كابشن متحرك', async () => {
-      for (const cl of clips) await this.host('placeFile', { path: cl.file, time: cl.start, kind: 'video', track: -1, minTrack: top + 1, duration: +(cl.end - cl.start).toFixed(3), bin: 'EditFast/Captions' });
+    let track = -1;
+    await this.op(st.still ? 'كابشن ثابت' : 'كابشن متحرك', async () => {
+      // one import + one track for all of them, in batches so Premiere never freezes on one huge call
+      for (let i = 0; i < clips.length; i += 60) {
+        const part = clips.slice(i, i + 60).map(cl => ({ path: cl.file, time: cl.start, duration: +(cl.end - cl.start).toFixed(3) }));
+        const r = await this.host('placeFiles', { items: part, kind: 'video', bin: 'EditFast/Captions', minTrack: track >= 0 ? track : top + 1 });
+        if (track < 0) track = r.track;
+        if (onProgress) onProgress(0.8 + 0.2 * Math.min(1, (i + 60) / clips.length));
+      }
     });
     return { cues: cues.length, clips: clips.length, style: st.style || 'bold' };
   }
@@ -1148,29 +1345,66 @@ ${JSON.stringify(lite)}
   }
 
   /* ---------- تحميل من يوتيوب/إنستجرام/تيك توك ---------- */
-  ytdlpBin() { return ff.findBinary(['yt-dlp', 'yt-dlp_macos'], this.settings.paths.ytdlp); }
-  async downloadInfo(url) { return require('./ytdlp').info(this.ytdlpBin(), url); }
+  /** yt-dlp: the path set in settings → the copy the panel installed (always updatable) → one on the system */
+  ytdlpBin() {
+    const Y = require('./ytdlp');
+    if (this.settings.paths.ytdlp && fs.existsSync(this.settings.paths.ytdlp)) return this.settings.paths.ytdlp;
+    const managed = Y.managedPath(config.dataDir());
+    if (fs.existsSync(managed)) return managed;
+    return ff.findBinary(['yt-dlp', 'yt-dlp_macos'], null, [path.join(require('os').homedir(), 'Library', 'Python', '3.12', 'bin'), path.join(require('os').homedir(), 'Library', 'Python', '3.11', 'bin')]);
+  }
+  /** install or update the panel's own yt-dlp (no Homebrew/Python needed) */
+  async ytdlpInstall({ onProgress } = {}) {
+    const r = await require('./ytdlp').installManaged(config.dataDir(), { fetchImpl: this.fetch, onProgress });
+    this._ytdlpVer = null;
+    return r;
+  }
+  /** what to pass yt-dlp so YouTube works: a JS runtime for new versions, browser cookies if chosen */
+  async ytdlpOpts() {
+    const Y = require('./ytdlp'), bin = this.ytdlpBin();
+    if (!bin) return { bin: null };
+    if (!this._ytdlpVer || this._ytdlpVer.bin !== bin) this._ytdlpVer = { bin, v: await Y.version(bin).catch(() => '') };
+    let jsRuntime = null;
+    if (Y.needsJsRuntime(this._ytdlpVer.v)) {
+      const deno = ff.findBinary('deno', null, [path.join(require('os').homedir(), '.deno', 'bin')]);
+      const node = deno ? null : ff.findBinary('node', this.settings.paths.node);
+      jsRuntime = deno ? 'deno:' + deno : node ? 'node:' + node : null;
+    }
+    return { bin, version: this._ytdlpVer.v, jsRuntime, cookiesFrom: this.settings.ytdlpCookies || null };
+  }
+  async ytdlpStatus() { const o = await this.ytdlpOpts(); return { installed: !!o.bin, path: o.bin, version: o.version || '', jsRuntime: o.jsRuntime, managed: !!o.bin && o.bin === require('./ytdlp').managedPath(config.dataDir()), cookiesFrom: o.cookiesFrom }; }
+  async downloadInfo(url) { const o = await this.ytdlpOpts(); return require('./ytdlp').info(o.bin, url, o); }
   async downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
     const Y = require('./ytdlp'), W = require('./websearch');
     const pf = Y.platformOf(url);
     if (!pf) throw new Error('اللينك مش صح');
     const dir = await this.projectMediaDir('Downloads');
+    const o = await this.ytdlpOpts();
+    const base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom };
     let file, type = quality === 'audio' ? 'audio' : 'video';
     const cut = Y.parseTime(start) !== null || Y.parseTime(end) !== null;
+    const cutHere = async full => {
+      const a = Y.parseTime(start) || 0, b = Y.parseTime(end);
+      const out = full.replace(/(\.[^.]+)$/, `-${a}-${b === null ? 'end' : b}${quality === 'audio' ? '.mp3' : '.mp4'}`);
+      const f = (await Y.trim(this.ffmpeg(), full, { start, end, audioOnly: quality === 'audio', out })).file;
+      try { fs.unlinkSync(full); } catch (_) {}
+      return f;
+    };
     try {
-      try {
-        file = (await Y.download(this.ytdlpBin(), { url, quality, start, end, outDir: dir, ffmpeg: this.tools.ffmpeg }, onProgress)).file;
-      } catch (e1) {
-        // cutting while downloading fails on some sites/ffmpeg builds (e.g. "ffmpeg exited with code 8"):
-        // download the whole thing and cut it exactly here instead
-        if (!cut) throw e1;
-        onProgress && onProgress(0, 'full');
-        const full = (await Y.download(this.ytdlpBin(), { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, sections: false }, onProgress)).file;
-        const a = Y.parseTime(start) || 0, b = Y.parseTime(end);
-        const out = full.replace(/(\.[^.]+)$/, `-${a}-${b === null ? 'end' : b}${quality === 'audio' ? '.mp3' : '.mp4'}`);
-        file = (await Y.trim(this.ffmpeg(), full, { start, end, audioOnly: quality === 'audio', out })).file;
-        try { fs.unlinkSync(full); } catch (_) {}
+      // 1) normal (cut while downloading)  2) whole file + cut here (cutting while downloading fails on some sites)
+      // 3) one ready-made file, no merging (when ffmpeg merging is what failed)
+      const attempts = [() => Y.download(o.bin, { ...base, start, end }, onProgress).then(r => r.file)];
+      if (cut) attempts.push(async () => { onProgress && onProgress(0, 'full'); return cutHere((await Y.download(o.bin, { ...base, sections: false }, onProgress)).file); });
+      attempts.push(async () => { onProgress && onProgress(0, 'simple'); const f = (await Y.download(o.bin, { ...base, sections: false, simple: true }, onProgress)).file; return cut ? cutHere(f) : f; });
+      let lastErr = null;
+      for (const tryIt of attempts) {
+        try { file = await tryIt(); break; } catch (e) {
+          lastErr = e;
+          // these won't get better by retrying with another format
+          if (/تسجيل دخول|خاص|مش متاح|مش مدعوم|مش متثبّت|JavaScript|403/.test(e.message)) break;
+        }
       }
+      if (!file) throw lastErr;
     } catch (e) {
       // Pinterest photo pins aren't videos: grab the picture itself
       if (pf.id !== 'pinterest') throw e;
@@ -1181,8 +1415,8 @@ ${JSON.stringify(lite)}
     let placed = null;
     if (place) {
       const s = await this.seq();
-      const dur = type === 'photo' ? 5 : undefined;
-      placed = await this.host('placeFile', { path: file, time: time ?? s.playhead, kind: type === 'audio' ? 'audio' : 'video', track: -1, duration: dur, bin: 'EditFast/Downloads' });
+      // no duration for video/audio: Premiere's own length of the file decides the free track
+      placed = await this.host('placeFile', { path: file, time: time ?? s.playhead, kind: type === 'audio' ? 'audio' : 'video', track: -1, duration: type === 'photo' ? 5 : undefined, bin: 'EditFast/Downloads' });
     }
     return { file, type, platform: pf, placed };
   }
@@ -1337,7 +1571,7 @@ ${JSON.stringify(lite)}
   }
   async revisionsMarkers({ roundId }) {
     const data = await this.revisionsLoad(); const r = data.rounds.find(x => x.id === roundId);
-    const marks = (r ? r.items : []).filter(x => x.time != null).map((x, i) => ({ time: x.time, name: `تعديل ${i + 1}`, comment: x.text, color: 'yellow' }));
+    const marks = (r ? r.items : []).filter(x => x.time != null).map((x, i) => ({ time: x.time, duration: x.timeEnd != null && x.timeEnd > x.time ? x.timeEnd - x.time : undefined, name: `تعديل ${i + 1}`, comment: x.text, color: x.done ? 'green' : 'yellow' }));
     if (!marks.length) throw new Error('مفيش أوقات في التعديلات دي');
     await this.host('addMarkers', { markers: marks });
     return { added: marks.length };

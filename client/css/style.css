@@ -521,3 +521,31 @@ input::placeholder, textarea::placeholder { color: rgba(255,255,255,.38); }
 #topbar .brand { min-width: 96px; }
 #topbar #status { max-width: 34%; }
 .pill.spend { max-width: 30%; }
+/* التفريغ: كلمة متصلّحة + دليل العربي */
+.words span[contenteditable="true"] { outline: 1px solid var(--accent, #8B5CF6); border-radius: 4px; padding: 0 3px; background: rgba(139, 92, 246, .15); }
+.words span.fixed { text-decoration: underline dotted rgba(110, 231, 183, .8); }
+.ar-guide { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.ar-guide summary { cursor: pointer; color: #FBBF24; }
+.ar-guide ol { margin: 6px 0 0; padding-inline-start: 18px; line-height: 1.8; }
+.dl-urls { min-height: 46px; resize: vertical; }
+.chip.ok { color: #6EE7B7; border-color: rgba(52, 211, 153, .45); }
+.chip.bad { color: #FB7185; border-color: rgba(251, 113, 133, .5); }
+/* الفحص */
+.diag-res { margin-top: 10px; }
+.diag-sum { font-weight: 800; padding: 8px 12px; border-radius: 10px; margin-bottom: 8px; }
+.diag-sum.ok { color: #6EE7B7; background: rgba(52, 211, 153, .1); }
+.diag-sum.bad { color: #FBBF24; background: rgba(251, 191, 36, .1); }
+.diag-line { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.diag-line .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #34D399; }
+.diag-line.bad .dot { background: #FB7185; }
+.diag-line .hint { max-width: 55%; text-align: left; overflow-wrap: anywhere; }
+.diag-det, details.adv { margin-top: 8px; }
+.diag-det summary, details.adv summary { cursor: pointer; color: var(--muted); font-weight: 700; padding: 4px 0; }
+#toast.err { cursor: pointer; }
+/* the switcher inside a tool */
+.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.subnav .chip { cursor: pointer; }
+.list .item.off { opacity: .4; text-decoration: line-through; }
+.words.cut-mode span { cursor: crosshair; }
+.words span.struck { text-decoration: line-through; color: #FB7185; opacity: .75; }
+.yt-desc { width: 100%; }

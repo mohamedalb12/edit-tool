@@ -6,11 +6,31 @@
     id: 'download', label: 'تحميل', title: 'تحميل فيديو من لينك',
     render: function (view) {
       var S = EF.services, Y = EF.node('ytdlp');
-      var bin = S.ytdlpBin();
+      // ——— yt-dlp status: install / update from here, cookies when YouTube asks to sign in ———
+      var toolBox = h('div'), toolProg = UI.progress();
+      function drawTool() {
+        UI.empty(toolBox);
+        Promise.resolve().then(function () { return S.ytdlpStatus(); }).then(function (st) {
+          UI.empty(toolBox);
+          var inst = UI.btn(st.installed ? 'حدّث yt-dlp' : 'ثبّت yt-dlp (40 ميجا)', function () {
+            toolProg.set(0);
+            UI.safe('بيثبّت yt-dlp', function () { return S.ytdlpInstall({ onProgress: function (p) { toolProg.set(p); } }).then(function (r) { toolProg.set(1); UI.toast('yt-dlp ' + (r.version || '') + ' جاهز ✓'); drawTool(); }); }, inst);
+          }, st.installed ? 'small' : 'primary');
+          var cookies = UI.select([{ value: '', label: 'من غير' }, { value: 'chrome', label: 'Chrome' }, { value: 'safari', label: 'Safari' }, { value: 'firefox', label: 'Firefox' }, { value: 'edge', label: 'Edge' }, { value: 'brave', label: 'Brave' }], st.cookiesFrom || '', function (v) { S.saveSettings({ ytdlpCookies: v }); UI.toast(v ? 'هياخد تسجيل دخولك من ' + v + ' ✓' : 'من غير كوكيز'); });
+          toolBox.appendChild(h('div', { class: 'row dl-tool' },
+            h('span', { class: 'chip' + (st.installed ? ' ok' : ' bad') }, st.installed ? 'yt-dlp ' + (st.version || '') + (st.managed ? '' : ' (من الجهاز)') : 'yt-dlp مش متثبّت'),
+            st.installed && !st.jsRuntime && /^20(2[6-9]|25\.1[12])/.test(st.version || '') ? h('span', { class: 'chip bad', title: 'يوتيوب محتاج deno أو node: brew install deno' }, 'مفيش deno/node') : null,
+            h('span', { class: 'spacer' }), inst));
+          toolBox.appendChild(h('div', { class: 'row' }, h('label', { title: 'لو يوتيوب قالك سجّل دخول أو الفيديو خاص' }, 'كوكيز المتصفح'), cookies));
+          toolBox.appendChild(toolProg);
+        }).catch(function (e) { toolBox.appendChild(h('div', { class: 'hint err' }, e.message)); });
+      }
+      var bin = true;
       var infoBox = h('div'), prog = UI.progress(), qualWrap = h('div');
-      var url = h('input', { class: 'grow ltr', placeholder: 'https://youtube.com/… أو instagram / tiktok / pinterest', value: o.url, oninput: function (e) { o.url = e.target.value; badge(); } });
+      var url = h('textarea', { class: 'grow ltr dl-urls', rows: 2, placeholder: 'https://youtube.com/… أو instagram / tiktok / pinterest\n(تقدر تلصق كذا لينك، كل واحد في سطر)', value: o.url, oninput: function (e) { o.url = e.target.value; badge(); } });
+      function links() { return String(o.url || '').split(/[\s]+/).map(function (x) { return x.trim(); }).filter(function (x) { return /^https?:\/\//i.test(x); }); }
       var plat = h('span', { class: 'chip' });
-      function badge() { var p = Y.platformOf(o.url); plat.textContent = p ? p.label : 'لينك'; plat.style.display = o.url ? '' : 'none'; }
+      function badge() { var l = links(); var p = l.length ? Y.platformOf(l[0]) : null; plat.textContent = l.length > 1 ? l.length + ' لينكات' : (p ? p.label : 'لينك'); plat.style.display = l.length ? '' : 'none'; }
 
       function drawQual() {
         UI.empty(qualWrap);
@@ -28,8 +48,8 @@
       }
 
       var analyze = UI.btn('حلّل اللينك', function () {
-        if (!o.url.trim()) return UI.toast('حط اللينك الأول', true);
-        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(o.url).then(function (i) { o.info = i; o.start = ''; o.end = ''; drawInfo(); drawQual(); drawRange(); }); }, analyze);
+        if (!links().length) return UI.toast('حط اللينك الأول', true);
+        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(links()[0]).then(function (i) { o.info = i; o.start = ''; o.end = ''; drawInfo(); drawQual(); drawRange(); }); }, analyze);
       });
       // range slider over the video's length: drag the start and end handles (or type m:ss)
       var rangeBox = h('div', { class: 'dl-range' });
@@ -67,16 +87,30 @@
         sync('lo');
       }
       var go = UI.btn('نزّل', function () {
-        if (!o.url.trim()) return UI.toast('حط اللينك الأول', true);
+        var list = links();
+        if (!list.length) return UI.toast('حط اللينك الأول', true);
         prog.set(0);
         UI.safe('بيحمّل', function () {
-          return S.downloadMedia({ url: o.url, quality: o.quality, start: o.start || undefined, end: o.end || undefined, place: o.place, onProgress: function (p, phase) { prog.set(p); UI.status(phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : 'تحميل ' + Math.round(p * 100) + '%', 'busy'); } })
-            .then(function (r) { prog.set(1); UI.toast(r.placed ? 'نزل على التايملين ✓' : 'اتحمّل ✓ ' + r.file.split(/[\\/]/).pop()); });
+          var done = 0, failed = [];
+          // several links: one after the other; the start/end range only applies to a single link
+          return list.reduce(function (p, u, i) {
+            return p.then(function () {
+              var one = list.length === 1;
+              return S.downloadMedia({ url: u, quality: o.quality, start: one ? (o.start || undefined) : undefined, end: one ? (o.end || undefined) : undefined, place: o.place, onProgress: function (x, phase) {
+                prog.set((i + x) / list.length);
+                UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : 'تحميل ' + Math.round(x * 100) + '%'), 'busy');
+              } }).then(function () { done++; }, function (e) { if (list.length === 1) throw e; failed.push(u + ' — ' + e.message); });
+            });
+          }, Promise.resolve()).then(function () {
+            prog.set(1);
+            if (failed.length) UI.toast(done + ' اتحمّلوا و' + failed.length + ' فشلوا: ' + failed[0], true);
+            else UI.toast(list.length > 1 ? done + ' فيديو اتحمّلوا ✓' : (o.place ? 'نزل على التايملين ✓' : 'اتحمّل ✓'));
+          });
         }, go);
       }, 'primary');
 
-      if (!bin) view.appendChild(UI.card('محتاج yt-dlp', UI.hint('أداة التحميل (yt-dlp) مش موجودة. المثبّت بيثبّتها تلقائي — أو نزّلها وحدد مكانها من الإعدادات.'),
-        UI.row(UI.btn('صفحة yt-dlp', function () { EF.openUrl('https://github.com/yt-dlp/yt-dlp#installation'); }, 'small'), UI.btn('الإعدادات', function () { EF.show('settings'); }, 'small'))));
+      view.appendChild(UI.card('أداة التحميل', toolBox, UI.hint('الإضافة بتنزّل نسختها من yt-dlp لوحدها (من غير Homebrew). المواقع بتغيّر حاجات كتير، فلو التحميل وقف فجأة دوس "حدّث yt-dlp".')));
+      drawTool();
       view.appendChild(UI.card(null, UI.row(url, plat), UI.row(analyze), infoBox,
         UI.field('الجودة', qualWrap),
         UI.field('الجزء', rangeBox),

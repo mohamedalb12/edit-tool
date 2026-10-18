@@ -73,9 +73,10 @@ test('markers: name, comment, color, duration', () => {
 
 test('placeFile: imports into EditFast bin once, picks a free video track, trims to duration', () => {
   const { call, seq, pr } = setup();
-  const r = call('placeFile', { path: '/cache/broll1.mp4', time: 6.5, kind: 'video', duration: 3, bin: 'EditFast/B-Roll' });
-  assert.equal(r.track, 2, 'V2 busy at 6.5 → V3');
-  assert.deepEqual(spans(seq.v[2]), [[6.5, 9.5, 0]]);
+  const r = call('placeFile', { path: '/cache/broll1.mp4', time: 6.4, kind: 'video', duration: 3, bin: 'EditFast/B-Roll' });
+  assert.equal(r.track, 2, 'V2 busy at 6.4 → V3');
+  assert.deepEqual(spans(seq.v[2]), [[6.4, 9.4, 0]]);
+  assert.equal(pr.project.root.kids.find(k => k.name === 'EditFast').kids.find(k => k.name === 'B-Roll').kids[0].outPoint, null, 'source in/out cleared after placing');
   const ef = pr.project.root.kids.find(k => k.name === 'EditFast');
   assert.ok(ef && ef.kids.find(k => k.name === 'B-Roll').kids.length === 1);
   call('placeFile', { path: '/cache/broll1.mp4', time: 0, kind: 'video', duration: 1, bin: 'EditFast/B-Roll' });
@@ -171,7 +172,7 @@ test('panel bridge → evalScript → host.jsx round-trip keeps Arabic text and 
   const vm = require('vm');
   const { call, ctx, seq } = setup();
   const scripts = [];
-  const win = { location: { pathname: '/Users/me/EditFast/client/index.html' }, __adobe_cep__: { evalScript: (s, cb) => { scripts.push(s); cb(vm.runInContext(s, ctx)); } } };
+  const win = { setTimeout, clearTimeout, location: { pathname: '/Users/me/EditFast/client/index.html' }, __adobe_cep__: { evalScript: (s, cb) => { scripts.push(s); cb(vm.runInContext(s, ctx)); } } };
   win.window = win;
   vm.runInNewContext(fs.readFileSync(require('path').join(__dirname, '..', '..', 'client', 'js', 'bridge.js'), 'utf8'), win);
   assert.equal(win.EF.extRoot, '/Users/me/EditFast');
@@ -189,4 +190,78 @@ test('placeFile: minTrack puts a layer above the clip it belongs to', () => {
   const r = call('placeFile', { path: '/c/glass-abc.mov', time: 1, kind: 'video', duration: 2, minTrack: 2 });
   assert.equal(r.track, 2);
   assert.deepEqual(spans(seq.v[2]), [[1, 3, 0]]);
+});
+
+test('host.jsx is pure ASCII (Arabic as \\u escapes) so ExtendScript never misreads its encoding', () => {
+  assert.ok(/^[\x00-\x7f]*$/.test(SRC));
+});
+
+test('placeFile: a long source cut to a short duration never covers the clips after it on that track', () => {
+  const { call, seq, pr } = setup({ withBroll: false });
+  const later = seq.v[1].add({ projectItem: pr.project.importOne('/media/logo.mp4', pr.project.root), start: 4, end: 6, inPoint: 0 });
+  const r = call('placeFile', { path: '/cache/music-long.mp4', time: 0, kind: 'video', duration: 3, minTrack: 1 });
+  assert.equal(r.track, 1, 'V2 is free for 0–3 s');
+  assert.deepEqual(spans(seq.v[1]), [[0, 3, 0], [4, 6, 0]], 'the 10 s source was laid as 3 s: the logo at 4 s survives');
+  assert.ok(seq.v[1].items.includes(later));
+});
+
+test('placeFile: no duration given → the real source length decides the free track', () => {
+  const { call, seq, pr } = setup({ withBroll: false });
+  seq.v[1].add({ projectItem: pr.project.importOne('/media/logo.mp4', pr.project.root), start: 8, end: 9, inPoint: 0 });
+  const r = call('placeFile', { path: '/dl/video.mp4', time: 1, kind: 'video' }); // 10 s source
+  assert.equal(r.track, 2, 'V2 is busy at 8 s, inside the 10 s the download needs → V3');
+  assert.deepEqual(spans(seq.v[2]), [[1, 11, 0]]);
+});
+
+test('placeFiles: one import + one track for 50 captions, each trimmed to its cue', () => {
+  const { call, seq, pr } = setup({ withBroll: false });
+  const items = Array.from({ length: 50 }, (_, i) => ({ path: `/cache/cap-${i}.png`, time: i * 0.2, duration: 0.2 }));
+  const before = pr.qeLog ? pr.qeLog.length : 0;
+  const r = call('placeFiles', { items, kind: 'video', bin: 'EditFast/Captions', minTrack: 1 });
+  assert.equal(r.placed, 50); assert.equal(r.track, 1);
+  assert.equal(seq.v[1].items.length, 50, 'no 5 s stills stacking up on other tracks');
+  assert.ok(seq.v[1].items.every(c => Math.abs(c._end - c._start - 0.2) < 1e-6));
+  assert.equal(pr.project.root.kids.find(k => k.name === 'EditFast').kids.find(k => k.name === 'Captions').kids.length, 50);
+  assert.ok(before >= 0);
+});
+
+test('import: an Arabic file name stored decomposed (NFD, like macOS) still matches → no false "import failed", no duplicate', () => {
+  const { call, pr } = setup({ withBroll: false });
+  const nfc = '/dl/أهلاً بيكم.mp4', nfd = nfc.normalize('NFD');
+  assert.notEqual(nfc, nfd);
+  // Premiere reports the path the way the disk stores it
+  const orig = pr.project.importOne.bind(pr.project);
+  pr.project.importOne = (p, bin) => orig(p === nfc ? nfd : p, bin);
+  call('placeFile', { path: nfc, time: 0, kind: 'video', duration: 1, minTrack: 2 });
+  call('placeFile', { path: nfc, time: 2, kind: 'video', duration: 1, minTrack: 2 });
+  assert.equal(pr.project.root.kids.find(k => k.name === 'EditFast').kids.length, 1);
+});
+
+test('pickTrack: when no track is free and none can be added, it refuses instead of overwriting', () => {
+  const { raw, seq, pr } = setup({ withBroll: false });
+  pr.qe.project.getActiveSequence = () => ({ addTracks() { throw new Error('nope'); } });
+  for (let i = 1; i < seq.v.length; i++) seq.v[i].add({ projectItem: pr.project.importOne('/m/x' + i + '.mp4', pr.project.root), start: 0, end: 10 });
+  const r = raw('placeFile', { path: '/cache/new.mp4', time: 1, kind: 'video', duration: 2 });
+  assert.equal(r.ok, false); assert.match(r.error, /تراك فيديو فاضي/);
+  assert.equal(r.fn, 'placeFile');
+});
+
+test('cloneSequence: picks the new copy by id even when an older "… Copy" exists, and makes it active', () => {
+  const { call, pr } = setup({ withBroll: false });
+  call('cloneSequence', { name: 'Main - EditFast' });
+  pr.app.project.openSequence(pr.app.project.sequences[0].sequenceID);
+  const second = call('cloneSequence', { name: 'Main - EditFast 2' });
+  assert.equal(second.name, 'Main - EditFast 2');
+  assert.equal(pr.project.activeSeq.name, 'Main - EditFast 2');
+});
+
+test('setVolumeKeys: ducking twice rewrites the keys from the real level instead of ducking again on top', () => {
+  const { call, seq } = setup({ withBroll: false });
+  const keys = [{ t: 1, db: 0 }, { t: 1.2, db: -12 }, { t: 3, db: -12 }, { t: 3.2, db: 0 }];
+  call('setVolumeKeys', { track: 0, clipStart: 0, keys });
+  const lvl = seq.a[0].items[0].comps[0].props.find(p => p.displayName === 'Level');
+  const first = lvl.keys.map(k => +k.v.toFixed(5));
+  call('setVolumeKeys', { track: 0, clipStart: 0, keys });
+  assert.deepEqual(lvl.keys.map(k => +k.v.toFixed(5)), first, 'same levels, not −24 dB');
+  assert.equal(lvl.keys.length, 4);
 });
