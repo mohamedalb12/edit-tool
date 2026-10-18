@@ -53,9 +53,11 @@ class Services {
   /* ---------- الفحص: كل اللي الإضافة محتاجاه، على بريمير والجهاز بتوعك ---------- */
   /** test media for the self-test: a short video (if ffmpeg is there), a PNG and an Arabic SRT */
   async selfTestMedia() {
-    const dir = config.cacheDir('selftest');
+    // inside a folder with Arabic + spaces, like the editor's own media
+    const dir = path.join(config.cacheDir('selftest'), 'اختبار EditFast');
+    fs.mkdirSync(dir, { recursive: true });
     const png = path.join(dir, 'ef-test.png'), srt = path.join(dir, 'ef-test-captions.srt'), mp4 = path.join(dir, 'ef-test.mp4');
-    if (!fs.existsSync(png)) fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAYAAADhAJiYAAAAPklEQVR42u3PAQkAAAgDIN8/9K3hQOGTgkxPRxAREREREREREREREREREREREREREREREREREREREREREREREZ2uWDzKj0GL04v8AAAAAElFTkSuQmCC', 'base64'));
+    fs.writeFileSync(png, require('./util').makePng(320, 180)); // a real PNG (1.5.0 shipped a broken one)
     fs.writeFileSync(srt, '\ufeff1\n00:00:00,000 --> 00:00:01,000\nاختبار الكابشن\n', 'utf8');
     let video = png;
     if (this.tools.ffmpeg) {
@@ -113,21 +115,28 @@ class Services {
   readiness(r) {
     const P = {}; ((r.premiere && r.premiere.probes) || []).forEach(p => { P[p.id] = p; });
     const t = r.tools || {}, why = [];
-    const need = (list) => { const miss = list.filter(([ok]) => !ok).map(([, m]) => m); return miss.length ? { ok: false, why: miss.join('، ') } : { ok: true }; };
-    const prem = !(r.premiere && r.premiere.error) && !!P.import;
-    const place = [[prem && P.import && P.import.ok, 'الاستيراد في بريمير مش شغال'], [P.placeStill && P.placeStill.ok, 'وضع الكليبات على التايملين مش شغال']];
+    // a check that never ran (an earlier step failed) is "not tested", not "broken"
+    const need = (list) => {
+      const miss = list.filter(([ok]) => ok !== true);
+      if (!miss.length) return { ok: true };
+      const broken = miss.filter(([ok]) => ok === false).map(([, m]) => m), untested = miss.filter(([ok]) => ok !== false).map(([, m]) => m);
+      return { ok: false, untested: !broken.length, why: broken.concat(untested.length ? ['ما اتجرّبش: ' + untested.join('، ')] : []).join('، ') };
+    };
+    const probe = id => (P[id] ? (P[id].ok ? true : (/^skipped/.test(P[id].detail || '') ? undefined : false)) : undefined);
+    const tool = k => (t[k] ? !!t[k].ok : undefined);
+    const place = [[probe('import'), 'الاستيراد في بريمير مش شغال'], [probe('placeStill'), 'وضع الكليبات على التايملين مش شغال']];
     void why;
     return {
-      captions: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [t.whisper && t.whisper.ok, 'whisper ناقص'], [t.whisperModel && t.whisperModel.ok, 'موديل Whisper ناقص']]),
-      nativeCaptions: need([[P.captions && P.captions.ok, 'بريمير مش بيقبل كابشن من سكريبت'], [t.whisper && t.whisper.ok, 'whisper ناقص']]),
-      cut: need([[t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [P.razor && P.razor.ok, 'القص (razor) مش شغال'], [P.rippleDelete && P.rippleDelete.ok, 'الحذف مع سحب الكليبات مش شغال'], [P.clone && P.clone.ok, 'نسخ السيكوينس مش شغال']]),
-      audio: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص']]),
-      motion: need([[P.transform && P.transform.ok, 'إضافة Transform مش شغالة (بريمير مش بالإنجليزي؟) — هيستخدم Motion بداله']]),
-      download: need([[t.ytdlp && t.ytdlp.ok, 'yt-dlp مش متثبّت (تبويب التحميل)'], [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص (للدمج والقص)'], ...place]),
-      reels: need([...place, [t.ffmpeg && t.ffmpeg.ok, 'ffmpeg ناقص'], [P.newSequence && P.newSequence.ok, 'عمل سيكوينس جديدة مش شغال']]),
-      graphics: need([...place, [t.node && t.node.ok, 'Node.js ناقص'], [t.proEngine && t.proEngine.ok, 'محرك الجرافيك مش متثبّت']]),
-      ai: need([[r.keys && r.keys.openrouter, 'مفيش مفتاح OpenRouter'], [r.network && r.network.openrouter && r.network.openrouter.ok, 'مش واصل لـ OpenRouter']]),
-      markers: need([[P.markers && P.markers.ok, 'الماركرز مش شغالة']])
+      captions: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص'], [tool('whisper'), 'whisper ناقص'], [tool('whisperModel'), 'موديل Whisper ناقص']]),
+      nativeCaptions: need([[probe('captions'), 'بريمير مش بيقبل كابشن من سكريبت'], [tool('whisper'), 'whisper ناقص']]),
+      cut: need([[tool('ffmpeg'), 'ffmpeg ناقص'], [probe('razor'), 'القص (razor) مش شغال'], [probe('rippleDelete'), 'الحذف مع سحب الكليبات مش شغال'], [probe('clone'), 'نسخ السيكوينس مش شغال']]),
+      audio: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص']]),
+      motion: need([[probe('transform'), 'إضافة Transform مش شغالة (بريمير مش بالإنجليزي؟) — هيستخدم Motion بداله']]),
+      download: need([[tool('ytdlp'), 'yt-dlp مش متثبّت (تبويب التحميل)'], [tool('ffmpeg'), 'ffmpeg ناقص (للدمج والقص)'], ...place]),
+      reels: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص'], [probe('newSequence'), 'عمل سيكوينس جديدة مش شغال']]),
+      graphics: need([...place, [tool('node'), 'Node.js ناقص'], [tool('proEngine'), 'محرك الجرافيك مش متثبّت']]),
+      ai: need([[!!(r.keys && r.keys.openrouter), 'مفيش مفتاح OpenRouter'], [r.network && r.network.openrouter ? !!r.network.openrouter.ok : undefined, 'مش واصل لـ OpenRouter']]),
+      markers: need([[probe('markers'), 'الماركرز مش شغالة']])
     };
   }
 
@@ -1152,19 +1161,87 @@ ${JSON.stringify(lite)}
   librarySearch(q) { return library.search(this.libraryItems(), q); }
   async libraryAdd(dirs, onProgress) {
     const probe = this.tools.ffprobe ? f => ff.probe(this.tools.ffprobe, f) : null;
-    const items = await library.scan(dirs, { probe, onProgress });
-    const merged = library.mergeIndex(this.libraryItems(), items);
+    const known = this.libraryItems();
+    const items = await library.scan(dirs, { probe, onProgress, known });
+    const merged = library.mergeIndex(known, items);
     library.saveIndex(config.dataDir(), merged);
-    const known = new Set(this.settings.libraryDirs || []);
-    dirs.forEach(d => known.add(d));
-    this.saveSettings({ libraryDirs: Array.from(known) });
-    return { added: items.length, total: merged.length };
+    const dirsKnown = new Set(this.settings.libraryDirs || []);
+    dirs.forEach(d => { try { if (fs.statSync(d).isDirectory()) dirsKnown.add(d); } catch (_) {} });
+    this.saveSettings({ libraryDirs: Array.from(dirsKnown) });
+    const before = new Set(known.map(x => x.id));
+    return { added: items.filter(x => !before.has(x.id)).length, scanned: items.length, total: merged.length };
   }
-  async libraryPlace({ id, time }) {
-    const it = this.libraryItems().find(x => x.id === id);
+  /** rescan every library folder (fast: unchanged files are skipped), drop what was deleted from disk */
+  async libraryRescan(onProgress) { return this.libraryAdd(this.settings.libraryDirs || [], onProgress); }
+  libraryRemoveDir(dir) {
+    const norm = d => String(d).replace(/[\\/]+$/, '');
+    const keep = (this.settings.libraryDirs || []).filter(d => norm(d) !== norm(dir));
+    const items = this.libraryItems().filter(x => !x.path.startsWith(norm(dir) + path.sep) && x.path !== norm(dir));
+    library.saveIndex(config.dataDir(), items);
+    this.saveSettings({ libraryDirs: keep });
+    return { total: items.length, dirs: keep };
+  }
+  libraryStats() { return { ...library.stats(this.libraryItems()), dirs: this.settings.libraryDirs || [], categories: library.CATEGORIES }; }
+  /** favourite / tags on one item (kept across rescans) */
+  libraryUpdate({ id, fav, tags }) {
+    const items = this.libraryItems(), it = items.find(x => x.id === id);
     if (!it) throw new Error('العنصر مش في المكتبة');
-    const kind = (it.category === 'sfx' || it.category === 'music') ? 'audio' : 'video';
-    return this.host('placeFile', { path: it.path, time, kind, track: -1, bin: 'EditFast/Library/' + it.category });
+    if (fav !== undefined) it.fav = !!fav;
+    if (tags !== undefined) it.tags = (Array.isArray(tags) ? tags : String(tags).split(/[,،]+/)).map(t => String(t).trim()).filter(Boolean).slice(0, 12);
+    library.saveIndex(config.dataDir(), items);
+    return it;
+  }
+  /**
+   * A picture for every item: a frame for video/images Premiere's panel can't show (ProRes, HEVC, PSD, TIFF),
+   * a waveform for sounds. Made once with ffmpeg and cached.
+   */
+  async libraryThumb(id) {
+    const it = this.libraryItems().find(x => x.id === id);
+    if (!it || !this.tools.ffmpeg) return null;
+    const dir = config.cacheDir('libthumbs'), audio = library.AUDIO.includes(it.ext);
+    const out = path.join(dir, `${it.id}-${Math.round(it.mtime || 0)}.${audio ? 'png' : 'jpg'}`);
+    if (fs.existsSync(out)) return out;
+    if (it.ext === 'mogrt' || it.ext === 'prfpset') return null;
+    const args = ['-hide_banner', '-loglevel', 'error', '-y'];
+    if (audio) args.push('-i', it.path, '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=320x90:colors=#A78BFA', '-frames:v', '1', out);
+    else if (library.VIDEO.includes(it.ext)) args.push('-ss', String(Math.min(1, (it.duration || 2) / 3)), '-i', it.path, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', out);
+    else args.push('-i', it.path, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', out);
+    try { await ff.run(this.tools.ffmpeg, args); } catch (_) { return null; }
+    return fs.existsSync(out) ? out : null;
+  }
+  /**
+   * Put an item on the timeline: at the playhead (default), at every marker, or at the In point.
+   * .mogrt → an Essential Graphics clip; presets can't be applied by script (drag them onto the clip).
+   */
+  async libraryPlace({ id, time, at = 'playhead' }) {
+    const items = this.libraryItems(), it = items.find(x => x.id === id);
+    if (!it) throw new Error('العنصر مش في المكتبة');
+    if (!fs.existsSync(it.path)) throw new Error('الملف اتمسح أو اتنقل من مكانه — دوس "حدّث المكتبة"');
+    if (it.ext === 'prfpset') throw new Error('البريسيت مايتحطش بسكريبت — اسحبه من هنا على الكليب في التايملين، أو استورده من Effects ← Import Presets');
+    const s = await this.seq();
+    const kind = library.AUDIO.includes(it.ext) ? 'audio' : 'video';
+    let times = [time ?? s.playhead];
+    if (at === 'markers') { times = (s.markers || []).map(m => m.time); if (!times.length) throw new Error('مفيش ماركرز في السيكوينس'); }
+    if (at === 'in' && s.inOut && s.inOut[0] !== null) times = [s.inOut[0]];
+    let r;
+    if (it.ext === 'mogrt') {
+      for (const t of times) r = await this.host('importMGT', { path: it.path, time: t, duration: 5 });
+    } else if (times.length > 1) {
+      r = await this.host('placeFiles', { items: times.map(t => ({ path: it.path, time: t })), kind, bin: 'EditFast/Library/' + it.category, minTrack: kind === 'audio' ? 0 : 1 });
+    } else {
+      r = await this.host('placeFile', { path: it.path, time: times[0], kind, track: -1, bin: 'EditFast/Library/' + it.category });
+    }
+    it.uses = (it.uses || 0) + times.length; it.lastUsed = Date.now();
+    library.saveIndex(config.dataDir(), items);
+    return { ...r, placed: times.length };
+  }
+  /** show the file in Finder / Explorer */
+  libraryReveal(id) {
+    const it = this.libraryItems().find(x => x.id === id);
+    if (!it) return false;
+    const cp = require('child_process');
+    if (process.platform === 'darwin') cp.execFile('open', ['-R', it.path]); else if (process.platform === 'win32') cp.execFile('explorer', ['/select,', it.path]); else cp.execFile('xdg-open', [path.dirname(it.path)]);
+    return true;
   }
 
   /* ---------- B-Roll ---------- */

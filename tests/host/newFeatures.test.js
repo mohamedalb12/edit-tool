@@ -305,7 +305,7 @@ test('self-test: every Premiere call on a throwaway sequence, cleaned up after; 
   const steps = [];
   const r = await S.selfTest({ onStep: m => steps.push(m) });
   const ids = r.premiere.probes.map(p => p.id);
-  for (const id of ['qe', 'import', 'newSequence', 'addTrack', 'placeStill', 'clipEnd', 'markers', 'razor', 'rippleDelete', 'transform', 'captions', 'clone', 'cleanup']) assert.ok(ids.includes(id), id);
+  for (const id of ['qe', 'import', 'importStill', 'importSrt', 'newSequence', 'addTrack', 'placeStill', 'clipEnd', 'markers', 'razor', 'rippleDelete', 'transform', 'captions', 'clone', 'cleanup']) assert.ok(ids.includes(id), id);
   const bad = r.premiere.probes.filter(p => !p.ok);
   assert.deepEqual(bad, [], JSON.stringify(bad));
   assert.equal(h.pr.project.seqs.length, before, 'test sequences deleted');
@@ -315,8 +315,66 @@ test('self-test: every Premiere call on a throwaway sequence, cleaned up after; 
   assert.ok(r.tools.ffmpeg.ok); assert.ok('ytdlp' in r.tools);
   assert.ok(r.ready.cut.ok && r.ready.markers.ok, JSON.stringify(r.ready));
   assert.ok(steps.length >= 2);
+  // the test PNG is a real PNG (1.5.0 shipped a corrupt one and Premiere rightly refused it)
+  const png = fs.readFileSync(path.join(require('../../core/config').cacheDir('selftest'), 'اختبار EditFast', 'ef-test.png'));
+  assert.deepEqual([...png.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.ok(require('zlib').inflateSync(png.slice(41, 41 + png.readUInt32BE(33))).length === 180 * (1 + 320 * 4));
+  // a probe that never ran reads as "not tested", not "broken"
+  const rd = S.readiness({ premiere: { probes: [{ id: 'import', ok: false, detail: 'refused' }, { id: 'newSequence', ok: false, detail: 'skipped: nothing imported' }] }, tools: { ffmpeg: { ok: true } }, network: {}, keys: {} });
+  assert.equal(rd.markers.untested, true); assert.match(rd.markers.why, /ما اتجرّبش/);
+  assert.equal(rd.audio.untested, false);
   S.logError({ tab: 'download', action: 'بيحمّل', error: 'فشل مع مفتاح sk-or-abcdef123456' });
   const rep = S.diagnosticReport();
   assert.match(rep, /OK  razor/); assert.match(rep, /ready cut: yes/); assert.match(rep, /بيحمّل/);
   assert.doesNotMatch(rep, /abcdef123456/, 'keys are redacted');
+});
+
+test('مكتبتي: sorts a folder into categories, thumbnails + waveforms, fast rescans keep tags/favourites, place at markers, MOGRT, presets explained', async () => {
+  const lib = path.join(TMP, 'my-lib-' + Date.now());
+  for (const d of ['SFX/Whoosh', 'Music', 'Overlays', 'B-Roll', 'Titles', 'Presets']) fs.mkdirSync(path.join(lib, d), { recursive: true });
+  fs.copyFileSync(makeAudio('lib-whoosh.wav', [{ tone: 600, dur: 0.8 }]), path.join(lib, 'SFX/Whoosh', 'whoosh fast.wav'));
+  fs.copyFileSync(makeAudio('lib-song.wav', [{ tone: 300, dur: 45, amp: 0.2 }]), path.join(lib, 'Music', 'calm bed.wav'));
+  fs.copyFileSync(video('lib-leak.mp4', 3), path.join(lib, 'Overlays', 'light leak 01.mp4'));
+  fs.copyFileSync(video('lib-city.mp4', 6), path.join(lib, 'B-Roll', 'city night.mp4'));
+  fs.writeFileSync(path.join(lib, 'Titles', 'lower third.mogrt'), 'x');
+  fs.writeFileSync(path.join(lib, 'Presets', 'zoom.prfpset'), 'x');
+  fs.writeFileSync(path.join(lib, 'Overlays', 'frame.png'), require('../../core/util').makePng(64, 36));
+  const { S, seq } = world({ clip: video('lib-main.mp4', 8) });
+  require('../../core/library').saveIndex(require('../../core/config').dataDir(), []);
+  const r = await S.libraryAdd([lib]);
+  assert.equal(r.total, 7); assert.equal(r.added, 7);
+  const byName = n => S.libraryItems().find(x => x.name === n);
+  assert.equal(byName('whoosh fast').category, 'sfx'); assert.equal(byName('whoosh fast').sub, 'whoosh');
+  assert.equal(byName('calm bed').category, 'music');
+  assert.equal(byName('light leak 01').category, 'overlays');
+  assert.equal(byName('city night').category, 'footage');
+  assert.equal(byName('lower third').category, 'graphics');
+  assert.equal(byName('zoom').category, 'presets');
+  const st = S.libraryStats(); assert.equal(st.total, 7); assert.equal(st.cats.sfx, 1); assert.deepEqual(st.dirs, [lib]);
+  // thumbnails: a frame for video, a waveform for sound — cached
+  const tv = await S.libraryThumb(byName('city night').id), ta = await S.libraryThumb(byName('whoosh fast').id);
+  assert.ok(/\.jpg$/.test(tv) && fs.statSync(tv).size > 500); assert.ok(/\.png$/.test(ta) && fs.statSync(ta).size > 200);
+  assert.equal(await S.libraryThumb(byName('city night').id), tv);
+  assert.equal(await S.libraryThumb(byName('lower third').id), null);
+  // favourite + tags survive a rescan, and the rescan doesn't probe unchanged files
+  S.libraryUpdate({ id: byName('whoosh fast').id, fav: true, tags: 'سريع، انتقال' });
+  const probeOrig = require('../../core/ffmpeg').probe; let probes = 0;
+  require('../../core/ffmpeg').probe = async (...a) => { probes++; return probeOrig(...a); };
+  try { const rr = await S.libraryRescan(); assert.equal(rr.added, 0); assert.equal(probes, 0, 'nothing re-probed'); } finally { require('../../core/ffmpeg').probe = probeOrig; }
+  assert.equal(byName('whoosh fast').fav, true); assert.deepEqual(byName('whoosh fast').tags, ['سريع', 'انتقال']);
+  assert.deepEqual(S.librarySearch({ q: 'انتقال' }).map(x => x.name), ['whoosh fast'], 'tags are searchable');
+  assert.deepEqual(S.librarySearch({ special: 'fav' }).map(x => x.name), ['whoosh fast']);
+  // place: at every marker (one call), recent + uses tracked
+  seq.markers.createMarker(1); seq.markers.createMarker(4);
+  const p = await S.libraryPlace({ id: byName('whoosh fast').id, at: 'markers' });
+  assert.equal(p.placed, 2);
+  const sfxClips = seq.a.flatMap(t => t.items).filter(c => /whoosh fast/.test(c.projectItem.mediaPath));
+  assert.deepEqual(sfxClips.map(c => c._start).sort(), [1, 4]);
+  assert.equal(byName('whoosh fast').uses, 2); assert.ok(S.librarySearch({ special: 'recent' }).length === 1);
+  const m = await S.libraryPlace({ id: byName('lower third').id, time: 2 });
+  assert.ok(m.track >= 1, 'MOGRT through importMGT');
+  await assert.rejects(S.libraryPlace({ id: byName('zoom').id }), /اسحبه/);
+  // remove a folder: its items leave the library, files stay on disk
+  const rm = S.libraryRemoveDir(lib);
+  assert.equal(rm.total, 0); assert.ok(fs.existsSync(path.join(lib, 'Music', 'calm bed.wav')));
 });

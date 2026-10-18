@@ -53,10 +53,10 @@ async function open(id) {
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 11 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
+test('boots: 12 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'download', 'revisions', 'relink', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 11);
+  assert.deepEqual(ids, ['agent', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 12);
   // every screen still exists inside some tool, except the removed "organize"
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
   assert.equal(members.length, 27); assert.ok(!members.includes('organize'));
@@ -195,16 +195,58 @@ test('محرر المنحنيات: read keyframes, pick easing, apply to propert
   await shot('07-curves');
 });
 
-test('المكتبة: categories, search, add folder, double-click to place', async () => {
-  await open('library'); await clearCalls();
-  await page.waitForSelector('.tile >> text=whoosh fast');
+test('مكتبتي: its own tool — categories with counts, favourites, recent, tags, place at playhead / markers, drag to the timeline', async () => {
+  await page.click('#nav button[data-id="library"]'); await clearCalls();
+  await page.locator('.lib-cats .chip', { hasText: 'الكل' }).click();
+  await page.waitForSelector('.lib-tile >> text=whoosh fast');
+  assert.equal(await page.locator('.lib-tile').count(), 4);
+  assert.match(await page.textContent('.lib-cats'), /ساوند إفكتس2/);
+  // a category, then its sub-types
+  await page.locator('.lib-cats .chip', { hasText: 'ساوند إفكتس' }).click();
+  assert.equal(await page.locator('.lib-tile').count(), 2);
+  await page.locator('.lib-subs .chip', { hasText: 'ضربات' }).click();
+  assert.equal(await page.locator('.lib-tile').count(), 1);
+  await page.locator('.lib-subs .chip', { hasText: 'كله' }).click();
+  // search finds your tags too
+  await page.fill('input[placeholder^="دوّر… (whoosh"]', 'تقيل');
+  assert.equal(await page.locator('.lib-tile').count(), 1);
+  await page.fill('input[placeholder^="دوّر… (whoosh"]', '');
+  // double click places, ★ adds to favourites
+  await page.locator('.lib-tile', { hasText: 'whoosh fast' }).dblclick(); await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => window.__calls.find(c => c.name === 'libraryPlace').args.id), 'l1');
+  await page.locator('.lib-tile', { hasText: 'big impact' }).hover();
+  await page.locator('.lib-tile', { hasText: 'big impact' }).locator('.fav').click();
+  await page.locator('.lib-cats .chip', { hasText: 'المفضلة' }).click();
+  assert.deepEqual(await page.locator('.lib-tile .name').allTextContents(), ['big impact']);
+  // details: on every marker, tags, show in Finder
+  await page.locator('.lib-tile', { hasText: 'big impact' }).click();
+  await clickText('على كل الماركرز');
+  assert.equal(await page.evaluate(() => window.__calls.filter(c => c.name === 'libraryPlace').at(-1).args.at), 'markers');
+  await page.fill('input[placeholder^="تاجات"]', 'تقيل، سينمائي'); await page.locator('input[placeholder^="تاجات"]').dispatchEvent('change');
+  assert.deepEqual(await page.evaluate(() => EF.services._lib.find(x => x.id === 'l2').tags), ['تقيل', 'سينمائي']);
+  await clickText('افتح مكانه');
+  assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'libraryReveal')));
+  await page.locator('.lib-cats .chip', { hasText: 'الأخيرة' }).click();
+  assert.ok(await page.locator('.lib-tile').count() >= 1, 'recently used');
+  // drag sets the CEP file type Premiere accepts
+  await page.locator('.lib-cats .chip', { hasText: 'الكل' }).click();
+  const dragged = await page.evaluate(() => {
+    const tile = document.querySelector('.lib-tile[data-id="l3"]'); const dt = new DataTransfer();
+    tile.dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true }));
+    return dt.getData('com.adobe.cep.dnd.file.0');
+  });
+  assert.equal(dragged, '/lib/Overlays/light leak 04.mov');
+  // folders: add, rescan, remove
   await clickText('اختار فولدر');
-  await page.locator('.tile', { hasText: 'whoosh fast' }).dblclick(); await page.waitForTimeout(200);
-  const c = await page.evaluate(() => window.__calls);
-  assert.deepEqual(c.find(x => x.name === 'libraryAdd').args, ['/picked/folder']);
-  assert.equal(c.find(x => x.name === 'libraryPlace').args.id, 'l1');
-  await page.locator('.seg button', { hasText: 'ترانزيشنز' }).click();
-  assert.equal(await page.locator('.tile').count(), 0);
+  assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c.name === 'libraryAdd').args), ['/picked/folder']);
+  await page.locator('.lib-drop').locator('..').locator('button', { hasText: 'حدّث' }).click(); await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'libraryRescan')));
+  assert.ok(await page.locator('.lib-dirs .chip', { hasText: 'folder' }).count() >= 1);
+  await page.locator('.lib-dirs .chip', { hasText: 'folder' }).locator('.x').click();
+  assert.equal(await page.evaluate(() => window.__calls.find(c => c.name === 'libraryRemoveDir').args), '/picked/folder');
+  // thumbnails load lazily
+  await page.waitForFunction(() => document.querySelectorAll('.lib-tile .thumb img').length >= 2);
+  await shot('43-library');
 });
 
 test('قوالب الحركة: 28 tiles in 3 groups, 3 levels, click applies keyframes', async () => {

@@ -74,13 +74,13 @@ test('scene engine: normalise style roles, clamp, animation states', () => {
   assert.equal(scene.frameCount({ duration: 2, fps: 30 }), 60);
 });
 
-test('library: drop a whole folder → sorted into sfx / transitions / overlays / music', async () => {
+test('library: drop a whole folder → sorted into sfx / transitions / overlays / music / presets / graphics', async () => {
   const root = path.join(TMP, 'mylib');
   const files = {
     'SFX/Whoosh/fast_whoosh_01.wav': 'sfx/whoosh', 'SFX/hits/boom impact.mp3': 'sfx/impact', 'random/pop.wav': 'sfx/pop',
     'Transitions/zoom transition.mov': 'transitions/video', 'Packs/swipe_left.mp4': 'transitions/video',
     'Overlays/Light Leaks/leak 03.mov': 'overlays/video', 'textures/dust.png': 'overlays/image',
-    'music/bgm_chill.mp3': 'music/', 'presets/my.prfpset': 'transitions/preset', 'notes.txt': null
+    'music/bgm_chill.mp3': 'music/', 'presets/my.prfpset': 'presets/preset', 'Titles/lower third.mogrt': 'graphics/mogrt', 'notes.txt': null
   };
   for (const f of Object.keys(files)) { fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true }); fs.writeFileSync(path.join(root, f), 'x'); }
   const items = await library.scan([root]);
@@ -90,7 +90,9 @@ test('library: drop a whole folder → sorted into sfx / transitions / overlays 
     assert.equal(`${it.category}/${it.sub}`, exp, f);
   }
   assert.equal(library.classifyFile('clip.mov', { duration: 1.2 }).category, 'transitions');
-  assert.equal(library.classifyFile('logo.mov', { duration: 8, alpha: true }).category, 'overlays');
+  assert.equal(library.classifyFile('logo.mov', { duration: 8, alpha: true }).category, 'graphics');
+  assert.equal(library.classifyFile('sparkles.mov', { duration: 8, alpha: true }).category, 'overlays');
+  assert.equal(library.classifyFile('Stock/beach.mp4', { duration: 12 }).category, 'footage');
   assert.equal(library.classifyFile('long.wav', { duration: 120 }).category, 'music');
   const dd = path.join(TMP, 'libdata'); fs.mkdirSync(dd, { recursive: true });
   library.saveIndex(dd, items);

@@ -973,9 +973,15 @@ EFAPI.selfTest = function (a) {
   env.hasSequence = !!orig;
   probe('qe', function () { app.enableQE(); return typeof qe !== 'undefined' && !!qe.project; });
   probe('bin', function () { bin = EF.ensureBin('EditFast Self-Test'); return !!bin; });
-  probe('import', function () { items = EF.importMany([a.video, a.still, a.srt], 'EditFast Self-Test'); return items.length === 3; });
+  // each file on its own: one refused file must not hide the rest of the test
+  items = [null, null, null];
+  probe('import', function () { items[0] = EF.importFile(a.video, 'EditFast Self-Test'); return EF.baseName(a.video); });
+  probe('importStill', function () { items[1] = EF.importFile(a.still, 'EditFast Self-Test'); return true; });
+  probe('importSrt', function () { items[2] = EF.importFile(a.srt, 'EditFast Self-Test'); return true; });
   probe('newSequence', function () {
-    seq = app.project.createNewSequenceFromClips('EditFast Self-Test', [items[0]], bin);
+    var src = items[0] || items[1];
+    if (!src) throw new Error('skipped: nothing imported');
+    seq = app.project.createNewSequenceFromClips('EditFast Self-Test', [src], bin);
     if (!seq) return false;
     app.project.openSequence(seq.sequenceID);
     for (k = 0; k < 20 && (!app.project.activeSequence || app.project.activeSequence.sequenceID !== seq.sequenceID); k++) $.sleep(100);
@@ -987,6 +993,7 @@ EFAPI.selfTest = function (a) {
     probe('settings', function () { var st = seq.getSettings(); return st.videoFrameWidth + 'x' + st.videoFrameHeight + ' @ ' + Math.round(fps * 100) / 100; });
     probe('addTrack', function () { var n = seq.videoTracks.numTracks; return EF.addTrack(seq, 'video') ? (n + ' -> ' + seq.videoTracks.numTracks) : false; });
     probe('placeStill', function () {
+      if (!items[1]) throw new Error('skipped: the PNG was not imported');
       var ti = EF.pickTrack(seq, 'video', 0.4, 1.4, 1), c = EF.layItem(seq, items[1], 'video', ti, 0.4, 1, fps);
       if (!c) return false;
       var d = EF.sec(c.end) - EF.sec(c.start);
@@ -1017,6 +1024,7 @@ EFAPI.selfTest = function (a) {
     probe('audioTransition', function () { return !!qe.project.getAudioTransitionByName('Constant Power'); });
     probe('captions', function () {
       if (typeof seq.createCaptionTrack !== 'function') throw new Error('createCaptionTrack missing');
+      if (!items[2]) throw new Error('skipped: the SRT was not imported');
       var r = seq.createCaptionTrack(items[2], 0, Sequence.CAPTION_FORMAT_SUBTITLE);
       return r === false ? false : true;
     });

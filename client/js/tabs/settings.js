@@ -59,20 +59,20 @@
       }, 'small');
 
       // ——— الفحص: أول حاجة تعملها لو حاجة مش شغالة ———
-      var PROBE = { qe: 'أوامر بريمير الداخلية (QE)', bin: 'عمل فولدر في المشروع', 'import': 'استيراد ملفات', newSequence: 'عمل سيكوينس جديدة', settings: 'قراءة إعدادات السيكوينس', addTrack: 'إضافة تراك', placeStill: 'وضع كليب بمدة مضبوطة', clipEnd: 'تعديل طول كليب', markers: 'الماركرز بالألوان', razor: 'القص (Razor)', rippleDelete: 'الحذف وسحب اللي بعده', transform: 'إضافة Transform وكي فريم', audioTransition: 'انتقال الصوت', captions: 'تراك كابشن بريمير', clone: 'نسخ السيكوينس', cleanup: 'مسح سيكوينس التجربة' };
+      var PROBE = { qe: 'أوامر بريمير الداخلية (QE)', bin: 'عمل فولدر في المشروع', 'import': 'استيراد فيديو (مسار عربي)', importStill: 'استيراد صورة', importSrt: 'استيراد ملف كابشن', newSequence: 'عمل سيكوينس جديدة', settings: 'قراءة إعدادات السيكوينس', addTrack: 'إضافة تراك', placeStill: 'وضع كليب بمدة مضبوطة', clipEnd: 'تعديل طول كليب', markers: 'الماركرز بالألوان', razor: 'القص (Razor)', rippleDelete: 'الحذف وسحب اللي بعده', transform: 'إضافة Transform وكي فريم', audioTransition: 'انتقال الصوت', captions: 'تراك كابشن بريمير', clone: 'نسخ السيكوينس', cleanup: 'مسح سيكوينس التجربة' };
       var TOOLS = { ffmpeg: 'ffmpeg', ffprobe: 'ffprobe', whisper: 'whisper.cpp', whisperModel: 'موديل Whisper', ytdlp: 'yt-dlp', deno: 'deno (ليوتيوب)', node: 'Node.js', proEngine: 'محرك الجرافيك' };
       var READY = { captions: 'الكابشن بالشكل', nativeCaptions: 'كابشن بريمير', cut: 'القص', audio: 'الصوت', motion: 'الحركة', download: 'التحميل', reels: 'ريلز', graphics: 'الجرافيك', ai: 'الذكاء الاصطناعي', markers: 'الماركرز والتعديلات' };
       var diagBox = h('div', { class: 'diag-res' }), diagStep = h('span', { class: 'hint' });
-      function line(ok, name, detail) { return h('div', { class: 'diag-line' + (ok ? ' ok' : ' bad') }, h('span', { class: 'dot' }), h('span', { class: 'grow' }, name), detail ? h('span', { class: 'hint ltr' }, detail) : null); }
+      function line(ok, name, detail, untested) { return h('div', { class: 'diag-line' + (ok ? ' ok' : untested ? ' wait' : ' bad') }, h('span', { class: 'dot' }), h('span', { class: 'grow' }, name), detail ? h('span', { class: 'hint ltr' }, detail) : null); }
       function drawDiag(r) {
         UI.empty(diagBox); if (!r) return;
         var bad = Object.keys(r.ready).filter(function (k) { return !r.ready[k].ok; });
         diagBox.appendChild(h('div', { class: 'diag-sum' + (bad.length ? ' bad' : ' ok') }, bad.length ? bad.length + ' أدوات مش هتشتغل عندك دلوقتي — السبب جنب كل واحدة' : 'كل حاجة جاهزة ✓'));
-        Object.keys(READY).forEach(function (k) { var v = r.ready[k]; if (v) diagBox.appendChild(line(v.ok, READY[k], v.ok ? 'جاهزة' : v.why)); });
+        Object.keys(READY).forEach(function (k) { var v = r.ready[k]; if (v) diagBox.appendChild(line(v.ok, READY[k], v.ok ? 'جاهزة' : v.why, v.untested)); });
         var det = h('details', { class: 'diag-det' }, h('summary', null, 'التفاصيل'));
         if (r.premiere && r.premiere.error) det.appendChild(line(false, 'بريمير', r.premiere.error));
         if (r.premiere && r.premiere.env) det.appendChild(h('div', { class: 'hint ltr' }, (r.premiere.env.app || '') + ' ' + (r.premiere.env.version || '') + ' · ' + (r.premiere.env.os || '') + ' · Node ' + (r.panel.node || '')));
-        ((r.premiere && r.premiere.probes) || []).forEach(function (p) { det.appendChild(line(p.ok, PROBE[p.id] || p.id, (p.detail || '') + ' · ' + p.ms + 'ms')); });
+        ((r.premiere && r.premiere.probes) || []).forEach(function (p) { det.appendChild(line(p.ok, PROBE[p.id] || p.id, (p.detail || '') + ' · ' + p.ms + 'ms', /^skipped/.test(p.detail || ''))); });
         Object.keys(r.tools).forEach(function (k) { det.appendChild(line(r.tools[k].ok, TOOLS[k] || k, r.tools[k].detail)); });
         Object.keys(r.network).forEach(function (k) { det.appendChild(line(r.network[k].ok, 'النت: ' + k, r.network[k].detail)); });
         diagBox.appendChild(det);

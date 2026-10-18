@@ -549,3 +549,35 @@ input::placeholder, textarea::placeholder { color: rgba(255,255,255,.38); }
 .words.cut-mode span { cursor: crosshair; }
 .words span.struck { text-decoration: line-through; color: #FB7185; opacity: .75; }
 .yt-desc { width: 100%; }
+.diag-line.wait .dot { background: #FBBF24; }
+/* ---------- مكتبتي ---------- */
+.lib-drop { padding: 14px; font-size: 12.5px; }
+.lib-cats .chip .n, .lib-subs .chip .n { margin-inline-start: 6px; font-size: 10px; opacity: .65; }
+.lib-subs { margin-top: 6px; }
+.lib-subs .chip { font-size: 11px; padding: 2px 9px; }
+.lib-dirs .chip.dir { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-dirs .chip .x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 11px; }
+.lib-dirs .chip .x:hover { color: #FB7185; }
+.lib-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin-top: 4px; }
+.lib-grid.s1 { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.lib-grid.s3 { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.lib-tile { position: relative; border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); cursor: grab; transition: transform .2s var(--ease), border-color .2s; outline: none; }
+.lib-tile:hover { transform: translateY(-2px); border-color: rgba(167, 139, 250, .55); }
+.lib-tile.on { border-color: #A78BFA; box-shadow: 0 0 0 2px rgba(167, 139, 250, .35); }
+.lib-tile .thumb { aspect-ratio: 16 / 9; display: grid; place-items: center; background: linear-gradient(135deg, #1d1832, #2c2350); position: relative; overflow: hidden; }
+.lib-tile .thumb img, .lib-tile .thumb video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lib-tile .thumb img.wave { object-fit: fill; padding: 10px 6px; }
+.lib-tile .thumb .ph { font-size: 24px; opacity: .8; }
+.lib-tile .meta { padding: 6px 8px 7px; }
+.lib-tile .name { font-size: 11.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-tile .sub { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-tile .fav, .lib-tile .put { position: absolute; top: 6px; width: 24px; height: 24px; border-radius: 8px; border: 0; cursor: pointer; display: grid; place-items: center; background: rgba(10, 8, 20, .6); color: #fff; font-size: 13px; opacity: 0; transition: opacity .2s; }
+.lib-tile .fav { inset-inline-start: 6px; }
+.lib-tile .put { inset-inline-end: 6px; background: var(--grad); }
+.lib-tile:hover .fav, .lib-tile:hover .put, .lib-tile .fav.on { opacity: 1; }
+.lib-tile .fav.on { color: #FBBF24; }
+.lib-empty { grid-column: 1 / -1; text-align: center; padding: 26px 10px; color: var(--muted); font-size: 12.5px; }
+.lib-path { overflow-wrap: anywhere; margin: 4px 0 8px; }
+.lib-details { height: 168px; margin-bottom: 8px; overflow: hidden; }
+.lib-details .card { margin: 0; height: 100%; box-sizing: border-box; overflow: auto; }
+.lib-details .lib-hint { height: 100%; display: grid; place-items: center; text-align: center; padding: 0 16px; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); font-size: 12px; }
