@@ -145,15 +145,22 @@ function frameAt(ffmpeg, url, t, { width = 320, timeout = 45000 } = {}) {
   }));
 }
 
-/** a small 360p H.264/AAC piece of the remote file from t (for playing in the panel when the original codec can't) */
-function previewArgs(url, t, len, out) {
-  return ['-hide_banner', '-loglevel', 'error', '-y', ...NET_IN, '-ss', String(Math.max(0, +t || 0)), '-i', url, '-t', String(len),
-    '-map', '0:v:0?', '-map', '0:a:0?', '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out];
+/**
+ * A small 360p piece of the remote file from t, for playing in the panel. Premiere's built-in browser has no
+ * H.264/AAC (licensing), so it's WebM (VP8 + Opus/Vorbis) whenever this ffmpeg can make it.
+ */
+function previewArgs(url, t, len, out, { webm = true, audio = 'libopus' } = {}) {
+  const v = webm
+    ? ['-c:v', 'libvpx', '-deadline', 'realtime', '-cpu-used', '8', '-b:v', '900k', '-qmin', '4', '-qmax', '42', '-pix_fmt', 'yuv420p', '-c:a', audio, '-b:a', '96k', '-ac', '2', '-ar', '48000', '-f', 'webm']
+    : ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart'];
+  return ['-hide_banner', '-loglevel', 'error', '-y', ...(/^https?:/.test(url) ? NET_IN : []), '-ss', String(Math.max(0, +t || 0)), '-i', url, '-t', String(len),
+    '-map', '0:v:0?', '-map', '0:a:0?', '-vf', 'scale=-2:360', ...v, out];
 }
-function previewClip(ffmpeg, url, t, len, out) {
-  return new Promise((resolve, reject) => execFile(ffmpeg, previewArgs(url, t, len, out), { timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, err => {
-    if (err || !fs.existsSync(out)) return reject(new Error('مش قادر أجهّز البريفيو'));
+function previewClip(ffmpeg, url, t, len, out, opts) {
+  const tmp = out + '.part' + path.extname(out);
+  return new Promise((resolve, reject) => execFile(ffmpeg, previewArgs(url, t, len, tmp, opts), { timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => {
+    if (err || !fs.existsSync(tmp) || !fs.statSync(tmp).size) { try { fs.unlinkSync(tmp); } catch (_) {} return reject(new Error('مش قادر أجهّز البريفيو: ' + String(se || (err && err.message) || '').trim().split('\n').pop())); }
+    fs.renameSync(tmp, out); // never leave half a piece in the cache
     resolve(out);
   }));
 }

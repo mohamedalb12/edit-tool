@@ -190,7 +190,7 @@ async function speechThreshold(ffmpeg, wav) {
 function wordsToTimeline(words, clip) {
   const sp = Math.abs(clip.speed || 1) || 1;
   return words
-    .map(w => ({ ...w, start: clip.start + (w.start - clip.inPoint) / sp, end: clip.start + (w.end - clip.inPoint) / sp }))
+    .map(w => ({ ...w, start: clip.start + (w.start - clip.inPoint) / sp, end: clip.start + (w.end - clip.inPoint) / sp, src: w.src !== undefined ? w.src : w.start }))
     .filter(w => w.end > clip.start && w.start < clip.end);
 }
 

@@ -496,6 +496,9 @@ test('Dropbox links: info off the link, only the chosen part comes down, folders
     assert.equal(pc.start, 3);
     const pr = await require('../../core/ffmpeg').probe(require('../../core/ffmpeg').findBinary('ffprobe'), pc.path);
     assert.equal(pr.height, 360); assert.ok(Math.abs(pr.duration - 4) < 0.3, 'piece length ' + pr.duration);
+    // Premiere's panel browser has no H.264: the piece is WebM (VP8) so it actually plays there
+    assert.match(pc.path, /\.webm$/); assert.equal(pr.codec, 'vp8'); assert.equal(pc.mime, 'video/webm');
+    assert.equal((await S.previewSource(url)).webm, true);
     assert.deepEqual(await S.previewClip(url, 3.2, 4), pc, 'same piece reused');
     hits.length = 0;
     const r = await S.downloadMedia({ url, start: '0:02', end: '0:05', place: false });

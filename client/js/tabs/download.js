@@ -108,42 +108,51 @@
       // preview with picture + sound: watch, then "this is the start / this is the end"
       function playerBox(lo, hi, sync, D) {
         var box = h('div', { class: 'dl-player' }), stat = h('span', { class: 'hint' }), now = h('span', { class: 'chip ltr' }, '0:00');
-        var v = null, mode = 'direct', cs = 0, clen = 0, stopAt = null, src = null, want = 0;
+        var v = null, mode = 'direct', cs = 0, clen = 0, stopAt = null, src = null, want = 0, dog = null, next = null, LEN = 20;
+        // Premiere's built-in browser plays WebM but usually not H.264/AAC: only try the original when it can
+        var probe = document.createElement('video');
+        var h264 = !!(probe.canPlayType && probe.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'));
         function abs() { return v ? cs + (v.currentTime || 0) : 0; }
+        function say(t) { stat.textContent = t || ''; }
+        function fail(e) { say(e && e.message ? e.message : 'البريفيو مااشتغلش'); try { S.logError && S.logError({ where: 'preview', error: String(e && e.message || e) }); } catch (_) {} }
         function chunkAt(t, play) {
-          stat.textContent = 'بيجهّز بريفيو من ' + mmss(t) + '…';
-          return Promise.resolve().then(function () { return S.previewClip(links()[0], t, 30); }).then(function (c) {
-            mode = 'chunk'; cs = c.start; clen = c.len;
-            v.onloadedmetadata = function () { v.onloadedmetadata = null; v.currentTime = Math.max(0, t - cs); stat.textContent = 'بريفيو مخفف (360p) — الأصلي هينزل بجودته'; if (play) v.play(); };
+          t = Math.max(0, Math.min(D - 1, t));
+          var u = links()[0];
+          say('بيجهّز البريفيو من ' + mmss(t) + '…');
+          return Promise.resolve().then(function () { return S.previewClip(u, t, LEN); }).then(function (c) {
+            mode = 'chunk'; cs = c.start; clen = c.len; next = null;
+            v.onloadedmetadata = function () { v.onloadedmetadata = null; v.currentTime = Math.max(0, t - cs); say(''); if (play) { var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); } };
             v.src = EF.fileUrl(c.path);
-          }, function (e) { stat.textContent = e.message; });
+          }, fail);
         }
-        function fallback() { if (src && src.chunks && mode === 'direct') { mode = 'chunk'; chunkAt(want, true); } else stat.textContent = 'الفيديو ده مش بيشتغل هنا — بس التحميل شغال عادي'; }
+        function toChunks() { clearTimeout(dog); if (mode === 'direct') { mode = 'chunk'; if (src && src.chunks) chunkAt(want, true); else say('الفيديو ده مش بيشتغل جوه بريمير ومفيش ffmpeg يعمله بريفيو — بس التحميل شغال عادي'); } }
         function playAt(t, until) {
           want = t; stopAt = until === undefined ? null : until;
           if (!v) return;
-          if (mode === 'chunk') { if (clen && t >= cs && t < cs + clen - 1) { v.currentTime = t - cs; v.play(); } else chunkAt(t, true); }
+          if (mode === 'chunk') { if (clen && t >= cs && t < cs + clen - 0.5) { v.currentTime = t - cs; v.play(); } else chunkAt(t, true); }
           else if (v.readyState >= 1) { v.currentTime = t; v.play(); }
         }
         var start = UI.btn('▶ بريفيو بالصوت والصورة', function () {
-          stat.textContent = 'بيفتح البريفيو…';
+          say('بيفتح البريفيو…');
           UI.safe('بيفتح البريفيو', function () {
             return S.previewSource(links()[0]).then(function (r) {
               src = r; want = +lo.value;
               v = h('video', { controls: true, preload: 'metadata', playsinline: true, class: 'dl-video' });
               v.addEventListener('loadedmetadata', function () {
                 if (mode !== 'direct') return;
-                // HEVC / ProRes: the sound plays but no picture → a 360p piece made by ffmpeg instead
-                if (src.type === 'video' && !v.videoWidth) return fallback();
-                stat.textContent = ''; v.currentTime = want; v.play();
+                clearTimeout(dog);
+                // HEVC / ProRes: the sound may play with no picture → a playable piece made by ffmpeg instead
+                if (src.type === 'video' && !v.videoWidth) return toChunks();
+                say(''); v.currentTime = want; v.play();
               });
-              v.addEventListener('error', function () { if (mode === 'direct') fallback(); else stat.textContent = 'البريفيو مااشتغلش'; });
+              v.addEventListener('error', function () { if (mode === 'direct') toChunks(); else fail(new Error('البريفيو مااشتغلش (' + ((v.error && v.error.code) || '?') + ')')); });
               v.addEventListener('timeupdate', function () {
                 var t = abs(); now.textContent = mmss(t);
                 if (stopAt !== null && t >= stopAt) { v.pause(); stopAt = null; }
+                // get the next piece ready while this one plays
+                if (mode === 'chunk' && !next && clen && v.currentTime > clen - 8 && cs + clen < D) { next = cs + clen; S.previewClip(links()[0], next, LEN).catch(function () {}); }
               });
               v.addEventListener('ended', function () { if (mode === 'chunk' && cs + clen < D && (stopAt === null || stopAt > cs + clen)) chunkAt(cs + clen, true); });
-              v.src = r.url;
               UI.empty(box);
               box.appendChild(v);
               box.appendChild(h('div', { class: 'row rs-row' }, now,
@@ -152,6 +161,11 @@
                 UI.btn('خلّي ده البداية', function () { lo.value = Math.min(D, Math.round(abs())); sync('lo'); }, 'small'),
                 UI.btn('خلّي ده النهاية', function () { hi.value = Math.min(D, Math.round(abs())); sync('hi'); }, 'small')));
               box.appendChild(stat);
+              var direct = r.ext === 'webm' || (h264 && /^(mp4|m4v|mov|mp3|m4a|wav|aac)$/.test(r.ext || '')) || (h264 && r.kind === 'stream');
+              if (!direct && r.chunks) { mode = 'chunk'; return chunkAt(want, true); }
+              // the original link: if it hasn't started in 8 s (slow server, unsupported file), switch to pieces
+              dog = setTimeout(function () { if (mode === 'direct' && v.readyState < 1) toChunks(); }, 8000);
+              v.src = r.url;
             });
           }, start);
         }, 'small');

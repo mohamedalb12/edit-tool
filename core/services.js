@@ -25,6 +25,11 @@ const { hash } = require('./util');
 const { nodeFetch } = require('./http');
 const vision = require('./vision');
 
+/** where the speech clips sit on the timeline: changes when a clip is moved, trimmed, cut or sped up */
+function clipSig(clips) {
+  return clips.map(c => [c.mediaPath, (+c.start).toFixed(3), (+c.end).toFixed(3), (+c.inPoint).toFixed(3), (+(c.speed || 1)).toFixed(3)].join('|')).join(';');
+}
+
 class Services {
   /**
    * host(name, args) → Promise<data>   (calls host/host.jsx via CEP evalScript)
@@ -557,17 +562,51 @@ class Services {
       });
       words.set(sp.file, r.words);
     }
-    const all = [];
-    for (const clip of clips) all.push(...transcribeMod.wordsToTimeline(words.get(clip.mediaPath) || [], clip));
-    all.sort((a, b) => a.start - b.start);
-    this.transcript = { seqId: seq.id, words: all, dialect: d };
+    this.transcript = { seqId: seq.id, words: this.placeWords(clips, words), dialect: d, source: words, spans: new Map(list.map(sp => [sp.file, sp])), sig: clipSig(clips), trackIndex };
     return this.transcript;
   }
 
+  /** source-time words of each file → timeline words for these clips (sorted); `file` + `src` remember where each came from */
+  placeWords(clips, source, edits) {
+    const all = [];
+    for (const clip of clips) {
+      for (const w of transcribeMod.wordsToTimeline(source.get(clip.mediaPath) || [], clip)) {
+        w.file = clip.mediaPath;
+        const fixed = edits && edits.get(clip.mediaPath + '|' + w.src.toFixed(3));
+        if (fixed) w.text = fixed;
+        all.push(w);
+      }
+    }
+    return all.sort((a, b) => a.start - b.start);
+  }
+
+  /**
+   * The transcript for the timeline AS IT IS NOW. Moved, trimmed, cut or sped up a clip by hand after transcribing?
+   * The words are placed again from their source times (no new whisper run, your text fixes kept); only media that
+   * wasn't transcribed yet (a new file, a clip extended past what was heard) runs whisper again.
+   */
   async ensureTranscript() {
     const s = await this.seq();
-    if (this.transcript && this.transcript.seqId === s.id) return this.transcript;
-    return this.transcribe({});
+    const t = this.transcript;
+    if (!t || t.seqId !== s.id) return this.transcribe({});
+    if (!t.source) return t;
+    let cur;
+    try { cur = await this.audioClips(t.trackIndex); } catch (_) { return t; }
+    const sig = clipSig(cur.clips);
+    if (sig === t.sig) return t;
+    const edits = new Map(t.words.filter(w => w.file && w.src !== undefined).map(w => [w.file + '|' + w.src.toFixed(3), w.text]));
+    const heard = cur.clips.every(c => {
+      const sp = t.spans.get(c.mediaPath), x = transcribeMod.sourceSpan(c);
+      return sp && x.a >= Math.floor(sp.a) - 0.05 && x.b <= Math.ceil(sp.b) + 0.05;
+    });
+    if (!heard) {
+      const r = await this.transcribe({ trackIndex: t.trackIndex, dialect: t.dialect });
+      r.words = this.placeWords(cur.clips, r.source, edits);
+      return r;
+    }
+    t.words = this.placeWords(cur.clips, t.source, edits);
+    t.sig = sig;
+    return t;
   }
 
   async transcriptSentences(from, to) {
@@ -1542,29 +1581,55 @@ ${JSON.stringify(lite)}
   }
   /**
    * Where the panel's player reads the video (picture + sound) for the preview: the file's own link for Dropbox /
-   * Drive, a ready-made stream from yt-dlp for YouTube & co. `chunks` = the panel may ask previewClip for pieces
-   * when the original can't play there (ProRes, HEVC…).
+   * Drive, a ready-made stream from yt-dlp for YouTube & co. `chunks` = previewClip can make playable pieces
+   * (the panel can't play H.264 itself, so that's the usual way).
    */
   async previewSource(url) {
+    const C = require('./cloud');
+    const src = await this.previewInput(url);
+    const enc = this.tools.ffmpeg ? await this.previewEncoders() : null;
+    return { url: src.url, chunks: !!enc, webm: !!(enc && enc.webm), type: src.type, ext: src.ext, name: src.name, kind: C.kindOf(url) ? 'cloud' : 'stream' };
+  }
+  /** what ffmpeg reads for the preview: the Dropbox/Drive file itself, or yt-dlp's stream link (kept 2 hours) */
+  async previewInput(url) {
     const C = require('./cloud'), Y = require('./ytdlp');
     if (C.kindOf(url)) {
       const h = (this._cloudHead && this._cloudHead.src === url && this._cloudHead.h) || await C.head(url, { fetchImpl: this.fetch });
       this._cloudHead = { src: url, h };
-      return { url: h.finalUrl, chunks: !!this.tools.ffmpeg, type: h.type };
+      return { url: h.finalUrl, type: h.type, ext: (path.extname(h.name) || '').slice(1).toLowerCase(), name: h.name };
     }
+    this._streams = this._streams || new Map();
+    const hit = this._streams.get(url);
+    if (hit && Date.now() - hit.at < 2 * 3600e3) return hit.src;
     const o = await this.ytdlpOpts();
-    return { url: await this.withLogin(x => Y.streamUrl(o.bin, url, x), o), chunks: false, type: 'video' };
+    const u = await this.withLogin(x => Y.streamUrl(o.bin, url, x), o);
+    const src = { url: u, type: 'video', ext: /mime=video%2Fwebm|\.webm/.test(u) ? 'webm' : 'mp4', name: '' };
+    this._streams.set(url, { at: Date.now(), src });
+    return src;
   }
-  /** a 360p piece [t, t+len] of a Dropbox / Drive file the panel can always play → { path, start, len } (cached) */
-  async previewClip(url, t, len = 30) {
+  /** which preview format this ffmpeg can write: WebM (VP8 + Opus/Vorbis) plays in Premiere's panel, H.264 doesn't */
+  async previewEncoders() {
+    if (this._pvEnc) return this._pvEnc;
+    let list = '';
+    try { list = String((await ff.run(this.ffmpeg(), ['-hide_banner', '-encoders'])).stdout); } catch (_) {}
+    const audio = /\blibopus\b/.test(list) ? 'libopus' : /\blibvorbis\b/.test(list) ? 'libvorbis' : null;
+    this._pvEnc = { webm: /\blibvpx\b/.test(list) && !!audio, audio: audio || 'libopus' };
+    return this._pvEnc;
+  }
+  /** a 360p piece [t, t+len] the panel can play (WebM when possible) → { path, start, len, mime } (cached) */
+  async previewClip(url, t, len = 20) {
     const C = require('./cloud');
-    const h = (this._cloudHead && this._cloudHead.src === url && this._cloudHead.h) || await C.head(url, { fetchImpl: this.fetch });
-    this._cloudHead = { src: url, h };
-    const start = Math.max(0, Math.floor(t));
+    const src = await this.previewInput(url), enc = await this.previewEncoders();
+    const start = Math.max(0, Math.floor(t)), ext = enc.webm ? '.webm' : '.mp4';
     const dir = config.cacheDir('preview'); fs.mkdirSync(dir, { recursive: true });
-    const out = path.join(dir, require('crypto').createHash('md5').update(url).digest('hex').slice(0, 12) + '-' + start + '-' + len + '.mp4');
-    if (!fs.existsSync(out)) await C.previewClip(this.ffmpeg(), h.finalUrl, start, len, out);
-    return { path: out, start, len };
+    const out = path.join(dir, require('crypto').createHash('md5').update(url).digest('hex').slice(0, 12) + '-' + start + '-' + len + ext);
+    if (!fs.existsSync(out)) {
+      this._pvJobs = this._pvJobs || new Map();
+      // the panel prefetches the next piece while this one plays: never make the same piece twice at once
+      if (!this._pvJobs.has(out)) this._pvJobs.set(out, C.previewClip(this.ffmpeg(), src.url, start, len, out, { webm: enc.webm, audio: enc.audio }).finally(() => this._pvJobs.delete(out)));
+      await this._pvJobs.get(out);
+    }
+    return { path: out, start, len, mime: enc.webm ? 'video/webm' : 'video/mp4' };
   }
   /**
    * Download from Dropbox / Drive. A part of a video (start/end) is cut straight off the link by ffmpeg — only that

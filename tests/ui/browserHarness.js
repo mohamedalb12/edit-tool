@@ -171,7 +171,7 @@
     _ytInstalled: true,
     ytdlpStatus: function () { return Promise.resolve({ installed: S._ytInstalled, path: S._ytInstalled ? '/data/bin/yt-dlp_macos' : null, version: S._ytInstalled ? '2026.08.19' : '', jsRuntime: 'deno:/opt/homebrew/bin/deno', managed: true, cookiesFrom: settings.ytdlpCookies || null }); },
     ytdlpInstall: function (o) { if (o && o.onProgress) o.onProgress(1); S._ytInstalled = true; return rec('ytdlpInstall', null, { file: '/data/bin/yt-dlp_macos', version: '2026.08.19' }); },
-    previewSource: function (u) { return rec('previewSource', u, { url: /broken/.test(u) ? '/tests/.tmp/missing.webm' : '/tests/.tmp/pv.webm', chunks: true, type: 'video' }); },
+    previewSource: function (u) { return rec('previewSource', u, { url: /broken/.test(u) ? '/tests/.tmp/missing.webm' : '/tests/.tmp/pv.webm', chunks: true, webm: true, type: 'video', ext: 'webm', kind: 'cloud' }); },
     previewClip: function (u, t, len) { return rec('previewClip', { url: u, t: t, len: len }, { path: '/nowhere/pv-' + Math.floor(t) + '.mp4', start: Math.floor(t), len: len }); },
     cloudFrame: function (u, t) { return rec('cloudFrame', { url: u, t: t }, 'data:image/gif;base64,R0lGODlhAQABAAAAACw='); },
     downloadInfo: function (u) { if (/dropbox/.test(u)) return rec('downloadInfo', u, { id: 'x', title: 'مقابلة.mp4', duration: 1800, thumbnail: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', uploader: '2400 ميجا', heights: [2160], cloud: true, type: 'video', folder: false, platform: { id: 'dropbox', label: 'دروبوكس' } }); return rec('downloadInfo', u, { id: 'abc', title: 'فيديو تجربة', duration: 212, thumbnail: '', uploader: 'EditFast', heights: [1080, 720, 480], platform: { id: 'youtube', label: 'يوتيوب' } }); },

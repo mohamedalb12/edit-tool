@@ -560,6 +560,36 @@ test('transcription: one whisper run per source file even after the timeline is 
   } finally { T.transcribe = orig; delete process.env.FAKE_WHISPER_WORDS; }
 });
 
+test('captions follow the timeline as it is NOW: a clip moved / trimmed by hand after transcribing re-places the words (no new whisper run, text fixes kept)', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'واحد اتنين تلاتة اربعة خمسة ستة سبعة تمانية';
+  const f = makeAudio('moved.wav', [{ tone: 240, dur: 4 }]);
+  const { S, seq } = world({ clipFile: f, clipLen: 4 });
+  const T = require('../../core/transcribe'), orig = T.transcribe; let runs = 0;
+  T.transcribe = async o => { runs++; return orig(o); };
+  try {
+    const t = await S.transcribe({});
+    assert.equal(runs, 1);
+    const w2 = t.words.find(w => w.text === 'تلاتة'), at = w2.start;
+    w2.text = 'تلاته ✓'; // fixed by hand in the panel
+    // the editor drags the clip 5 s later and trims its head by 0.4 s (Premiere, not EditFast)
+    for (const tr of [seq.a[0], seq.v[0]]) { const c = tr.items[0]; c._start = 5; c._end = 8.6; c._in = 0.4; }
+    const info = await S.seq();
+    assert.equal(info.audio[0].clips[0].start, 5, 'simulator moved the clip');
+    const t2 = await S.ensureTranscript();
+    assert.equal(runs, 1, 'no new whisper run');
+    const w3 = t2.words.find(w => w.text === 'تلاته ✓');
+    assert.ok(w3, 'the hand fix survived');
+    assert.ok(Math.abs(w3.start - (at + 5 - 0.4)) < 1e-6, `moved with the clip: ${w3.start} vs ${at + 4.6}`);
+    assert.ok(t2.words.every(w => w.start >= 4.99), 'nothing left at the old place');
+    const c = await S.addCaptions({ maxWords: 2 });
+    assert.match(fs.readFileSync(c.file, 'utf8'), /00:00:0[45],\d{3} -->/);
+    // extended past what was heard → whisper runs for the new span
+    for (const tr of [seq.a[0], seq.v[0]]) { const c2 = tr.items[0]; c2._start = 0; c2._end = 4; c2._in = 0; }
+    await S.ensureTranscript();
+    assert.equal(runs, 1, 'back inside the heard span: still no run');
+  } finally { T.transcribe = orig; delete process.env.FAKE_WHISPER_WORDS; }
+});
+
 test('caption sync: measures that the captions are 0.4 s early against the voice, applies it to SRT and animated captions; speed respected', async () => {
   const parts = []; for (let i = 0; i < 6; i++) parts.push({ silence: 1 }, { tone: 260, dur: 1.5 });
   const f = makeAudio('sync.wav', parts); // speech starts at 1, 3.5, 6, 8.5, 11, 13.5
