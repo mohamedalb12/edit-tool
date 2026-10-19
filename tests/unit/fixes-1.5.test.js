@@ -125,3 +125,34 @@ test('caption presets: every preset uses a real style / animation / curve / exit
   }
   assert.equal(new Set(CS.PRESETS.map(p => p.id)).size, CS.PRESETS.length);
 });
+
+test('EditFast Motion is its own After Effects extension next to EditFast: created from the install, refreshed on a new version, never from a dev checkout', () => {
+  const MI = require('../../core/motionInstall');
+  const os = require('os'), fs2 = require('fs'), p2 = require('path');
+  const root = fs2.mkdtempSync(p2.join(os.tmpdir(), 'ef-cep-'));
+  const ext = p2.join(root, 'Adobe', 'CEP', 'extensions', 'EditFast');
+  const repo = p2.join(__dirname, '..', '..');
+  for (const d of ['client', 'core', 'host', 'assets', 'CSXS']) fs2.cpSync(p2.join(repo, d), p2.join(ext, d), { recursive: true });
+  assert.deepEqual(MI.ensure(repo), { skipped: 'not an installed extension' });
+  const r = MI.ensure(ext);
+  assert.equal(r.created, true);
+  const dest = p2.join(root, 'Adobe', 'CEP', 'extensions', 'EditFastMotion');
+  assert.equal(r.path, dest);
+  const man = fs2.readFileSync(p2.join(dest, 'CSXS', 'manifest.xml'), 'utf8');
+  const v = MI.version(ext);
+  assert.match(man, /ExtensionBundleId="com\.editfast\.motion"/);
+  assert.match(man, new RegExp('ExtensionBundleVersion="' + v.replace(/\./g, '\\.') + '"'));
+  assert.match(man, /<Host Name="AEFT"/); assert.doesNotMatch(man, /PPRO|__VERSION__/);
+  assert.match(man, /\.\/client\/ae\.html/); assert.match(man, /\.\/host\/ae\.jsx/);
+  assert.ok(fs2.existsSync(p2.join(dest, 'host', 'ae.jsx')) && fs2.existsSync(p2.join(dest, 'core', 'aeServices.js')));
+  assert.doesNotThrow(() => { if (!/^<\?xml[\s\S]*<\/ExtensionManifest>\s*$/.test(man)) throw new Error('bad xml'); });
+  assert.deepEqual(MI.ensure(ext), { path: dest, created: false, updated: false, version: v }, 'same version: nothing to do');
+  // a new EditFast version → the AE folder follows
+  const mp = p2.join(ext, 'CSXS', 'manifest.xml');
+  fs2.writeFileSync(mp, fs2.readFileSync(mp, 'utf8').replace(/ExtensionBundleVersion="[^"]+"/, 'ExtensionBundleVersion="9.9.9"'));
+  const u = MI.ensure(ext);
+  assert.equal(u.updated, true); assert.equal(MI.version(dest), '9.9.9');
+  // the Premiere manifest is Premiere only now (one host per bundle: what CEP supports)
+  const main = fs2.readFileSync(p2.join(repo, 'CSXS', 'manifest.xml'), 'utf8');
+  assert.doesNotMatch(main, /AEFT|ae\.html/);
+});

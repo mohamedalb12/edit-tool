@@ -73,6 +73,13 @@
     var first = null; try { first = localStorage.getItem('ef-tab'); } catch (e3) {}
     show(first || 'agent');
     if (EF.updates) EF.updates.boot();
+    // EditFast Motion for After Effects lives in its own folder next to this one: create / refresh it
+    setTimeout(function () {
+      try {
+        var m = EF.services.ensureMotion ? EF.services.ensureMotion() : null;
+        if (m && (m.created || m.updated)) UI.toast('EditFast Motion ' + (m.created ? 'اتثبّت' : 'اتحدّث') + ' لأفتر إفكتس ✓ — اقفل الأفتر وافتحه، وهتلاقيه في Window ← Extensions ← EditFast Motion');
+      } catch (e) { console.warn(e); }
+    }, 2500);
     if (EF.spend) EF.spend.boot();
     EF.loadHostScript().then(function () { return EF.host('ping', {}); }).then(function (r) { UI.status('متصل بـ ' + (r.app || 'Premiere')); }).catch(function (e) { UI.status('مش متصل ببريمير', 'err'); console.warn(e); });
   }

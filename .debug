@@ -5,9 +5,4 @@
       <Host Name="PPRO" Port="8098" />
     </HostList>
   </Extension>
-  <Extension Id="com.editfast.panel.ae">
-    <HostList>
-      <Host Name="AEFT" Port="8099" />
-    </HostList>
-  </Extension>
 </ExtensionList>

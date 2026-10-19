@@ -106,8 +106,11 @@ async function install({ info, extRoot, dataDir, fetchImpl, onProgress }) {
   }
   for (const d of ['client', 'core', 'host', 'remotion/src']) for (const rel of walk(path.join(extRoot, d), extRoot)) if (!keep.has(rel)) fs.unlinkSync(path.join(extRoot, rel));
   fs.rmSync(tmp, { recursive: true, force: true });
+  // the After Effects panel (its own extension folder next to this one) gets the same version
+  let motion = null;
+  try { motion = require('./motionInstall').ensure(extRoot); } catch (e) { motion = { error: e.message }; }
   onProgress && onProgress(1, 'done');
-  return { version: newVer, previous, backup, engineChanged: JSON.stringify(oldDeps) !== JSON.stringify(readDeps(extRoot)), notes: info.notes };
+  return { version: newVer, previous, backup, engineChanged: JSON.stringify(oldDeps) !== JSON.stringify(readDeps(extRoot)), notes: info.notes, motion };
 }
 
 function readDeps(extRoot) { try { return JSON.parse(fs.readFileSync(path.join(extRoot, 'remotion', 'package.json'), 'utf8')).dependencies || {}; } catch (_) { return {}; } }

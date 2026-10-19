@@ -2254,6 +2254,8 @@ ${JSON.stringify(lite)}
     this.saveSettings({ lastUpdateCheck: Date.now() });
     return r;
   }
+  /** make sure EditFast Motion (After Effects) is installed next to this extension, at this version */
+  ensureMotion() { try { return require('./motionInstall').ensure(this.extRoot()); } catch (e) { return { error: e.message }; } }
   async applyUpdate(info, onProgress) {
     const U = require('./updater');
     const r = await U.install({ info, extRoot: this.extRoot(), dataDir: config.dataDir(), fetchImpl: this.fetch, onProgress });

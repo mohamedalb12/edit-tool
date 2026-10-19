@@ -9,6 +9,15 @@ for d in CSXS client core host assets bin remotion; do [ -d "$SRC/$d" ] && cp -R
 cp "$SRC/README.md" "$DEST/" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 
+# EditFast Motion (After Effects): its own extension folder, same code + the After Effects manifest
+MDEST="$HOME/Library/Application Support/Adobe/CEP/extensions/EditFastMotion"
+echo "==> EditFast Motion لأفتر إفكتس: $MDEST"
+rm -rf "$MDEST"; mkdir -p "$MDEST/CSXS"
+for d in client core host assets; do [ -d "$SRC/$d" ] && cp -R "$SRC/$d" "$MDEST/"; done
+VER=$(sed -n 's/.*ExtensionBundleVersion="\([^"]*\)".*/\1/p' "$SRC/CSXS/manifest.xml" | head -1)
+sed "s/__VERSION__/$VER/g" "$SRC/assets/motion/manifest.xml" > "$MDEST/CSXS/manifest.xml"
+xattr -dr com.apple.quarantine "$MDEST" 2>/dev/null || true
+
 echo "==> تفعيل الإضافات الغير موقّعة (PlayerDebugMode)"
 for v in 9 10 11 12 13; do defaults write "com.adobe.CSXS.$v" PlayerDebugMode 1; done
 
@@ -29,5 +38,5 @@ if command -v npm >/dev/null 2>&1; then
   (cd "$DEST/remotion" && rm -rf node_modules && npm install --no-audit --no-fund --omit=dev --cache "$HOME/.editfast/npm-cache") || echo "!! ثبّته بعدين من تبويب مشاهد Pro"
 fi
 echo ""
-echo "خلصت ✓  افتح بريمير > Window > Extensions > EditFast"
+echo "خلصت ✓  افتح بريمير > Window > Extensions > EditFast — وأفتر > Window > Extensions > EditFast Motion"
 echo "أول مرة: من تبويب الإعدادات حط مفتاح OpenRouter وحمّل موديل Whisper."

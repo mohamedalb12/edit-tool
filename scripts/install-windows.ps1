@@ -8,6 +8,15 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 foreach ($d in 'CSXS','client','core','host','assets','bin','remotion') { if (Test-Path (Join-Path $src $d)) { Copy-Item (Join-Path $src $d) $dest -Recurse -Force } }
 Copy-Item (Join-Path $src 'README.md') $dest -ErrorAction SilentlyContinue
 
+# EditFast Motion (After Effects): its own extension folder, same code + the After Effects manifest
+$mdest = Join-Path $env:APPDATA 'Adobe\CEP\extensions\EditFastMotion'
+Write-Host "==> EditFast Motion لأفتر إفكتس: $mdest"
+if (Test-Path $mdest) { Remove-Item $mdest -Recurse -Force }
+New-Item -ItemType Directory -Force -Path (Join-Path $mdest 'CSXS') | Out-Null
+foreach ($d in 'client','core','host','assets') { if (Test-Path (Join-Path $src $d)) { Copy-Item (Join-Path $src $d) $mdest -Recurse -Force } }
+$ver = ([regex]::Match((Get-Content (Join-Path $src 'CSXS\manifest.xml') -Raw), 'ExtensionBundleVersion="([^"]+)"')).Groups[1].Value
+(Get-Content (Join-Path $src 'assets\motion\manifest.xml') -Raw -Encoding UTF8).Replace('__VERSION__', $ver) | Set-Content (Join-Path $mdest 'CSXS\manifest.xml') -Encoding UTF8
+
 Write-Host "==> تفعيل الإضافات الغير موقّعة (PlayerDebugMode)"
 foreach ($v in 9,10,11,12,13) { New-Item -Path "HKCU:\Software\Adobe\CSXS.$v" -Force | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Adobe\CSXS.$v" -Name 'PlayerDebugMode' -Value '1' }
 
@@ -44,5 +53,5 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
   Push-Location (Join-Path $dest 'remotion'); try { npm install --no-audit --no-fund --omit=dev --cache (Join-Path $env:USERPROFILE '.editfast\npm-cache') } catch { Write-Warning 'ثبّت المحرك بعدين من تبويب مشاهد Pro' }; Pop-Location
 } else { Write-Warning 'مفيش Node.js — ثبّته من nodejs.org وبعدين ثبّت المحرك من تبويب مشاهد Pro' }
 Write-Host ""
-Write-Host "خلصت ✓  افتح بريمير > Window > Extensions > EditFast"
+Write-Host "خلصت ✓  افتح بريمير > Window > Extensions > EditFast — وأفتر > Window > Extensions > EditFast Motion"
 Write-Host "أول مرة: من تبويب الإعدادات حط مفتاح OpenRouter وحمّل موديل Whisper."
