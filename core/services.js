@@ -1841,9 +1841,15 @@ ${JSON.stringify(lite)}
     try { return await fn(o); } catch (e) {
       if (!e.login) throw e;
       const tried = new Set([o.cookiesFrom].filter(Boolean));
+      let n = 0;
       for (const b of Y.installedBrowsers()) {
         if (tried.has(b)) continue; tried.add(b);
-        try { const r = await fn({ ...o, cookiesFrom: b }); this.saveSettings({ ytdlpCookies: b }); return r; } catch (e2) { if (!e2.login && !/cookie|keyring|decrypt|permission|Operation not permitted/i.test(e2.raw || e2.message)) throw e2; }
+        // two browsers at most: each try is a whole yt-dlp run (and the Mac may ask for Keychain access)
+        if (++n > 2) break;
+        try { const r = await fn({ ...o, cookiesFrom: b }); this.saveSettings({ ytdlpCookies: b }); return r; } catch (e2) {
+          if (e2.stall || e2.cancelled) throw e2;
+          if (!e2.login && !/cookie|keyring|decrypt|permission|Operation not permitted/i.test(e2.raw || e2.message)) throw e2;
+        }
       }
       throw e;
     }
@@ -1945,7 +1951,7 @@ ${JSON.stringify(lite)}
     const bytes = (got, total) => { if (!total && onProgress) onProgress(0, 'bytes', got); };
     const whole = async name => {
       const f = C.outName(dir, name);
-      await this.fetch(h.url, { toFile: f, timeout: 600000, redirects: 8, onProgress: p => onProgress && onProgress(p), onBytes: bytes, onRequest: track });
+      await this.fetch(h.url, { toFile: f, timeout: 60000, redirects: 8, onProgress: p => onProgress && onProgress(p), onBytes: bytes, onRequest: track });
       // a "download" that's really a sign-in page
       if (fs.statSync(f).size < 64 * 1024 && /<html/i.test(fs.readFileSync(f, 'utf8').slice(0, 2000))) { try { fs.unlinkSync(f); } catch (_) {} throw new Error('اللينك رجّع صفحة مش ملف — خلّيه "Anyone with the link" وجرّب تاني'); }
       return f;
@@ -2052,7 +2058,7 @@ ${JSON.stringify(lite)}
       try { await this.ytdlpInstall({}); o = await this.ytdlpOpts(); return o.bin === managed; } catch (_) { return false; }
     };
     if (o.bin && o.bin !== managed && !this.settings.paths.ytdlp && Y.ageDays(o.version) > 45) await upgrade();
-    let base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom, onChild: track };
+    let base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom, onChild: track, stallSec: this.settings.dlStallSec, idleSec: this.settings.dlIdleSec };
     let file, type = quality === 'audio' ? 'audio' : 'video';
     const cut = Y.parseTime(start) !== null || Y.parseTime(end) !== null;
     const cutHere = async full => {
@@ -2068,11 +2074,13 @@ ${JSON.stringify(lite)}
       const attempts = [() => Y.download(o.bin, { ...base, start, end }, onProgress).then(r => r.file)];
       if (cut) attempts.push(async () => { onProgress && onProgress(0, 'full'); return cutHere((await Y.download(o.bin, { ...base, sections: false }, onProgress)).file); });
       attempts.push(async () => { onProgress && onProgress(0, 'simple'); const f = (await Y.download(o.bin, { ...base, sections: false, simple: true }, onProgress)).file; return cut ? cutHere(f) : f; });
-      let lastErr = null, triedFix = false;
+      let lastErr = null, firstErr = null, triedFix = false, stalls = 0;
       for (let i = 0; i < attempts.length; i++) {
         try { file = await this.withLogin(x => { this._dlCheck(); base = { ...base, cookiesFrom: x.cookiesFrom }; return attempts[i](); }, { cookiesFrom: base.cookiesFrom }); break; } catch (e) {
           this._dlCheck(); // stopped: no other way, no other browser
           lastErr = e;
+          if (e.stall) { stalls++; onProgress && onProgress(0, 'stall'); continue; } // hung: straight to the next way
+          if (!firstErr) firstErr = e;
           if (/403|Forbidden|JavaScript|challenge/i.test(e.message + ' ' + (e.raw || '')) && !triedFix) {
             // 403 / challenge: newest yt-dlp + another YouTube client, then the same attempt again
             triedFix = true;
@@ -2086,7 +2094,11 @@ ${JSON.stringify(lite)}
           if (/تسجيل دخول|خاص|مش متاح|مش مدعوم|مش متثبّت/.test(e.message)) break;
         }
       }
-      if (!file) throw lastErr;
+      if (!file) {
+        // the real reason, not the last fallback's: a hang only explains it when every way hung
+        if (stalls && !firstErr) { const e = new Error('الموقع بطيء جدًا أو بيوقف التحميل دلوقتي — جرّب تاني بعد شوية، أو اختار جودة أقل، أو دوس "حدّث yt-dlp".'); e.raw = lastErr && lastErr.raw; throw e; }
+        throw firstErr || lastErr;
+      }
     } catch (e) {
       // Pinterest photo pins aren't videos: grab the picture itself
       if (pf.id !== 'pinterest' || e.cancelled) throw e;

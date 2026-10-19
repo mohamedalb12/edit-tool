@@ -607,3 +607,29 @@ let p = 0; setInterval(() => { p = Math.min(99, p + 1); console.log('EFPROG ' + 
     assert.deepEqual(fs.readdirSync(d2).filter(n => /^big/.test(n)), [], 'no big.mp4 / big.mp4.part left');
   } finally { srv.close(); }
 });
+
+test('a download that hangs is stopped within the stall time and the next way runs (no minutes of waiting then an error); all hanging → a clear message', async () => {
+  const fake = path.join(TMP, 'yt-hang');
+  fs.writeFileSync(fake, `#!${process.execPath}
+const a = process.argv.slice(2), fs = require('fs');
+if (a[0] === '--version') { console.log('2026.10.15'); process.exit(0); }
+if (!a.includes('--socket-timeout') || !a.includes('--concurrent-fragments')) { console.error('ERROR: missing fail-fast args'); process.exit(1); }
+const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'hang [x]').replace('%(ext)s', 'mp4');
+if (a.includes('--download-sections') || process.env.EF_HANG_ALL) { console.log('EFPROG 30.0% 1.2MiB/s ETA 00:10'); setInterval(() => {}, 1000); return; }
+console.log('EFPROG 50.0% 3.1MiB/s ETA 00:02'); console.log('EFPROG 100% 3.1MiB/s ETA 00:00'); fs.copyFileSync(process.env.EF_SRC, out); console.log('EFFILE ' + out);
+`); fs.chmodSync(fake, 0o755);
+  process.env.EF_SRC = video('yt-src-10s.mp4', 10);
+  const { S, h } = world({ settings: { paths: { ...config.DEFAULTS.paths, ytdlp: fake }, dlStallSec: 2, dlIdleSec: 3 } });
+  h.ctx.app.project.path = path.join(TMP, 'Projects', 'hang.prproj');
+  const phases = [], infos = [];
+  const t0 = Date.now();
+  const r = await S.downloadMedia({ url: 'https://youtu.be/hang', quality: '720', start: '0:05', end: '0:20', place: false, onProgress: (p, ph, info) => { if (ph) phases.push(ph); if (info && info.speed) infos.push(info); } });
+  assert.ok(Date.now() - t0 < 9000, 'took ' + (Date.now() - t0));
+  assert.ok(phases.includes('stall'), phases.join(','));
+  assert.match(r.file, /hang \[x\]-5-20\.mp4$/, 'whole file + exact cut here');
+  assert.ok(infos.some(i => i.speed === '3.1MiB/s' && i.eta === '00:02'), 'speed + time left for the panel');
+  process.env.EF_HANG_ALL = '1';
+  try {
+    await assert.rejects(S.downloadMedia({ url: 'https://youtu.be/hang2', quality: '720', place: false }), /بطيء جدًا|بيوقف التحميل/);
+  } finally { delete process.env.EF_HANG_ALL; }
+});

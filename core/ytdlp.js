@@ -107,8 +107,11 @@ function installedBrowsers(platform = process.platform) {
 
 /** yt-dlp arguments (pure — tested without the network). */
 function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true, jsRuntime, cookiesFrom, simple = false, extra = [] }) {
+  // fail fast instead of hanging: short socket timeout, few retries (we have our own fallbacks), and parallel
+  // fragments so HLS/DASH sites (Instagram, TikTok, X) come down faster
   const args = ['--no-playlist', '--newline', '--no-colors', '--windows-filenames', '--no-mtime', '--progress',
-    '--progress-template', 'download:EFPROG %(progress._percent_str)s %(progress._speed_str)s',
+    '--socket-timeout', '15', '--retries', '3', '--fragment-retries', '3', '--extractor-retries', '2', '--concurrent-fragments', '4',
+    '--progress-template', 'download:EFPROG %(progress._percent_str)s %(progress._speed_str)s ETA %(progress._eta_str)s',
     '--no-simulate', '--print', 'after_move:EFFILE %(filepath)s', ...extra];
   if (ffmpeg) args.push('--ffmpeg-location', ffmpeg);
   if (jsRuntime) args.push('--js-runtimes', jsRuntime);
@@ -155,7 +158,7 @@ function runJson(bin, args, timeout = 150000) {
 async function info(bin, url, { jsRuntime, cookiesFrom } = {}) {
   if (!bin) throw new Error('yt-dlp مش متثبّت — دوس "ثبّت yt-dlp" فوق.');
   const extra = [...(jsRuntime ? ['--js-runtimes', jsRuntime] : []), ...(cookiesFrom ? ['--cookies-from-browser', cookiesFrom] : [])];
-  const j = await runJson(bin, ['-J', '--no-playlist', '--no-warnings', ...extra, String(url).trim()]);
+  const j = await runJson(bin, ['-J', '--no-playlist', '--no-warnings', '--socket-timeout', '15', '--extractor-retries', '2', ...extra, String(url).trim()], 75000);
   const heights = Array.from(new Set((j.formats || []).filter(f => f.vcodec && f.vcodec !== 'none' && f.height).map(f => f.height))).sort((a, b) => b - a);
   return { id: j.id, title: j.title || j.id, duration: j.duration || null, thumbnail: j.thumbnail || null, uploader: j.uploader || j.channel || '', heights, platform: platformOf(url), extractor: j.extractor_key || j.extractor };
 }
@@ -196,16 +199,39 @@ function download(bin, opts, onProgress) {
     const child = spawn(bin, args, { windowsHide: true, detached: process.platform !== 'win32' });
     child.efGroup = process.platform !== 'win32';
     if (opts.onChild) opts.onChild(child); // so the panel's stop button can end it
-    let file = null, err = '', buf = '';
+    let file = null, err = '', buf = '', stalled = null, best = -1;
+    // watchdog: no output at all for `idleSec`, or no progress for `stallSec` once bytes are coming → stop it now and
+    // let the next way try (instead of yt-dlp retrying for many minutes and failing anyway)
+    const idleSec = opts.idleSec || 75, stallSec = opts.stallSec || 45;
+    let lastOut = Date.now(), lastGain = Date.now();
+    const dog = setInterval(() => {
+      const now = Date.now();
+      // after 100% it's merging / converting: that can be quiet for a while, leave it alone
+      const why = best >= 99.9 ? null : now - lastOut > idleSec * 1000 ? 'idle' : best >= 0 && now - lastGain > stallSec * 1000 ? 'stall' : null;
+      if (!why) return;
+      stalled = why; clearInterval(dog);
+      try { if (child.efGroup) process.kill(-child.pid, 'SIGTERM'); else child.kill('SIGTERM'); } catch (_) { try { child.kill('SIGTERM'); } catch (__) {} }
+    }, 1000);
     const line = l => {
-      const p = /EFPROG\s+([\d.]+)%/.exec(l); if (p && onProgress) onProgress(Math.min(1, +p[1] / 100));
+      lastOut = Date.now();
+      const p = /EFPROG\s+([\d.]+)%(?:\s+(\S+))?(?:\s+ETA\s+(\S+))?/.exec(l);
+      if (p) {
+        const pc = +p[1];
+        if (pc > best + 0.05) { best = pc; lastGain = Date.now(); }
+        if (onProgress) onProgress(Math.min(1, pc / 100), undefined, { speed: p[2] && !/N\/A|Unknown/i.test(p[2]) ? p[2] : '', eta: p[3] && !/N\/A|Unknown/i.test(p[3]) ? p[3] : '' });
+      }
       const f = /EFFILE\s+(.+)$/.exec(l); if (f) file = f[1].trim();
     };
     child.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { line(buf.slice(0, i)); buf = buf.slice(i + 1); } });
-    child.stderr.on('data', d => { err += d; });
-    child.on('error', reject);
+    child.stderr.on('data', d => { err += d; lastOut = Date.now(); });
+    child.on('error', e => { clearInterval(dog); reject(e); });
     child.on('close', code => {
+      clearInterval(dog);
       if (buf) line(buf);
+      if (stalled) {
+        const e = new Error(stalled === 'idle' ? 'الموقع مابيردّش (مفيش أي استجابة) — بيجرّب طريقة تانية' : 'التحميل وقف في النص (النت أو الموقع بطّأ) — بيجرّب طريقة تانية');
+        e.stall = stalled; e.raw = 'stalled: ' + stalled; return reject(e);
+      }
       if (code === 0 && file && fs.existsSync(file)) resolve({ file });
       else {
         const last = (err.trim().split('\n').filter(x => /ERROR/.test(x)).pop() || err.trim().split('\n').pop() || 'exit ' + code).replace(/^ERROR:\s*/, '');

@@ -186,7 +186,7 @@
               var one = list.length === 1;
               return S.downloadMedia({ url: u, quality: o.quality, start: one ? (o.start || undefined) : undefined, end: one ? (o.end || undefined) : undefined, place: o.place, onProgress: function (x, phase, got) {
                 prog.set((i + x) / list.length);
-                UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : phase === 'update' ? 'بيحدّث yt-dlp لآخر نسخة (أول مرة بس)…' : phase === 'retry' ? 'يوتيوب رفض — بيجرّب بطريقة تانية…' : phase === 'unzip' ? 'بيفك الضغط ويضيف لمكتبتي…' : phase === 'bytes' ? 'تحميل ' + Math.round((got || 0) / 1e6) + ' ميجا…' : 'تحميل ' + Math.round(x * 100) + '%'), 'busy');
+                UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : phase === 'update' ? 'بيحدّث yt-dlp لآخر نسخة (أول مرة بس)…' : phase === 'retry' ? 'يوتيوب رفض — بيجرّب بطريقة تانية…' : phase === 'unzip' ? 'بيفك الضغط ويضيف لمكتبتي…' : phase === 'stall' ? 'التحميل علّق — بيجرّب طريقة تانية…' : phase === 'bytes' ? 'تحميل ' + Math.round((got || 0) / 1e6) + ' ميجا…' : 'تحميل ' + Math.round(x * 100) + '%' + (got && typeof got === 'object' ? (got.speed ? ' · ' + got.speed : '') + (got.eta ? ' · باقي ' + got.eta : '') : '')), 'busy');
               } }).then(function (r) { done++; last = r; }, function (e) { if (list.length === 1 || e.cancelled) throw e; failed.push(u + ' — ' + e.message); });
             });
           }, Promise.resolve()).then(function () {

@@ -166,24 +166,27 @@ function previewClip(ffmpeg, url, t, len, out, opts) {
 }
 
 /** cut a part out of the remote file → { file } (progress 0..1 from ffmpeg's out_time) */
-function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total, onChild }, onProgress) {
+function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total, onChild, stallSec }, onProgress) {
   const args = rangeArgs(url, { start, end, audioOnly, out });
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true });
     if (onChild) onChild(child);
-    let err = '', buf = '';
+    let err = '', buf = '', at = -1, gain = Date.now(), stalled = false;
+    // ffmpeg keeps reporting even when the server stopped sending: no progress for stallSec → give up on this way
+    const dog = setInterval(() => { if (Date.now() - gain > (stallSec || 45) * 1000) { stalled = true; clearInterval(dog); try { child.kill('SIGTERM'); } catch (_) {} } }, 1000);
     child.stdout.on('data', d => {
       buf += d; let i;
       while ((i = buf.indexOf('\n')) >= 0) {
         const l = buf.slice(0, i); buf = buf.slice(i + 1);
         const m = /^out_time_(?:us|ms)=(\d+)/.exec(l);
-        if (m && total > 0 && onProgress) onProgress(Math.min(0.99, +m[1] / 1e6 / total));
+        if (m) { if (+m[1] > at) { at = +m[1]; gain = Date.now(); } if (total > 0 && onProgress) onProgress(Math.min(0.99, +m[1] / 1e6 / total)); }
       }
     });
     child.stderr.on('data', d => { err += d; });
-    child.on('error', reject);
+    child.on('error', e => { clearInterval(dog); reject(e); });
     child.on('close', code => {
-      if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) return resolve({ file: out });
+      clearInterval(dog);
+      if (!stalled && code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) return resolve({ file: out });
       try { fs.unlinkSync(out); } catch (_) {}
       reject(new Error('القص من اللينك فشل: ' + (err.trim().split('\n').pop() || 'exit ' + code)));
     });
