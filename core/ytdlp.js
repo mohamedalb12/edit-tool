@@ -12,7 +12,9 @@ const PLATFORMS = [
   ['pinterest', /(^|\.)pinterest\.[a-z.]+|pin\.it/i, 'بنترست'],
   ['x', /(^|\.)(twitter|x)\.com/i, 'X'],
   ['facebook', /(^|\.)(facebook\.com|fb\.watch)/i, 'فيسبوك'],
-  ['vimeo', /(^|\.)vimeo\.com/i, 'فيميو']
+  ['vimeo', /(^|\.)vimeo\.com/i, 'فيميو'],
+  ['dropbox', /(^|\.)(dropbox\.com|dropboxusercontent\.com)$|^db\.tt$/i, 'دروبوكس'],
+  ['gdrive', /^(drive|docs|drive\.usercontent)\.google\.com$/i, 'جوجل درايف']
 ];
 
 function platformOf(url) {

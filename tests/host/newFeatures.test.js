@@ -443,3 +443,62 @@ const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'reel [x]').
   await assert.rejects(S.downloadInfo('https://www.instagram.com/reels/DepEQ/'), e => /إنستجرام طالب تسجيل دخول/.test(e.message) && !/يوتيوب/.test(e.message));
   delete process.env.EF_GOOD_BROWSER;
 });
+
+test('Dropbox links: info off the link, only the chosen part comes down, folders unzip into مكتبتي + a bin, locked links explain themselves', async () => {
+  const http = require('http'), { nodeFetch } = require('../../core/http'), C = require('../../core/cloud');
+  // pure bits first
+  assert.equal(C.direct('https://www.dropbox.com/scl/fi/abc/clip.mp4?rlkey=k&dl=0').url, 'https://www.dropbox.com/scl/fi/abc/clip.mp4?rlkey=k&dl=1');
+  assert.equal(C.direct('https://www.dropbox.com/scl/fo/xyz/AAB?rlkey=k&dl=0').folder, true);
+  assert.equal(C.direct('https://www.dropbox.com/scl/fo/xyz/AAB/cam%20A.mp4?rlkey=k&dl=0').folder, false, 'a file opened inside a shared folder');
+  assert.equal(C.direct('https://drive.google.com/file/d/1AbCdEfGhIjK_lm/view?usp=sharing').url, 'https://drive.usercontent.google.com/download?id=1AbCdEfGhIjK_lm&export=download&confirm=t');
+  assert.throws(() => C.direct('https://drive.google.com/drive/folders/1AbCdEfGhIjK'), /فولدر جوجل درايف/);
+  assert.equal(C.nameFromDisposition("attachment; filename=\"x.mp4\"; filename*=UTF-8''%D9%85%D9%82%D8%A7%D8%A8%D9%84%D8%A9.mp4"), 'مقابلة.mp4');
+  assert.equal(require('../../core/ytdlp').platformOf('https://www.dropbox.com/scl/fi/abc/x.mp4').label, 'دروبوكس');
+
+  const src = video('dbx-src-10s.mp4', 10), data = fs.readFileSync(src);
+  const zdir = path.join(TMP, 'dbx-zip'); fs.rmSync(zdir, { recursive: true, force: true }); fs.mkdirSync(path.join(zdir, 'Shoot'), { recursive: true });
+  fs.copyFileSync(src, path.join(zdir, 'Shoot', 'cam A.mp4')); fs.writeFileSync(path.join(zdir, 'notes.txt'), 'x');
+  const zipFile = path.join(TMP, 'dbx.zip'); try { fs.unlinkSync(zipFile); } catch (_) {}
+  execFileSync('zip', ['-qr', zipFile, '.'], { cwd: zdir });
+  const hits = [];
+  const srv = http.createServer((req, res) => {
+    hits.push(req.method + ' ' + req.url + ' ' + (req.headers.range || ''));
+    if (req.url.startsWith('/scl/fi/abc/')) { res.writeHead(302, { Location: '/content/clip' }); return res.end(); }
+    if (req.url.startsWith('/scl/fi/locked/')) { res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end('<html>sign in</html>'); }
+    if (req.url.startsWith('/scl/fo/')) { res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': "attachment; filename*=UTF-8''%D8%AA%D8%B5%D9%88%D9%8A%D8%B1.zip" }); return res.end(fs.readFileSync(zipFile)); }
+    if (req.url === '/content/clip') {
+      const hd = { 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Disposition': "attachment; filename*=UTF-8''%D9%85%D9%82%D8%A7%D8%A8%D9%84%D8%A9.mp4" };
+      const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
+      if (m) { const a = +m[1], b = m[2] ? +m[2] : data.length - 1; res.writeHead(206, { ...hd, 'Content-Range': `bytes ${a}-${b}/${data.length}`, 'Content-Length': b - a + 1 }); return res.end(data.subarray(a, b + 1)); }
+      res.writeHead(200, { ...hd, 'Content-Length': data.length }); return res.end(data);
+    }
+    res.writeHead(404); res.end();
+  });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + srv.address().port;
+  const fetchImpl = (u, o) => nodeFetch(u.replace('https://www.dropbox.com', base), o);
+  try {
+    const { S, h } = world({ fetchImpl });
+    h.ctx.app.project.path = path.join(TMP, 'Projects', 'dbx.prproj');
+    const url = 'https://www.dropbox.com/scl/fi/abc/clip.mp4?rlkey=k&dl=0';
+    const info = await S.downloadInfo(url);
+    assert.equal(info.title, 'مقابلة.mp4'); assert.equal(info.cloud, true); assert.equal(info.type, 'video');
+    assert.ok(Math.abs(info.duration - 10) < 0.2, 'length read off the link: ' + info.duration);
+    assert.deepEqual(info.heights, [360]);
+    hits.length = 0;
+    const r = await S.downloadMedia({ url, start: '0:02', end: '0:05', place: false });
+    assert.match(path.basename(r.file), /^مقابلة-2-5\.mp4$/);
+    assert.match(r.file, /EditFast Media[\\/]Downloads/);
+    const d = +execFileSync(require('../../core/ffmpeg').findBinary('ffprobe'), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', r.file]).toString();
+    assert.ok(Math.abs(d - 3) < 0.2, 'only 3 s: ' + d);
+    assert.ok(!hits.some(x => /^GET \/content\/clip\s*$/.test(x)), 'never pulled the whole file without a range: ' + hits.join(' | '));
+    const w = await S.downloadMedia({ url, place: true });
+    assert.equal(fs.statSync(w.file).size, data.length); assert.equal(w.type, 'video'); assert.ok(w.placed);
+    const f = await S.downloadMedia({ url: 'https://www.dropbox.com/scl/fo/xyz/AAB?rlkey=k&dl=0' });
+    assert.equal(f.type, 'folder'); assert.equal(path.basename(f.file), 'تصوير');
+    assert.deepEqual(f.files.map(x => x.name), ['cam A.mp4'], 'media only, notes.txt skipped');
+    assert.equal(f.imported, 1); assert.equal(f.bin, 'EditFast/Downloads/تصوير');
+    assert.ok((S.settings.libraryDirs || []).includes(f.file), 'added to مكتبتي');
+    await assert.rejects(S.downloadInfo('https://www.dropbox.com/scl/fi/locked/x.mp4?rlkey=k'), /Anyone with the link/);
+  } finally { srv.close(); }
+});

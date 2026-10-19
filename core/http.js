@@ -18,9 +18,10 @@ function makeResponse(res, buf, url) {
 /**
  * nodeFetch(url, { method, headers, body, timeout, toFile, onProgress, redirects })
  * With `toFile`, the body is streamed to disk (for big downloads) and the response text is empty.
+ * `onBytes(got, total)` also reports when the size isn't known; `headersOnly` resolves on the headers and drops the body.
  */
 function nodeFetch(url, opts = {}) {
-  const { method = 'GET', headers = {}, body, timeout = 120000, toFile, onProgress, redirects = 5 } = opts;
+  const { method = 'GET', headers = {}, body, timeout = 120000, toFile, onProgress, onBytes, headersOnly, redirects = 5 } = opts;
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'http:' ? http : https;
@@ -34,12 +35,14 @@ function nodeFetch(url, opts = {}) {
         const keep = res.statusCode === 307 || res.statusCode === 308;
         return resolve(nodeFetch(next, { ...opts, method: keep ? method : 'GET', body: keep ? body : undefined, redirects: redirects - 1 }));
       }
+      // headers only (size / name / type of a big file): never pull the body
+      if (headersOnly) { res.destroy(); return resolve(makeResponse(res, Buffer.alloc(0), url)); }
       const total = +res.headers['content-length'] || 0;
       let got = 0;
       if (toFile && res.statusCode >= 200 && res.statusCode < 300) {
         const tmp = toFile + '.part';
         const out = fs.createWriteStream(tmp);
-        res.on('data', d => { got += d.length; if (onProgress && total) onProgress(got / total); });
+        res.on('data', d => { got += d.length; if (onProgress && total) onProgress(got / total); if (onBytes) onBytes(got, total); });
         res.pipe(out);
         out.on('finish', () => {
           // a dropped connection still "finishes" the file: never accept a truncated download as good

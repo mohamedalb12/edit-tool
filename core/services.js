@@ -1508,9 +1508,85 @@ ${JSON.stringify(lite)}
       throw e;
     }
   }
-  async downloadInfo(url) { const Y = require('./ytdlp'); const o = await this.ytdlpOpts(); return this.withLogin(x => Y.info(o.bin, url, x), o); }
+  async downloadInfo(url) {
+    const Y = require('./ytdlp');
+    if (require('./cloud').kindOf(url)) return this.cloudInfo(url);
+    const o = await this.ytdlpOpts(); return this.withLogin(x => Y.info(o.bin, url, x), o);
+  }
+  /* ---------- لينكات دروبوكس / جوجل درايف: من غير yt-dlp ---------- */
+  /** name / size / length of what's behind a Dropbox or Drive link (the video is read off the link, not downloaded) */
+  async cloudInfo(url) {
+    const C = require('./cloud'), Y = require('./ytdlp');
+    const h = await C.head(url, { fetchImpl: this.fetch });
+    let m = null;
+    if ((h.type === 'video' || h.type === 'audio') && this.tools.ffprobe) m = await C.probeRemote(this.tools.ffprobe, h.finalUrl).catch(() => null);
+    return { id: h.name, title: h.name, duration: m && m.duration, thumbnail: null, uploader: h.size ? Math.round(h.size / 1e6) + ' ميجا' : '', heights: m && m.height ? [m.height] : [],
+      platform: Y.platformOf(url), cloud: true, type: h.type, folder: h.folder, size: h.size, name: h.name };
+  }
+  /**
+   * Download from Dropbox / Drive. A part of a video (start/end) is cut straight off the link by ffmpeg — only that
+   * part comes down; a shared folder comes as a zip that's unpacked, added to مكتبتي and imported into its own bin.
+   */
+  async cloudDownload({ url, quality = 'best', start, end, place = true, time, onProgress } = {}) {
+    const C = require('./cloud'), Y = require('./ytdlp');
+    const pf = Y.platformOf(url);
+    const h = await C.head(url, { fetchImpl: this.fetch });
+    const dir = await this.projectMediaDir('Downloads');
+    const bytes = (got, total) => { if (!total && onProgress) onProgress(0, 'bytes', got); };
+    const whole = async name => {
+      const f = C.outName(dir, name);
+      await this.fetch(h.url, { toFile: f, timeout: 600000, redirects: 8, onProgress: p => onProgress && onProgress(p), onBytes: bytes });
+      // a "download" that's really a sign-in page
+      if (fs.statSync(f).size < 64 * 1024 && /<html/i.test(fs.readFileSync(f, 'utf8').slice(0, 2000))) { try { fs.unlinkSync(f); } catch (_) {} throw new Error('اللينك رجّع صفحة مش ملف — خلّيه "Anyone with the link" وجرّب تاني'); }
+      return f;
+    };
+    if (h.folder) {
+      const zip = await whole(/\.zip$/i.test(h.name) ? h.name : h.name + '.zip');
+      onProgress && onProgress(1, 'unzip');
+      const folder = C.outName(dir, C.safeName(h.name).replace(/\.zip$/i, ''), { ext: '' });
+      const files = await C.extract(zip, folder);
+      try { fs.unlinkSync(zip); } catch (_) {}
+      if (!files.length) throw new Error('الفولدر اتفك بس مفيهوش فيديو أو صوت أو صور');
+      await this.libraryAdd([folder]).catch(() => null);
+      const bin = 'EditFast/Downloads/' + path.basename(folder);
+      // a huge folder stays in مكتبتي only: importing hundreds of files at once freezes Premiere
+      let imported = 0;
+      if (files.length <= 150) imported = ((await this.hostRaw('importFiles', { paths: files.map(f => f.path), bin }).catch(() => null)) || {}).imported || 0;
+      return { file: folder, files, type: 'folder', platform: pf, placed: null, imported, bin, library: true };
+    }
+    let a = Y.parseTime(start), b = Y.parseTime(end);
+    const audioOnly = quality === 'audio';
+    let type = h.type === 'photo' ? 'photo' : audioOnly || h.type === 'audio' ? 'audio' : 'video';
+    const cut = (a !== null || b !== null) && (h.type === 'video' || h.type === 'audio');
+    let file;
+    if (cut || (audioOnly && h.type === 'video')) {
+      const ff = this.ffmpeg();
+      a = a || 0;
+      let total = b !== null ? b - a : 0;
+      if (!total) { const m = this.tools.ffprobe ? await C.probeRemote(this.tools.ffprobe, h.finalUrl).catch(() => null) : null; total = m && m.duration ? m.duration - a : 0; }
+      const audioOut = audioOnly || h.type === 'audio';
+      const out = C.outName(dir, h.name, { start: cut ? a : undefined, end: b, ext: audioOut ? '.mp3' : '.mp4' });
+      try {
+        file = (await C.downloadRange(ff, h.finalUrl, { start: a, end: b, audioOnly: audioOut, out, total }, onProgress)).file;
+      } catch (e) {
+        // the server didn't let ffmpeg jump inside the file: bring the whole file and cut it here
+        onProgress && onProgress(0, 'full');
+        const full = await whole(h.name);
+        file = (await Y.trim(ff, full, { start: a, end: b, audioOnly: audioOut, out })).file;
+        try { fs.unlinkSync(full); } catch (_) {}
+      }
+    } else file = await whole(h.name);
+    onProgress && onProgress(1);
+    let placed = null;
+    if (place && type !== 'other' && C.typeOf(file) !== 'other') {
+      const s = await this.seq();
+      placed = await this.host('placeFile', { path: file, time: time ?? s.playhead, kind: type === 'audio' ? 'audio' : 'video', track: -1, duration: type === 'photo' ? 5 : undefined, bin: 'EditFast/Downloads' });
+    } else if (place) await this.hostRaw('importFiles', { paths: [file], bin: 'EditFast/Downloads' }).catch(() => null);
+    return { file, type, platform: pf, placed };
+  }
   async downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
     const Y = require('./ytdlp'), W = require('./websearch');
+    if (require('./cloud').kindOf(url)) return this.cloudDownload({ url, quality, start, end, place, time, onProgress });
     const pf = Y.platformOf(url);
     if (!pf) throw new Error('اللينك مش صح');
     const dir = await this.projectMediaDir('Downloads');
