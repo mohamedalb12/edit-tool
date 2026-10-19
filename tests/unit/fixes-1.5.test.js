@@ -75,3 +75,19 @@ test('yt-dlp age + the YouTube retry flags', () => {
   assert.deepEqual(Y.youtubeRetryArgs('2025.06.01'), ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb']);
   assert.ok(Y.buildArgs({ url: 'u', outDir: '/o', extra: ['--x', 'y'] }).includes('--x'));
 });
+
+test('caption timing: sped-up clips map words sooner; the silence snap never wrecks a quiet voice and never moves a word far', () => {
+  const T = require('../../core/transcribe');
+  const w = [{ text: 'a', start: 12, end: 13 }, { text: 'b', start: 21, end: 22 }];
+  const clip = { start: 0, end: 20, inPoint: 10, speed: 1.1 };
+  const m = T.wordsToTimeline(w, clip);
+  assert.ok(Math.abs(m[0].start - 2 / 1.1) < 1e-9 && Math.abs(m[1].start - 11 / 1.1) < 1e-9, '110% → 10% sooner, no drift');
+  assert.deepEqual(T.sourceSpan(clip), { a: 10, b: 32 });
+  // "silence" over most of the words = threshold wrong for this voice → untouched
+  const words = [{ text: 'x', start: 1, end: 2 }, { text: 'y', start: 2.1, end: 3 }];
+  assert.deepEqual(T.refineWithSilence(words, [{ start: 0.5, end: 3.2 }]), words);
+  // a real pause: small move only (≤ 0.6 s)
+  const r = T.refineWithSilence([{ text: 'x', start: 1, end: 2 }, { text: 'y', start: 2.3, end: 4 }, { text: 'z', start: 4.2, end: 6 }], [{ start: 2.0, end: 2.5 }, { start: 3.9, end: 4.9 }]);
+  assert.equal(r[1].start, 2.5, 'moved 0.2 s to where the voice starts');
+  assert.equal(r[2].start, 4.2, 'a 0.7 s jump is not trusted');
+});

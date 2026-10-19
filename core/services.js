@@ -543,7 +543,7 @@ class Services {
     // hundreds of pieces of the same file, and they all reuse that one cached result
     const spans = new Map();
     for (const c of clips) {
-      const a = c.inPoint, b = c.inPoint + (c.end - c.start), sp = spans.get(c.mediaPath);
+      const { a, b } = transcribeMod.sourceSpan(c), sp = spans.get(c.mediaPath);
       if (!sp) spans.set(c.mediaPath, { file: c.mediaPath, a, b }); else { sp.a = Math.min(sp.a, a); sp.b = Math.max(sp.b, b); }
     }
     const list = [...spans.values()], words = new Map();
@@ -578,10 +578,52 @@ class Services {
   }
 
   /* ---------- الكابشن ---------- */
+  /** the transcript words with the caption sync offset applied (+ = later, − = sooner) */
+  captionWords(words) {
+    const off = +((this.settings.captions || {}).offset || 0);
+    return off ? words.map(w => ({ ...w, start: Math.max(0, w.start + off), end: Math.max(0.02, w.end + off) })) : words;
+  }
+
+  /**
+   * How far the captions are from the voice: speech onsets heard in the audio (ffmpeg, level-relative) vs the
+   * start of each spoken phrase in the transcript. The median gap is the offset to apply.
+   */
+  async captionSync({ apply = false } = {}) {
+    const t = await this.ensureTranscript();
+    const { clips } = await this.audioClips();
+    const onsets = [];
+    for (const c of clips.slice(0, 40)) {
+      const { a, b } = transcribeMod.sourceSpan(c);
+      let thr = -40;
+      try {
+        const { stderr } = await ff.run(this.ffmpeg(), ['-hide_banner', '-nostdin', '-ss', String(a), '-t', String(b - a), '-i', c.mediaPath, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(stderr)); if (m) thr = Math.min(-30, Math.max(-70, +m[1] - 16));
+      } catch (_) {}
+      const sil = await silence.detectSilence(this.ffmpeg(), c.mediaPath, { thresholdDb: thr, minSilence: 0.25, start: a, duration: b - a }).catch(() => []);
+      const sp = Math.abs(c.speed || 1) || 1;
+      sil.forEach(x => { const tt = c.start + x.end / sp; if (tt > c.start + 0.05 && tt < c.end - 0.05) onsets.push(tt); });
+    }
+    const W = t.words, starts = [];
+    for (let i = 0; i < W.length; i++) if (i === 0 || W[i].start - W[i - 1].end >= 0.35) starts.push(W[i].start);
+    const deltas = [];
+    for (const st of starts) {
+      let best = null;
+      for (const o of onsets) { const d = o - st; if (Math.abs(d) <= 1.5 && (best === null || Math.abs(d) < Math.abs(best))) best = d; }
+      if (best !== null) deltas.push(best);
+    }
+    deltas.sort((x, y) => x - y);
+    const median = deltas.length ? deltas[Math.floor(deltas.length / 2)] : 0;
+    const confident = deltas.length >= Math.min(5, Math.max(2, Math.floor(starts.length / 3)));
+    const offset = confident ? Math.round(median * 20) / 20 : 0;
+    const r = { offset, matched: deltas.length, phrases: starts.length, confident, current: +((this.settings.captions || {}).offset || 0) };
+    if (apply && confident) this.saveSettings({ captions: { ...this.settings.captions, offset } });
+    return r;
+  }
+
   async addCaptions(opts = {}) {
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) };
     const t = await this.ensureTranscript();
-    const cues = captions.buildCues(t.words, c);
+    const cues = captions.buildCues(this.captionWords(t.words), c);
     const file = path.join(config.cacheDir('captions'), `captions-${hash(JSON.stringify(cues))}.srt`);
     fs.writeFileSync(file, '\ufeff' + captions.toSRT(cues), 'utf8');
     await this.host('createCaptions', { srtPath: file, start: 0 });
@@ -597,7 +639,7 @@ class Services {
     if (this.settings.style) { st.accent = st.accent || this.settings.style.accent; st.box = st.box || this.settings.style.primary; }
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)), keepWords: true };
     if (st.style === 'bold' && !opts.maxWords) c.maxWords = Math.min(c.maxWords || 4, 3);
-    const cues = captions.buildCues(t.words, c);
+    const cues = captions.buildCues(this.captionWords(t.words), c);
     if (!cues.length) throw new Error('مفيش كلام اتفرّغ');
     const key = hash(JSON.stringify({ cues, st, w: s.width, h: s.height, fps: s.fps }));
     // still captions are PNGs drawn in the panel: no ffmpeg needed
@@ -619,7 +661,7 @@ class Services {
   /** Translate the captions (timing kept) and add them as another caption track. */
   async translateCaptions({ lang = 'English', place = true } = {}) {
     const t = await this.ensureTranscript();
-    const cues = captions.buildCues(t.words, this.settings.captions);
+    const cues = captions.buildCues(this.captionWords(t.words), this.settings.captions);
     const out = [];
     for (let i = 0; i < cues.length; i += 60) {
       const part = cues.slice(i, i + 60);
@@ -636,7 +678,7 @@ class Services {
   async exportSrt(dir, opts = {}) {
     const t = await this.ensureTranscript();
     const file = path.join(dir, 'captions.srt');
-    fs.writeFileSync(file, '\ufeff' + captions.toSRT(captions.buildCues(t.words, { ...this.settings.captions, ...opts })), 'utf8');
+    fs.writeFileSync(file, '\ufeff' + captions.toSRT(captions.buildCues(this.captionWords(t.words), { ...this.settings.captions, ...opts })), 'utf8');
     return file;
   }
 

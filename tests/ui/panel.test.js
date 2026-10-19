@@ -1020,4 +1020,13 @@ test('باقة النشر + بيب: titles to copy, description with chapters, t
   await shot('42-publish');
 });
 
+test('تزامن الكابشن: auto-measure from the audio sets the offset; the slider nudges it by hand', async () => {
+  await open('transcribe'); await clearCalls();
+  await clickText('اضبط التزامن تلقائي');
+  await page.waitForSelector('text=اتظبط: أتأخر 0.30s');
+  assert.deepEqual(await page.evaluate(() => window.__calls.find(c => c.name === 'captionSync').args), { apply: true });
+  assert.equal(await page.evaluate(() => EF.services.settings.captions.offset), 0.3);
+  await page.evaluate(() => EF.services.saveSettings({ captions: Object.assign({}, EF.services.settings.captions, { offset: 0 }) }));
+});
+
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

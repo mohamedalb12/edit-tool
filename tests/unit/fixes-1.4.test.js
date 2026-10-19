@@ -52,16 +52,18 @@ test('revisions: saved per project', () => {
   assert.equal(R.load(dir, '/p/b.prproj').rounds.length, 0);
 });
 
-test('whisper: beam search, all CPU threads and DTW word alignment from the model name', () => {
+test('whisper: beam search, all CPU threads, speech-only (VAD, bundled model) with segment times; DTW only when asked', () => {
   assert.equal(T.dtwPreset('/m/ggml-large-v3-turbo-q5_0.bin'), 'large.v3.turbo');
   assert.equal(T.dtwPreset('ggml-base.en.bin'), 'base.en');
-  assert.equal(T.dtwPreset('ggml-medium.bin'), 'medium');
   assert.equal(T.dtwPreset('my-model.bin'), null);
-  const a = T.buildWhisperArgs({ model: '/m/ggml-small.bin', wav: 'a.wav', outBase: 'o', threads: 6 });
-  const s = a.join(' ');
-  assert.match(s, /-t 6/); assert.match(s, /-bs 5 -bo 5/); assert.match(s, /-dtw small -ojf/); assert.ok(!a.includes('-oj'));
-  const b = T.buildWhisperArgs({ model: '/m/custom.bin', wav: 'a.wav', outBase: 'o', accurate: false });
-  assert.ok(!b.includes('-bs') && !b.includes('-dtw') && b.includes('-oj'));
+  assert.ok(fs.existsSync(T.VAD_MODEL) && fs.statSync(T.VAD_MODEL).size > 500000, 'Silero VAD ships with the extension');
+  const a = T.buildWhisperArgs({ model: '/m/ggml-small.bin', wav: 'a.wav', outBase: 'o', threads: 6 }).join(' ');
+  assert.match(a, /-t 6/); assert.match(a, /-bs 5 -bo 5/); assert.match(a, /--vad -vm \S+ggml-silero-v6\.2\.0\.bin -vp 50/);
+  assert.match(a, / -oj$/, 'segment times (VAD maps those back), not token times'); assert.doesNotMatch(a, /-dtw|-ojf/);
+  const b = T.buildWhisperArgs({ model: '/m/ggml-small.bin', wav: 'a.wav', outBase: 'o', vad: false, dtw: true }).join(' ');
+  assert.match(b, /-nfa -dtw small -ojf/, 'DTW needs flash attention off');
+  const c = T.buildWhisperArgs({ model: '/m/custom.bin', wav: 'a.wav', outBase: 'o', accurate: false, vad: false });
+  assert.ok(!c.includes('-bs') && !c.includes('--vad') && c.includes('-oj'));
 });
 
 test('whisper: DTW token times win over the segment guess; a word ends where the next starts', () => {

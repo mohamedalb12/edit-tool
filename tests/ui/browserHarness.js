@@ -48,6 +48,7 @@
     translateSfx: function (t) { return rec('translateSfx', t, 'fast whoosh then heavy impact'); },
     generateSfx: function (o) { return rec('generateSfx', o, { file: '/cache/sfx.mp3', prompt: o.prompt }); },
     transcribe: function (o) { S.transcript = { words: words }; if (o.onProgress) o.onProgress('تفريغ 50%'); return rec('transcribe', { dialect: o.dialect }, S.transcript); },
+    captionSync: function (o) { if (o && o.apply) settings.captions.offset = 0.3; return rec('captionSync', o, { offset: 0.3, matched: 9, phrases: 11, confident: true, current: 0 }); },
     addCaptions: function (o) { return rec('addCaptions', o, { cues: 3 }); },
     exportSrt: function (d, o) { return rec('exportSrt', d, d + '/captions.srt'); },
     multicamAnalyze: function (o) { return rec('multicamAnalyze', o, { plan: [{ start: 0, end: 4, trackIndex: 0 }, { start: 4, end: 9, trackIndex: 1 }], tracks: [0, 1], summary: { cuts: 1 } }); },

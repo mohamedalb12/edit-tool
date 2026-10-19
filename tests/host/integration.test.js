@@ -559,3 +559,24 @@ test('transcription: one whisper run per source file even after the timeline is 
     assert.ok(t.words.length > 0 && t.words.every(w => w.start >= 0 && w.end <= 6.01));
   } finally { T.transcribe = orig; delete process.env.FAKE_WHISPER_WORDS; }
 });
+
+test('caption sync: measures that the captions are 0.4 s early against the voice, applies it to SRT and animated captions; speed respected', async () => {
+  const parts = []; for (let i = 0; i < 6; i++) parts.push({ silence: 1 }, { tone: 260, dur: 1.5 });
+  const f = makeAudio('sync.wav', parts); // speech starts at 1, 3.5, 6, 8.5, 11, 13.5
+  const { S, seq } = world({ clipFile: f, clipLen: 15 });
+  const onsets = [1, 3.5, 6, 8.5, 11, 13.5];
+  const sid = (await S.seq()).id;
+  S.transcript = { seqId: sid, words: onsets.flatMap((o, i) => [{ text: 'كلمة' + i, start: o - 0.4, end: o + 0.4 }, { text: 'تانية' + i, start: o + 0.45, end: o + 1.0 }]), dialect: 'egyptian' };
+  const r = await S.captionSync({ apply: true });
+  assert.ok(r.confident, JSON.stringify(r)); assert.ok(Math.abs(r.offset - 0.4) <= 0.1, 'offset ' + r.offset);
+  assert.equal(S.settings.captions.offset, r.offset);
+  const c = await S.addCaptions({});
+  const srt = fs.readFileSync(c.file, 'utf8');
+  assert.match(srt, /00:00:01,0\d\d -->/, 'first caption now starts with the voice: ' + srt.slice(0, 80));
+  // speed: a 200% clip of the same media halves every time
+  seq.a[0].items[0].speed = 2; seq.v[0].items[0].speed = 2;
+  const info = await S.seq();
+  assert.equal(info.audio[0].clips[0].speed, 2);
+  const T = require('../../core/transcribe');
+  assert.equal(T.wordsToTimeline([{ text: 'x', start: 6, end: 7 }], info.audio[0].clips[0])[0].start, 3);
+});

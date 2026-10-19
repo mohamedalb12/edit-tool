@@ -84,7 +84,22 @@
           h('li', null, 'في بريمير: Settings (أو Preferences) ← Graphics ← Text Engine'),
           h('li', null, 'اختار "South Asian and Middle Eastern" واقفل بريمير وافتحه تاني'),
           h('li', null, 'في Essential Graphics اختار للكابشن خط عربي (Cairo أو Tajawal أو Noto Naskh Arabic) واعمله Paragraph: Right')));
-      view.appendChild(UI.card('كابشن عادي (من غير أنيميشن)',
+      // ——— التزامن: الكابشن بدري أو متأخر عن الصوت ———
+      c.offset = +(c.offset || 0);
+      var syncTxt = h('span', { class: 'hint' });
+      var syncSlider = UI.slider(-1.5, 1.5, 0.05, c.offset, function (v) { return v === 0 ? 'مظبوط' : (v > 0 ? 'أتأخر ' : 'أقدّم ') + Math.abs(v).toFixed(2) + 's'; }, function (v) { c.offset = v; saveC(); });
+      var syncBtn = UI.btn('اضبط التزامن تلقائي', function () {
+        UI.safe('بيقيس التزامن من الصوت', function () {
+          return S.captionSync({ apply: true }).then(function (r) {
+            if (!r.confident) { syncTxt.textContent = 'مقدرتش أقيس كويس (' + r.matched + ' من ' + r.phrases + ' جملة) — حرّك الشريط بإيدك'; return; }
+            c.offset = r.offset; S.settings.captions.offset = r.offset; saveC();
+            var inp = syncWrap.querySelector('input[type=range]'); if (inp) { inp.value = r.offset; inp.dispatchEvent(new Event('input')); }
+            syncTxt.textContent = r.offset === 0 ? 'الكابشن مظبوط مع الصوت ✓' : 'اتظبط: ' + (r.offset > 0 ? 'أتأخر ' : 'أقدّم ') + Math.abs(r.offset).toFixed(2) + 's (اتقاس على ' + r.matched + ' جملة) ✓ — نزّل الكابشن تاني';
+          });
+        }, syncBtn);
+      }, 'small');
+      var syncWrap = h('div', null, UI.field('تزامن الكابشن', syncSlider), UI.row(syncBtn, syncTxt));
+      view.appendChild(UI.card('كابشن عادي (من غير أنيميشن)', syncWrap,
         UI.hint('"كابشن بريمير" بينزل تراك كابشن عادي جوه بريمير: تعدّل الكلام والخط والمكان من Essential Graphics ومن غير رندر. "ثابت بالشكل" بينزل نفس الكابشن بشكل الاستايل اللي مختاره تحت، من غير حركة.'),
         UI.field('عدد الكلمات', UI.slider(1, 10, 1, c.maxWords, function (v) { return v + ' كلمات'; }, function (v) { c.maxWords = v; saveC(); })),
         UI.field('أقصى مدة', UI.slider(0.5, 6, 0.1, c.maxDuration, function (v) { return v.toFixed(1) + 's'; }, function (v) { c.maxDuration = v; saveC(); })),

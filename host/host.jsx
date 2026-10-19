@@ -98,8 +98,18 @@ EF.clipInfo = function (clip, kind, ti, ci) {
     nodeId: clip.projectItem ? clip.projectItem.nodeId : '',
     selected: clip.isSelected ? !!clip.isSelected() : false,
     disabled: !!clip.disabled,
+    speed: EF.clipSpeed(clip),
     effects: EF.effectNames(clip)
   };
+};
+
+/** playback speed of a clip (1 = 100%; 1.1 = sped up). Premiere returns a ratio; reversed clips are negative. */
+EF.clipSpeed = function (clip) {
+  var v = 1;
+  try { if (clip.getSpeed) v = clip.getSpeed(); } catch (e) {}
+  if (!v || !isFinite(v)) v = 1;
+  try { if (clip.isSpeedReversed && clip.isSpeedReversed()) v = -Math.abs(v); } catch (e2) {}
+  return v;
 };
 
 EF.INTRINSIC = { 'Opacity': 1, 'Motion': 1, 'Volume': 1, 'Channel Volume': 1, 'Panner': 1, 'Time Remapping': 1, 'Vector Motion': 1 };

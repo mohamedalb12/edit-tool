@@ -99,6 +99,8 @@ class TrackItem {
   get inPoint() { return T(this._in); }
   get outPoint() { return T(this._in + this._end - this._start); }
   isSelected() { return this.selected; }
+  getSpeed() { return this.speed || 1; }
+  isSpeedReversed() { return false; }
   remove(ripple) {
     const tr = this.track; const len = this._end - this._start;
     tr.items = tr.items.filter(c => c !== this);

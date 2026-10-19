@@ -26,13 +26,26 @@ function dtwPreset(model) {
   return m ? m[1].replace(/-/g, '.') + (m[2] || '') : null;
 }
 
-function buildWhisperArgs({ model, wav, outBase, dialectId = 'egyptian', threads, accurate = true, dtw = true }) {
+/** the voice-activity model shipped with the extension (Silero VAD, MIT) */
+const VAD_MODEL = path.join(__dirname, '..', 'assets', 'models', 'ggml-silero-v6.2.0.bin');
+
+/**
+ * whisper.cpp arguments.
+ * - accurate: beam search (fewer wrong words)
+ * - vad: only the parts with speech are transcribed (no words "heard" in silence/music, timing pinned to the voice).
+ *   whisper.cpp maps SEGMENT times back to the original audio under VAD, but not token times — so with -ml 1 every
+ *   word is its own segment and we read plain -oj (segment offsets), never token times.
+ * - dtw: token-level alignment; off by default (current whisper-cli disables it under flash attention, and its times
+ *   aren't mapped when VAD is on).
+ */
+function buildWhisperArgs({ model, wav, outBase, dialectId = 'egyptian', threads, accurate = true, dtw = false, vad = true, vadModel = VAD_MODEL }) {
   const d = dialect(dialectId);
   const t = threads || Math.max(2, Math.min(8, os.cpus().length));
   const args = ['-m', model, '-f', wav, '-l', d.lang, '-t', String(t), '--prompt', d.prompt, '-ml', '1', '-sow', '-of', outBase, '-np'];
   if (accurate) args.push('-bs', '5', '-bo', '5'); // beam search: fewer wrong words
-  const preset = dtw && dtwPreset(model);
-  if (preset) args.push('-dtw', preset, '-ojf'); else args.push('-oj');
+  if (vad && vadModel && fs.existsSync(vadModel)) args.push('--vad', '-vm', vadModel, '-vp', '50');
+  const preset = dtw && !vad && dtwPreset(model);
+  if (preset) args.push('-nfa', '-dtw', preset, '-ojf'); else args.push('-oj');
   return args;
 }
 
@@ -90,14 +103,19 @@ function parseWhisperJson(json, offset = 0) {
  * Snap word times to the audio: a word can't start or end inside a silence
  * (whisper often starts a word during the pause before it → captions show up too early).
  */
-function refineWithSilence(words, silences, { minSil = 0.12 } = {}) {
+function refineWithSilence(words, silences, { minSil = 0.12, maxShift = 0.6 } = {}) {
   const sil = (silences || []).filter(s => s.end - s.start >= minSil).sort((a, b) => a.start - b.start);
   if (!sil.length) return words;
+  // if "silence" covers most of the speech, the threshold was wrong (a quiet voice): don't touch anything
+  const total = words.reduce((a, w) => a + (w.end - w.start), 0) || 1;
+  const covered = words.reduce((a, w) => a + sil.reduce((x, s) => x + Math.max(0, Math.min(w.end, s.end) - Math.max(w.start, s.start)), 0), 0);
+  if (covered / total > 0.35) return words;
   const inside = t => sil.find(s => t > s.start + 0.02 && t < s.end - 0.02);
   const out = words.map(w => ({ ...w }));
   for (const w of out) {
-    const a = inside(w.start); if (a && a.end < w.end) w.start = a.end;
-    const b = inside(w.end); if (b && b.start > w.start) w.end = b.start;
+    // small, safe moves only: a word is never pushed far from where whisper heard it
+    const a = inside(w.start); if (a && a.end < w.end - 0.05 && a.end - w.start <= maxShift) w.start = a.end;
+    const b = inside(w.end); if (b && b.start > w.start + 0.05 && w.end - b.start <= maxShift) w.end = b.start;
     if (w.end - w.start < 0.06) w.end = w.start + 0.06;
   }
   for (let i = 1; i < out.length; i++) if (out[i].start < out[i - 1].start) out[i].start = out[i - 1].start;
@@ -126,7 +144,7 @@ function sentences(words, { pause = 0.6, maxWords = 30 } = {}) {
 async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 0, dialectId = 'egyptian', cacheDir, llm, spellModel, onProgress, accurate = true }) {
   requireTool(ffmpeg, 'ffmpeg'); requireTool(whisper, 'whisper.cpp');
   if (!model || !fs.existsSync(model)) throw new Error('موديل Whisper مش موجود. حمّله من الإعدادات (ggml-*.bin).');
-  const key = hash(`${file}|${start}|${duration}|${dialectId}|${model}|v2|${accurate}`);
+  const key = hash(`${file}|${start}|${duration}|${dialectId}|${model}|v4|${accurate}`); // v4: VAD + segment times
   const base = path.join(cacheDir, `tr-${key}`);
   const cached = base + '.words.json';
   if (fs.existsSync(cached)) return JSON.parse(fs.readFileSync(cached, 'utf8'));
@@ -134,14 +152,18 @@ async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 
   const wav = await toWav16k(ffmpeg, file, base + '.wav', { start, duration });
   onProgress && onProgress('بيفرّغ الكلام على جهازك…');
   const onStderr = s => { const m = /progress\s*=\s*(\d+)%/.exec(s); if (m && onProgress) onProgress(`تفريغ ${m[1]}%`); };
+  // newest options first; older whisper.cpp builds that don't know them get a simpler run
   try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate }), { onStderr }); }
-  catch (e) { // older whisper.cpp builds don't know -dtw / beam options → plain run
-    await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate: false, dtw: false }), { onStderr });
+  catch (e) {
+    try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate, vad: false }), { onStderr }); }
+    catch (e2) { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate: false, vad: false }), { onStderr }); }
   }
   let words = parseWhisperJson(fs.readFileSync(base + '.json', 'utf8'), start);
   // align to the actual speech (silences measured on the same audio)
   try {
-    const sil = await require('./silence').detectSilence(ffmpeg, wav, { thresholdDb: -38, minSilence: 0.12 });
+    // the silence threshold follows this recording's own level (a quiet lav mic isn't "silence")
+    const thr = await speechThreshold(ffmpeg, wav);
+    const sil = await require('./silence').detectSilence(ffmpeg, wav, { thresholdDb: thr, minSilence: 0.12 });
     words = refineWithSilence(words, sil.map(x => ({ start: x.start + start, end: x.end + start })));
   } catch (_) {}
   if (dialect(dialectId).lang === 'ar') {
@@ -154,11 +176,25 @@ async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 
   return result;
 }
 
-/** Map source-time words of a clip to timeline time. */
+/** a silence threshold relative to the recording's loudness (mean volume − 16 dB, never above −30 dB) */
+async function speechThreshold(ffmpeg, wav) {
+  try {
+    const { stderr } = await run(ffmpeg, ['-hide_banner', '-nostdin', '-i', wav, '-af', 'volumedetect', '-f', 'null', '-']);
+    const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(stderr));
+    if (m) return Math.min(-30, Math.max(-70, +m[1] - 16));
+  } catch (_) {}
+  return -40;
+}
+
+/** Map source-time words of a clip to timeline time — at the clip's speed (110% → the words come 10% sooner). */
 function wordsToTimeline(words, clip) {
+  const sp = Math.abs(clip.speed || 1) || 1;
   return words
-    .map(w => ({ ...w, start: clip.start + (w.start - clip.inPoint), end: clip.start + (w.end - clip.inPoint) }))
+    .map(w => ({ ...w, start: clip.start + (w.start - clip.inPoint) / sp, end: clip.start + (w.end - clip.inPoint) / sp }))
     .filter(w => w.end > clip.start && w.start < clip.end);
 }
 
-module.exports = { DIALECTS, dialect, dtwPreset, buildWhisperArgs, parseWhisperJson, refineWithSilence, sentences, transcribe, wordsToTimeline };
+/** how much of the source a clip uses (seconds of media), speed included */
+function sourceSpan(clip) { const sp = Math.abs(clip.speed || 1) || 1; return { a: clip.inPoint, b: clip.inPoint + (clip.end - clip.start) * sp }; }
+
+module.exports = { VAD_MODEL, DIALECTS, dialect, dtwPreset, buildWhisperArgs, parseWhisperJson, refineWithSilence, speechThreshold, sourceSpan, sentences, transcribe, wordsToTimeline };
