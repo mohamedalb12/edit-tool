@@ -72,4 +72,36 @@ function findRepeats(words, opts = {}) {
   return { cuts: merged, details: all.sort((a, b) => a.start - b.start), sentences: sents };
 }
 
-module.exports = { similarity, findStutters, findPhraseRepeats, findRetakes, findRepeats };
+/**
+ * Retakes as groups the editor can review: sentences that say the same line again (rule-based similarity), each
+ * group keeps its LAST take (the one that usually came out right). → [{ takes:[sentence idx], keep, reason, by }]
+ */
+function retakeGroups(sents, { threshold = 0.6, lookahead = 3 } = {}) {
+  const groups = [], used = new Set();
+  for (let i = 0; i < sents.length; i++) {
+    if (used.has(i) || tokens(sents[i].text).length < 2) continue;
+    const takes = [i];
+    let last = i;
+    for (let j = i + 1; j < sents.length && j <= last + lookahead; j++) {
+      if (!used.has(j) && similarity(sents[i].text, sents[j].text) >= threshold) { takes.push(j); last = j; }
+    }
+    if (takes.length > 1) { takes.forEach(t => used.add(t)); groups.push({ takes, keep: takes[takes.length - 1], reason: 'نفس الجملة اتقالت ' + takes.length + ' مرات', by: 'rules' }); }
+  }
+  return groups;
+}
+
+/**
+ * What to cut for a group: every take but the kept one, from its start to where the next sentence begins (the take
+ * and its pause go together). A dropped take right before the kept one also takes the false start between them.
+ */
+function groupCuts(group, sents) {
+  const out = [];
+  for (const i of group.takes) {
+    if (i === group.keep || !sents[i]) continue;
+    const next = sents[i + 1];
+    out.push({ start: sents[i].start, end: next ? next.start : sents[i].end, reason: 'إعادة: ' + sents[i].text.slice(0, 50) });
+  }
+  return ranges.merge(out);
+}
+
+module.exports = { similarity, findStutters, findPhraseRepeats, findRetakes, findRepeats, retakeGroups, groupCuts };

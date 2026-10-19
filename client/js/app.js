@@ -18,7 +18,7 @@
     { id: 'library', label: 'مكتبتي', title: 'مكتبتي', members: ['library'] },
     { id: 'download', label: 'ميديا', title: 'الميديا', members: ['download', 'broll', 'websearch', 'sfx'], names: { download: 'تحميل', broll: 'B-Roll', websearch: 'بحث النت', sfx: 'مؤثرات صوتية' } },
     { id: 'revisions', label: 'التعديلات', title: 'تعديلات العميل', members: ['revisions'] },
-    { id: 'relink', label: 'الملفات', title: 'ربط الملفات الناقصة', members: ['relink'] },
+    { id: 'relink', label: 'الملفات', title: 'الملفات والمشروع', members: ['relink', 'organize'], names: { relink: 'ربط الناقص', organize: 'تنظيم المشروع' } },
     { id: 'settings', label: 'الإعدادات', title: 'الإعداد والفحص', members: ['settings'] }
   ];
   function groupOf(id) {

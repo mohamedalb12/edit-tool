@@ -63,9 +63,9 @@ test('boots: 12 tools in the sidebar (each groups related screens), RTL Arabic, 
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
   assert.deepEqual(ids, ['agent', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
   assert.equal(await page.locator('#nav button svg').count(), 12);
-  // every screen still exists inside some tool, except the removed "organize"
+  // every screen lives inside some tool ("organize" is back, next to relink)
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
-  assert.equal(members.length, 27); assert.ok(!members.includes('organize'));
+  assert.equal(members.length, 28); assert.ok(members.includes('organize'));
   assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
@@ -327,7 +327,7 @@ test('الإعدادات: keys (with a Key-ID check), a model picker for every A
   await open('settings'); await clearCalls();
   const labels = await page.$$eval('#view label', hs => hs.map(h => h.textContent));
   for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll', 'اختيار الهوك (المونتاج التلقائي)', 'أقوى مقاطع الشورتس', 'عناوين الثامبنيل', 'ترجمة الكابشن', 'تعديلات العميل']) assert.ok(labels.includes(f), f);
-  assert.equal(await page.locator('#view .mp-input').count(), 14, 'general default + 13 features');
+  assert.equal(await page.locator('#view .mp-input').count(), 15, 'general default + 14 features');
   await clickText('حدّث قائمة الموديلات');
   assert.equal(await page.evaluate(() => EF.modelList.length), 2);
   await clickText('اختبر كل الموديلات');
@@ -1132,6 +1132,37 @@ test('زووم تلقائي + كل المقاسات: settings reach the services
   assert.deepEqual(f.formats, ['16:9', '4:5', '9:16', '1:1']); assert.equal(f.useInOut, true);
   await page.waitForSelector('.card .item');
   assert.match(await page.textContent('#view'), /Main - مقاطع 4:5/);
+});
+
+test('الإعادات: groups with takes to hear, change the kept take, untick a group, cut', async () => {
+  await open('quickcut'); await clearCalls();
+  await clickText('دوّر على الإعادات');
+  await page.waitForSelector('.retake');
+  assert.equal(await page.locator('.retake').count(), 2);
+  assert.match(await page.locator('.retake').first().locator('.take.keep').textContent(), /تيك 2/);
+  await page.locator('.retake').first().locator('.take').first().locator('input[type=radio]').check();
+  assert.match(await page.locator('.retake').first().locator('.take.keep').textContent(), /تيك 1/);
+  await page.locator('.retake').nth(1).locator('input[type=checkbox]').uncheck();
+  await clickText('اقطع الإعادات');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'cutRetakes').args);
+  assert.deepEqual(a.keep, { 0: 0 }); assert.deepEqual(a.skip, [1]);
+});
+
+test('تنظيم المشروع is back under الملفات; copy / paste effects in الحركة', async () => {
+  await open('organize'); await clearCalls();
+  assert.match(await page.textContent('#tab-title'), /الملفات والمشروع/);
+  await clickText('امسح المشروع');
+  await page.waitForSelector('#view h3');
+  await clickText('نفّذ الخطة');
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'organizeApply')));
+  await open('motion'); await clearCalls();
+  await clickText('انسخ من الكليب المختار');
+  await page.waitForFunction(() => /منسوخ من/.test(document.getElementById('view').textContent));
+  await page.locator('.card', { hasText: 'انسخ والصق' }).locator('label', { hasText: 'Gaussian Blur' }).locator('input').uncheck();
+  await page.locator('.card', { hasText: 'انسخ والصق' }).locator('label', { hasText: 'مطّ' }).locator('input').uncheck();
+  await clickText('الصق على المختار');
+  const a = await page.evaluate(() => window.__calls.find(x => x.name === 'pasteAttrs').args);
+  assert.deepEqual(a, { stretch: false, only: ['Transform'] });
 });
 
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

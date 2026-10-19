@@ -197,7 +197,7 @@ class Services {
     let before = null;
     if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
     const r = await this.hostRaw(name, args);
-    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك', applyEffect: 'إفكت' };
+    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك', applyEffect: 'إفكت', pasteClipAttrs: 'لصق إفكتات' };
     if (!LABELS[name]) return r;
     const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
     if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
@@ -785,6 +785,61 @@ class Services {
     return { ...out, found: r.details.length };
   }
 
+  /**
+   * Retakes, like Phantom's AI repeat removal: lines said again (and abandoned false starts) grouped with the best
+   * take chosen. With an OpenRouter key the AI reads the whole transcript (it understands a line said differently the
+   * second time); without one, the similarity rules. → { groups:[{takes:[{i,start,end,text}], keep, reason, by}], sentences }
+   */
+  async findRetakes({ ai = true } = {}) {
+    const R = require('./repeats');
+    const t = await this.ensureTranscript();
+    const sents = transcribeMod.sentences(t.words);
+    if (!sents.length) throw new Error('مفيش كلام اتفرّغ');
+    let groups = R.retakeGroups(sents);
+    let usedAi = false;
+    if (ai && this.settings.keys.openrouter) {
+      const found = [];
+      // chunks of ~160 lines with a little overlap so a retake across the border is still seen
+      for (let a = 0; a < sents.length; a += 150) {
+        const part = sents.slice(a, a + 160);
+        const res = await this.llm.json({ model: this.model('retakes'), maxTokens: 3000,
+          system: 'أنت مونتير محترف. قدامك تفريغ فيديو كلام، كل سطر جملة برقم. لاقي "الإعادات": جملة أو فكرة المتكلم قالها وبعدين عادها (حتى لو بكلام مختلف شوية)، أو بداية جملة سابها وبدأ من الأول. لكل مجموعة اختار أحسن تيك (غالبًا آخر واحد كامل ومن غير تلعثم). ماتعتبرش التكرار المقصود (تأكيد أو ملخص) إعادة. رجّع JSON: {"groups":[{"takes":[أرقام الجمل],"keep":رقم,"reason":"ليه بالمصري في جملة قصيرة"}]}',
+          user: part.map((x, k) => `${a + k}: [${x.start.toFixed(1)}] ${x.text}`).join('\n') });
+        for (const g of (res && res.groups) || []) {
+          const takes = Array.from(new Set((g.takes || []).map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < sents.length))).sort((x, y) => x - y);
+          const keep = Number(g.keep);
+          if (takes.length < 2 || !takes.includes(keep)) continue;
+          found.push({ takes, keep, reason: String(g.reason || 'إعادة').slice(0, 120), by: 'ai' });
+        }
+      }
+      usedAi = true;
+      // the AI's groups win; rule groups that don't overlap any of them are kept too
+      const inAi = new Set(found.flatMap(g => g.takes));
+      groups = found.concat(groups.filter(g => !g.takes.some(i => inAi.has(i))));
+      // the same group from two overlapping chunks: once
+      const seen = new Set(); groups = groups.filter(g => { const k = g.takes.join(','); if (seen.has(k)) return false; seen.add(k); return true; });
+    }
+    groups.sort((x, y) => x.takes[0] - y.takes[0]);
+    const out = groups.map(g => ({ ...g, takes: g.takes.map(i => ({ i, start: +sents[i].start.toFixed(2), end: +sents[i].end.toFixed(2), text: sents[i].text })), cuts: R.groupCuts(g, sents) }));
+    this._retakes = { sents, groups: out };
+    return { groups: out, sentences: sents.length, ai: usedAi };
+  }
+  /** cut the retakes (each group keeps the take given in keep[group index], or the suggested one) — on a copy */
+  async cutRetakes({ keep = {}, skip = [], mode, onProgress } = {}) {
+    const R = require('./repeats');
+    if (!this._retakes) throw new Error('دوّر على الإعادات الأول');
+    const { sents, groups } = this._retakes, all = [];
+    groups.forEach((g, gi) => {
+      if (skip.includes(gi)) return;
+      const k = keep[gi] !== undefined ? +keep[gi] : g.keep;
+      all.push(...R.groupCuts({ takes: g.takes.map(x => x.i), keep: k }, sents));
+    });
+    if (!all.length) return { removed: 0, message: 'مفيش إعادات متعلّمة' };
+    const r = await this.cutRanges({ ranges: require('./ranges').merge(all), mode, onProgress });
+    this._retakes = null;
+    return r;
+  }
+
   async makeHook({ start, end, title }) {
     if (!(end > start)) throw new Error('حدد بداية ونهاية الهوك');
     const s = await this.seq();
@@ -1320,6 +1375,21 @@ ${JSON.stringify(lite)}
       }
     });
     return { zooms: done, phrases: all.length, style, mode };
+  }
+
+  /* ---------- نسخ ولصق الإفكتات والكي فريمز ---------- */
+  /** copy every effect value and keyframe of the selected clip (kept until the next copy) */
+  async copyAttrs() {
+    const snap = await this.hostRaw('copyClipAttrs', {});
+    if (!snap.comps.length) throw new Error('الكليب ده مفيهوش إفكتات أو قيم تتنسخ');
+    this._clip = snap;
+    return { clip: snap.clip, duration: snap.duration, comps: snap.comps.map(c => ({ name: c.name, props: c.props.length, animated: c.props.filter(p => p.keys).length })) };
+  }
+  clipboardInfo() { const s = this._clip; return s ? { clip: s.clip, comps: s.comps.map(c => c.name) } : null; }
+  /** paste on the selected clips: keyframes stretched to each clip's length (stretch) or kept in seconds */
+  async pasteAttrs({ stretch = true, only } = {}) {
+    if (!this._clip) throw new Error('انسخ من كليب الأول');
+    return this.op('لصق إفكتات', () => this.host('pasteClipAttrs', { snap: this._clip, stretch, only }));
   }
 
   /* ---------- مربع الأوامر: إفكتات بريمير بالاسم ---------- */

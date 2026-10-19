@@ -598,3 +598,8 @@ input::placeholder, textarea::placeholder { color: rgba(255,255,255,.38); }
 .pal-item.on { background: rgba(167, 139, 250, .18); }
 .pal-ic { width: 20px; text-align: center; opacity: .85; }
 .pal-hint, .pal-empty { font-size: 11px; opacity: .65; padding: 8px 12px; }
+.retake { border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; margin: 6px 0; }
+.retake.off { opacity: .45; }
+.retake .take { display: flex; gap: 6px; align-items: center; }
+.retake .take.keep { background: rgba(52, 211, 153, .1); border-radius: 8px; }
+.retake .take:not(.keep) bdi { text-decoration: line-through; opacity: .75; }

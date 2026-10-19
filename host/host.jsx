@@ -673,6 +673,100 @@ EFAPI.readKeyframes = function (a) {
   return { clip: clip.name, start: EF.sec(clip.start), end: EF.sec(clip.end), props: out };
 };
 
+/* ---------------- copy / paste effects + keyframes (Dopple-style) ---------------- */
+EF.plainValue = function (v) {
+  var i;
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') return v;
+  if (v.length !== undefined && typeof v !== 'function') { var out = []; for (i = 0; i < v.length; i++) { if (typeof v[i] !== 'number') return null; out.push(v[i]); } return out; }
+  return null;
+};
+/** Everything on the selected clip: each effect's values and keyframes (relative to the clip's length). */
+EFAPI.copyClipAttrs = function (a) {
+  var seq = EF.seq(), clip = EF.selectedClip(seq), i, j, k, comp, p, v, keys, list, pr, comps = [];
+  if (!clip) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0627\u0644\u0643\u0644\u064a\u0628 \u0627\u0644\u0644\u064a \u0647\u062a\u0646\u0633\u062e \u0645\u0646\u0647');
+  var ins = EF.sec(clip.inPoint), dur = EF.sec(clip.end) - EF.sec(clip.start);
+  for (i = 0; i < clip.components.numItems; i++) {
+    comp = clip.components[i]; pr = [];
+    for (j = 0; j < comp.properties.numItems; j++) {
+      p = comp.properties[j];
+      try {
+        if (p.isTimeVarying()) {
+          keys = p.getKeys() || []; list = [];
+          for (k = 0; k < keys.length; k++) { v = EF.plainValue(p.getValueAtKey(keys[k])); if (v !== null) list.push({ s: EF.sec(keys[k]) - ins, r: dur > 0 ? (EF.sec(keys[k]) - ins) / dur : 0, v: v }); }
+          if (list.length) pr.push({ name: p.displayName, i: j, keys: list });
+        } else {
+          v = EF.plainValue(p.getValue());
+          if (v !== null) pr.push({ name: p.displayName, i: j, value: v });
+        }
+      } catch (e) {}
+    }
+    comps.push({ name: comp.displayName, match: comp.matchName, props: pr }); // even with no copyable value: the effect itself gets added
+  }
+  return { clip: clip.name, duration: dur, nodeId: clip.nodeId, start: EF.sec(clip.start), comps: comps };
+};
+/**
+ * Paste a copied snapshot on every selected video clip (not the one it came from). Effects the clip doesn't have
+ * are added by name; keyframes are stretched to each clip's length (stretch) or kept at their seconds.
+ * a: { snap, stretch, only: [component names] }
+ */
+EFAPI.pasteClipAttrs = function (a) {
+  var seq = EF.seq(), sel = [], i, j, k, c, ci, sc, comp, sp, p, kt, n = 0, clips = 0, where, it, fx, list = [];
+  try { var s0 = seq.getSelection(); for (i = 0; i < s0.length; i++) if (s0[i] && s0[i].mediaType !== 'Audio') sel.push(s0[i]); } catch (e) {}
+  if (!sel.length) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0627\u0644\u0643\u0644\u064a\u0628\u0627\u062a \u0627\u0644\u0644\u064a \u0647\u062a\u0644\u0635\u0642 \u0639\u0644\u064a\u0647\u0627');
+  var only = {}, hasOnly = a.only && a.only.length;
+  if (hasOnly) for (i = 0; i < a.only.length; i++) only[a.only[i]] = 1;
+  function findComp(clip, sc) {
+    var q;
+    for (q = 0; q < clip.components.numItems; q++) if (clip.components[q].matchName === sc.match) return clip.components[q];
+    for (q = 0; q < clip.components.numItems; q++) if (clip.components[q].displayName === sc.name) return clip.components[q];
+    return null;
+  }
+  function findProp(comp, sp) {
+    if (sp.i < comp.properties.numItems && comp.properties[sp.i].displayName === sp.name) return comp.properties[sp.i];
+    for (var q = 0; q < comp.properties.numItems; q++) if (comp.properties[q].displayName === sp.name) return comp.properties[q];
+    return null;
+  }
+  for (ci = 0; ci < sel.length; ci++) {
+    c = sel[ci];
+    if (c.nodeId === a.snap.nodeId && Math.abs(EF.sec(c.start) - a.snap.start) < 0.001) continue;
+    var ins = EF.sec(c.inPoint), dur = EF.sec(c.end) - EF.sec(c.start), wrote = 0;
+    for (j = 0; j < a.snap.comps.length; j++) {
+      sc = a.snap.comps[j];
+      if (hasOnly && !only[sc.name]) continue;
+      comp = findComp(c, sc);
+      if (!comp) {
+        where = EF.trackOfClip(seq, c);
+        try { fx = qe.project.getVideoEffectByName(sc.name); it = where ? EF.qeItem('video', where.index, c) : null; if (fx && it) it.addVideoEffect(fx); } catch (e2) {}
+        comp = findComp(c, sc);
+      }
+      if (!comp) { list.push(sc.name); continue; }
+      for (k = 0; k < sc.props.length; k++) {
+        sp = sc.props[k]; p = findProp(comp, sp);
+        if (!p) continue;
+        try {
+          if (sp.keys) {
+            if (p.isTimeVarying()) p.setTimeVarying(false, true); // replaces the clip's own animation of that property
+            p.setTimeVarying(true, true);
+            for (var q2 = 0; q2 < sp.keys.length; q2++) {
+              kt = ins + (a.stretch ? sp.keys[q2].r * dur : Math.min(sp.keys[q2].s, dur));
+              p.addKey(kt);
+              p.setValueAtKey(kt, sp.keys[q2].v, q2 === sp.keys.length - 1);
+            }
+          } else {
+            if (p.isTimeVarying()) p.setTimeVarying(false, true);
+            p.setValue(sp.value, true);
+          }
+          wrote++; n++;
+        } catch (e3) {}
+      }
+    }
+    if (wrote) clips++;
+  }
+  if (!clips) throw new Error('\u0645\u0627\u0641\u064a\u0634 \u0643\u0644\u064a\u0628 \u0627\u062a\u0644\u0635\u0642 \u0639\u0644\u064a\u0647 \u2014 \u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628\u0627\u062a \u063a\u064a\u0631 \u0627\u0644\u0644\u064a \u0646\u0633\u062e\u062a \u0645\u0646\u0647');
+  return { clips: clips, props: n, missing: list };
+};
+
 /** Replace keys of one property in [from,to] with a new dense list (baked curve). Times in timeline seconds. */
 EFAPI.writeKeyframes = function (a) {
   var seq = EF.seq(), clip = EF.selectedClip(seq);

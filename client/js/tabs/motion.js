@@ -67,6 +67,33 @@
         UI.field('قوة الزووم', UI.slider(105, 140, 1, az.scale, function (v) { return v + '%'; }, function (v) { az.scale = v; azSave(); })),
         UI.field('تراك الفيديو', UI.slider(1, 6, 1, az.track + 1, function (v) { return 'V' + v; }, function (v) { az.track = v - 1; azSave(); })),
         azProg, UI.row(azGo, azMark, azTxt)));
+      // ——— انسخ والصق الإفكتات والكي فريمز (بيتمطّوا على طول الكليب) ———
+      var cp = { stretch: true, only: null }, cpInfo = h('div'), cpBox = h('div', { class: 'chips' });
+      function drawCp(info) {
+        UI.empty(cpInfo); UI.empty(cpBox);
+        if (!info) { cpInfo.appendChild(UI.hint('اختار كليب في التايملين ودوس "انسخ".')); return; }
+        cpInfo.appendChild(h('div', { class: 'hint' }, 'منسوخ من: ', h('bdi', null, info.clip)));
+        cp.only = info.comps.map(function (c) { return c.name; });
+        info.comps.forEach(function (c) {
+          cpBox.appendChild(h('label', { class: 'chip' }, h('input', { type: 'checkbox', checked: true, onchange: function (e) {
+            cp.only = cp.only.filter(function (x) { return x !== c.name; }); if (e.target.checked) cp.only.push(c.name);
+          } }), ' ' + c.name + (c.animated ? ' 🎞' : '')));
+        });
+      }
+      var cpCopy = UI.btn('انسخ من الكليب المختار', function () {
+        UI.safe('بينسخ', function () { return S.copyAttrs().then(function (r) { drawCp(r); UI.toast('اتنسخ ' + r.comps.length + ' إفكت ✓ — اختار الكليبات ودوس الصق'); }); }, cpCopy);
+      }, 'small');
+      var cpPaste = UI.btn('الصق على المختار', function () {
+        UI.safe('بيلصق', function () {
+          return S.pasteAttrs({ stretch: cp.stretch, only: cp.only }).then(function (r) { UI.toast('اتلصق على ' + r.clips + ' كليب ✓' + (r.missing && r.missing.length ? ' — مالقاش: ' + r.missing.join('، ') : '')); });
+        }, cpPaste);
+      }, 'primary');
+      view.appendChild(UI.card('انسخ والصق الإفكتات',
+        UI.hint('بينسخ كل إفكتات الكليب وقيمها والكي فريمز، ويلصقهم على كل الكليبات اللي تختارها مرة واحدة. الإفكت اللي مش موجود على الكليب بيتضاف لوحده.'),
+        cpInfo, cpBox,
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: cp.stretch, onchange: function (e) { cp.stretch = e.target.checked; } }), ' مطّ الكي فريمز على طول كل كليب')),
+        UI.row(cpCopy, cpPaste)));
+      drawCp(S.clipboardInfo ? (function () { var x = S.clipboardInfo(); return x ? { clip: x.clip, comps: x.comps.map(function (n) { return { name: n }; }) } : null; })() : null);
       view.appendChild(grids);
       draw();
     }

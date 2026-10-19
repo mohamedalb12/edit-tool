@@ -102,6 +102,47 @@
       }, 'primary');
       view.appendChild(UI.card('كلمات الحشو (اممم، آآآ…)', UI.hint('بيلاقي أصوات التردد من التفريغ ويشيلها بنفس طريقة القص (على نسخة، والمزيكا ماتتقصّش). علّم كلمات زي "يعني" لو بتقولها كتير كحشو.'),
         optBox, UI.row(fFind, fCut), fRes));
+      // ——— الإعادات: نفس الجملة اتقالت كذا مرة → يسيب أحسن تيك ———
+      var rRes = h('div'), rLast = null, rKeep = {}, rSkip = {}, rProg = UI.progress();
+      function drawRetakes() {
+        UI.empty(rRes);
+        if (!rLast) return;
+        if (!rLast.groups.length) { rRes.appendChild(UI.hint('مفيش إعادات ✓')); return; }
+        rRes.appendChild(h('div', { class: 'hint' }, rLast.groups.length + ' مجموعة إعادة' + (rLast.ai ? ' (الذكاء الاصطناعي قرا الكلام كله)' : ' (بالقواعد — ضيف مفتاح OpenRouter عشان يفهم الإعادة حتى لو بكلام مختلف)') + ' · اختار التيك اللي يفضل'));
+        rLast.groups.forEach(function (g, gi) {
+          var card = h('div', { class: 'retake' + (rSkip[gi] ? ' off' : '') });
+          card.appendChild(h('div', { class: 'row' },
+            h('input', { type: 'checkbox', checked: !rSkip[gi], title: 'شيل العلامة لو عايز تسيب المجموعة دي زي ما هي', onchange: function (e) { rSkip[gi] = !e.target.checked; card.classList.toggle('off', !!rSkip[gi]); } }),
+            h('b', { class: 'grow' }, g.reason), h('span', { class: 'chip' + (g.by === 'ai' ? ' ok' : '') }, g.by === 'ai' ? 'AI' : 'قواعد')));
+          g.takes.forEach(function (tk, n) {
+            var keep = (rKeep[gi] !== undefined ? rKeep[gi] : g.keep) === tk.i;
+            card.appendChild(h('label', { class: 'item take' + (keep ? ' keep' : '') },
+              h('input', { type: 'radio', name: 'rt-' + gi, checked: keep, onchange: function () { rKeep[gi] = tk.i; drawRetakes(); } }),
+              h('span', { class: 't' }, UI.fmtTime(tk.start)), h('bdi', { class: 'grow' }, 'تيك ' + (n + 1) + ': ' + tk.text),
+              UI.btn('▶', function (e) { e.preventDefault(); S.setPlayhead(tk.start).catch(function () {}); }, 'small')));
+          });
+          rRes.appendChild(card);
+        });
+      }
+      var rFind = UI.btn('دوّر على الإعادات', function () {
+        UI.safe('بيدوّر على الإعادات', function () {
+          return S.findRetakes({}).then(function (r) { rLast = r; rKeep = {}; rSkip = {}; drawRetakes(); });
+        }, rFind);
+      });
+      var rCut = UI.btn('اقطع الإعادات', function () {
+        if (!rLast) return UI.toast('دوّر الأول', true);
+        var skip = Object.keys(rSkip).filter(function (k) { return rSkip[k]; }).map(Number);
+        rProg.set(0);
+        UI.safe('بيقص الإعادات', function () {
+          return S.cutRetakes({ keep: rKeep, skip: skip, mode: q.mode, onProgress: function (p) { rProg.set(p); } }).then(function (r) {
+            rProg.set(1);
+            UI.toast(q.mode === 'markers' ? (r.markers || 0) + ' ماركر ✓' : 'اتشالت الإعادات ✓ — على نسخة: ' + (r.sequence || '')); rLast = null; drawRetakes();
+          });
+        }, rCut);
+      }, 'primary');
+      view.appendChild(UI.card('الإعادات (أحسن تيك)',
+        UI.hint('لو قلت الجملة مرتين أو بدأتها وسبتها: بيجمّع التيكات ويختار أحسن واحد (غالبًا الأخير الكامل). تقدر تسمع كل تيك وتغيّر اختيارك قبل القص. القص على نسخة، وبنفس طريقة القص (ماركرز لو مختار "ماركرز بس").'),
+        UI.modelPicker('retakes'), UI.row(rFind, rCut), rProg, rRes));
       updParams();
     }
   });

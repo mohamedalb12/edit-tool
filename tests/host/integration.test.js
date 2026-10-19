@@ -680,3 +680,39 @@ test('auto zoom from the voice: the emphatic (louder) phrases get a zoom, the fi
   const z = Z.pick([{ start: 0, end: 1, loud: 20 }, { start: 2, end: 3, loud: 10 }, { start: 3.5, end: 4, loud: 9 }, { start: 9, end: 10, loud: 5 }], { density: 1, minGap: 3 });
   assert.deepEqual(z.map(x => x.start), [2, 9]);
 });
+
+test('retakes: AI groups lines said again (even reworded) and keeps the best take; rules without a key; cut on a copy keeps the chosen take', async () => {
+  const f = makeAudio('retakes.wav', [{ tone: 230, dur: 20 }]);
+  // 5 sentences, 1 s pause between: 0 and 1 are the same line reworded, 3 is a near-identical retake of 2
+  const lines = ['انا النهارده هكلمكم عن المونتاج', 'النهارده بقى هتكلم معاكم عن المونتاج السريع', 'اول حاجة افتح البرنامج', 'اول حاجة افتح البرنامج بتاعك', 'وبعدين حط الفيديو'];
+  const words = []; let t = 0.5;
+  lines.forEach(l => { l.split(' ').forEach(w => { words.push({ text: w, start: t, end: t + 0.3 }); t += 0.35; }); t += 1; });
+  const asked = [];
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body); asked.push(body.model);
+    return mockResponse({ choices: [{ message: { content: JSON.stringify({ groups: [{ takes: [0, 1], keep: 1, reason: 'نفس المقدمة بصياغة تانية' }, { takes: [2, 3], keep: 3, reason: 'اتعادت' }, { takes: [4], keep: 4 }, { takes: [1, 99], keep: 99 }] }) } }] });
+  };
+  const { S, seq } = world({ clipFile: f, clipLen: 20, fetchImpl });
+  S.transcript = { seqId: (await S.seq()).id, words, dialect: 'egyptian' };
+  const r = await S.findRetakes();
+  assert.equal(r.ai, true); assert.equal(asked.length, 1);
+  assert.deepEqual(r.groups.map(g => g.takes.map(x => x.i)), [[0, 1], [2, 3]], 'bad / single groups dropped');
+  assert.deepEqual(r.groups.map(g => g.keep), [1, 3]);
+  // the editor prefers the FIRST take of the second group
+  const sn = require('../../core/transcribe').sentences(words);
+  const out = await S.cutRetakes({ keep: { 1: 2 } });
+  const expect = (sn[1].start - sn[0].start) + (sn[4].start - sn[3].start);
+  assert.ok(Math.abs(out.removedSeconds - expect) < 0.15, `${out.removedSeconds} vs ${expect}`);
+  assert.equal(seq.v[0].items.length, 1, 'the original sequence is untouched (cut on a copy)');
+  // without a key: the similarity rules still catch the near-identical retake
+  const W2 = world({ clipFile: f, clipLen: 20, settings: { keys: { openrouter: '' } } });
+  W2.S.transcript = { seqId: (await W2.S.seq()).id, words, dialect: 'egyptian' };
+  const r2 = await W2.S.findRetakes();
+  assert.equal(r2.ai, false);
+  assert.deepEqual(r2.groups.map(g => g.takes.map(x => x.i)), [[2, 3]]);
+  assert.equal(r2.groups[0].keep, 3);
+  const R = require('../../core/repeats');
+  const sents = require('../../core/transcribe').sentences(words);
+  const c1 = R.groupCuts({ takes: [2, 3], keep: 2 }, sents);
+  assert.equal(c1.length, 1); assert.equal(c1[0].start, sents[3].start); assert.equal(c1[0].end, sents[4].start, 'the dropped take + its pause');
+});

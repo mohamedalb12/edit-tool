@@ -218,7 +218,7 @@ function createPremiere() {
           getItemAt(i) {
             const c = tr.clips[i]; if (!c) return null;
             return { type: 'Clip', name: c.name, start: { secs: c._start },
-              addVideoEffect(fx) { if (fx === transformFx) c.comps.push(transformComponent()); else c.comps.push(new Component(fx.name, 'AE.ADBE ' + fx.name, [])); qeLog.push(['fx', fx.name, c.name]); },
+              addVideoEffect(fx) { if (fx === transformFx) c.comps.push(transformComponent()); else c.comps.push(new Component(fx.name, 'AE.ADBE ' + fx.name, [new Property('Blurriness', 0)])); qeLog.push(['fx', fx.name, c.name]); },
               addAudioEffect(fx) { qeLog.push(['afx', fx.name, c.name, tr.index]); },
               addTransition(t, toStart, dur) { qeLog.push(['transition', t.name, tr.index, c._start, dur]); } };
           }

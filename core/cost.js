@@ -28,7 +28,8 @@ const PROFILES = {
   shorts: { in: 8000, out: 1500, perMin: true, what: 'أقوى مقاطع شورتس' },
   thumbnail: { in: 9000, out: 700, what: 'أفكار الثامبنيل (بيشوف صور)' },
   translate: { in: 4500, out: 4500, perMin: true, what: 'ترجمة الكابشن' },
-  revisions: { in: 1500, out: 1200, what: 'تقسيم التعديلات + رسالة العميل' }
+  revisions: { in: 1500, out: 1200, what: 'تقسيم التعديلات + رسالة العميل' },
+  retakes: { in: 8000, out: 1500, perMin: true, what: 'الإعادات وأحسن تيك للفيديو كله' }
 };
 
 /** price {in,out,cached?} per 1M tokens for a model: OpenRouter's list first, then the known table */

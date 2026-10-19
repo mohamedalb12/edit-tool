@@ -279,3 +279,35 @@ test('command palette: Premiere effect lists, effect / transition / audio effect
   assert.throws(() => call('applyEffect', { name: 'Nope FX', kind: 'video' }), /Nope FX/);
   assert.throws(() => call('applyEffect', { name: 'DeNoise', kind: 'audio' }), /صوت|\\u/);
 });
+
+test('copy / paste effects + keyframes: values and animation land on other clips, stretched to their length; missing effects are added', () => {
+  const h = setup({ withBroll: false }), { call, seq } = h;
+  const media = h.pr.project.importOne('/media/b.mp4', h.pr.project.root);
+  seq.v[0].add({ projectItem: media, start: 12, end: 17, inPoint: 1 }); // 5 s long
+  seq.v[0].add({ projectItem: media, start: 20, end: 30, inPoint: 0 }); // 10 s long
+  // source: 10 s clip at 0 (inPoint 2) with a blur and a scale animation 100 → 130 over its length
+  seq.player = 1;
+  call('applyKeyframes', { mode: 'in', duration: 10, props: { scale: [{ t: 0, v: 100 }, { t: 10, v: 130 }] }, track: 0, time: 0 });
+  const src = seq.v[0].items[0]; src.selected = true;
+  call('applyEffect', { name: 'Gaussian Blur', kind: 'video' });
+  src.comps.find(c => c.displayName === 'Opacity') ? src.comps.find(c => c.displayName === 'Opacity').props[0].value = 60 : null;
+  const snap = call('copyClipAttrs', {});
+  assert.ok(snap.comps.some(c => c.name === 'Transform' && c.props.some(p => p.keys && p.keys.length === 2)));
+  assert.ok(snap.comps.some(c => c.name === 'Gaussian Blur'));
+  // paste on the two others (the source stays selected too: it's skipped)
+  seq.v[0].items[1].selected = true; seq.v[0].items[2].selected = true;
+  const r = call('pasteClipAttrs', { snap, stretch: true });
+  assert.equal(r.clips, 2);
+  const tfOf = c => c.comps.find(x => x.matchName === 'AE.ADBE Geometry2');
+  const short = seq.v[0].items[1], long = seq.v[0].items[2];
+  const sk = tfOf(short).props.find(p => p.displayName === 'Scale').keys;
+  assert.deepEqual(sk.map(k => [+k.t.toFixed(3), k.v]), [[1, 100], [6, 130]], 'stretched over the 5 s clip (media time from its In)');
+  assert.ok(short.comps.some(c => c.displayName === 'Gaussian Blur'), 'missing effect added');
+  const lk = tfOf(long).props.find(p => p.displayName === 'Scale').keys;
+  assert.deepEqual(lk.map(k => [+k.t.toFixed(3), k.v]), [[0, 100], [10, 130]]);
+  // seconds mode + only some effects
+  seq.v[0].items[2].selected = false;
+  const r2 = call('pasteClipAttrs', { snap, stretch: false, only: ['Transform'] });
+  assert.equal(r2.clips, 1);
+  assert.deepEqual(tfOf(short).props.find(p => p.displayName === 'Scale').keys.map(k => +k.t.toFixed(3)), [1, 6], 'kept in seconds, clipped to the clip');
+});
