@@ -1,36 +1,67 @@
 'use strict';
-// المونتير الذكي في أفتر: "وصف المشهد" اللي الـ AI بيكتبه (ليرز + كي فريمز + إفكتات + منحنيات) — بيتراجع هنا
-// ويتحوّل لحاجة الأفتر يبنيها ليرز عادية تتعدّل. الـ AI عمره ما بيكتب كود بيتشغّل في الأفتر.
+// المونتير الذكي في أفتر: "وصف المشهد" اللي الـ AI بيكتبه (ليرز + كي فريمز + إفكتات + منحنيات + مسارات + ماسكات + بري كومب)
+// — بيتراجع هنا ويتحوّل لحاجة الأفتر يبنيها ليرز عادية تتعدّل. الـ AI عمره ما بيكتب كود بيتشغّل في الأفتر.
 const curves = require('./curves');
+const svg = require('./svgPath');
 
-/** effects the AI may use: friendly name → AE matchName + parameters (matchName of each param) */
+/**
+ * Effects the AI may use by a friendly name: AE matchName + its parameters (a param is a matchName, or the English
+ * display name the host finds by walking the effect). Any other installed effect works raw: {"match": "...", "params": {"Display Name": v}}.
+ */
 const EFFECTS = {
   blur: { match: 'ADBE Gaussian Blur 2', params: { amount: 'ADBE Gaussian Blur 2-0001' } },
   glow: { match: 'ADBE Glo2', params: { threshold: 'ADBE Glo2-0002', radius: 'ADBE Glo2-0003', intensity: 'ADBE Glo2-0004' } },
   shadow: { match: 'ADBE Drop Shadow', params: { color: 'ADBE Drop Shadow-0001', opacity: 'ADBE Drop Shadow-0002', direction: 'ADBE Drop Shadow-0003', distance: 'ADBE Drop Shadow-0004', softness: 'ADBE Drop Shadow-0005' } },
   fill: { match: 'ADBE Fill', params: { color: 'ADBE Fill-0002' } },
-  gradient: { match: 'ADBE Ramp', params: { start: 'ADBE Ramp-0001', startColor: 'ADBE Ramp-0002', end: 'ADBE Ramp-0003', endColor: 'ADBE Ramp-0004' } },
+  gradient: { match: 'ADBE Ramp', params: { start: 'ADBE Ramp-0001', startColor: 'ADBE Ramp-0002', end: 'ADBE Ramp-0003', endColor: 'ADBE Ramp-0004', shape: 'ADBE Ramp-0005' } },
   tint: { match: 'ADBE Tint', params: { black: 'ADBE Tint-0001', white: 'ADBE Tint-0002', amount: 'ADBE Tint-0003' } },
+  tritone: { match: 'ADBE Tritone', params: { highlights: 'Highlights', midtones: 'Midtones', shadows: 'Shadows', blend: 'Blend With Original' } },
   directionalBlur: { match: 'ADBE Motion Blur', params: { direction: 'ADBE Motion Blur-0001', length: 'ADBE Motion Blur-0002' } },
-  displace: { match: 'ADBE Turbulent Displace', params: { amount: 'ADBE Turbulent Displace-0002', size: 'ADBE Turbulent Displace-0003' } },
+  radialBlur: { match: 'CC Radial Fast Blur', params: { center: 'Center', amount: 'Amount' } },
+  displace: { match: 'ADBE Turbulent Displace', params: { amount: 'ADBE Turbulent Displace-0002', size: 'ADBE Turbulent Displace-0003', evolution: 'Evolution' } },
+  waveWarp: { match: 'ADBE Wave Warp', params: { height: 'Wave Height', width: 'Wave Width', speed: 'Wave Speed' } },
   noise: { match: 'ADBE Noise', params: { amount: 'ADBE Noise-0001' } },
-  lightSweep: { match: 'CC Light Sweep', params: {} },
-  motionTile: { match: 'ADBE Tile', params: {} }
+  fractalNoise: { match: 'ADBE Fractal Noise', params: { contrast: 'Contrast', brightness: 'Brightness', complexity: 'Complexity', evolution: 'Evolution', scale: 'Scale' } },
+  lightSweep: { match: 'CC Light Sweep', params: { center: 'Center', direction: 'Direction', width: 'Width', intensity: 'Sweep Intensity' } },
+  lightRays: { match: 'CC Light Rays', params: { intensity: 'Intensity', center: 'Center', radius: 'Radius' } },
+  lensFlare: { match: 'ADBE Lens Flare', params: { center: 'Flare Center', brightness: 'Flare Brightness' } },
+  linearWipe: { match: 'ADBE Linear Wipe', params: { completion: 'Transition Completion', angle: 'Wipe Angle', feather: 'Feather' } },
+  radialWipe: { match: 'ADBE Radial Wipe', params: { completion: 'Transition Completion', angle: 'Start Angle', feather: 'Feather' } },
+  venetianBlinds: { match: 'ADBE Venetian Blinds', params: { completion: 'Transition Completion', direction: 'Direction', width: 'Width' } },
+  echo: { match: 'ADBE Echo', params: { time: 'Echo Time (seconds)', count: 'Number Of Echoes', decay: 'Decay' } },
+  posterizeTime: { match: 'ADBE Posterize Time', params: { fps: 'Frame Rate' } },
+  exposure: { match: 'ADBE Exposure2', params: { exposure: 'Exposure' } },
+  brightness: { match: 'ADBE Brightness & Contrast 2', params: { brightness: 'Brightness', contrast: 'Contrast' } },
+  vibrance: { match: 'ADBE Vibrance', params: { vibrance: 'Vibrance', saturation: 'Saturation' } },
+  motionTile: { match: 'ADBE Tile', params: { outputWidth: 'Output Width', outputHeight: 'Output Height', mirror: 'Mirror Edges' } }
 };
-const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light'];
-const PROPS = ['position', 'scale', 'rotation', 'opacity', 'anchor', 'rotationX', 'rotationY'];
-const BLEND = ['normal', 'add', 'screen', 'multiply', 'overlay', 'softLight', 'colorDodge'];
+const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light', 'precomp', 'particles'];
+const PROPS = ['position', 'scale', 'rotation', 'opacity', 'anchor', 'rotationX', 'rotationY', 'orientation'];
+const SHAPE_PROPS = ['trimStart', 'trimEnd', 'trimOffset', 'fillColor', 'fillOpacity', 'strokeColor', 'strokeWidth', 'size', 'roundness', 'path',
+  'repeaterCopies', 'repeaterOffset', 'repeaterPosition', 'repeaterScale', 'repeaterRotation', 'outerRadius', 'innerRadius', 'starRotation', 'groupPosition', 'groupScale', 'groupRotation'];
+const MASK_PROPS = ['path', 'feather', 'expansion', 'opacity'];
+const CAMERA_PROPS = ['zoom', 'focusDistance', 'aperture', 'blurLevel', 'dof'];
+const LIGHT_PROPS = ['intensity', 'color', 'coneAngle', 'coneFeather', 'castsShadows'];
+const BLEND = ['normal', 'add', 'screen', 'multiply', 'overlay', 'softLight', 'colorDodge', 'lighten', 'darken', 'difference'];
+const MATTES = ['alpha', 'alphaInverted', 'luma', 'lumaInverted'];
+const MASK_MODES = ['add', 'subtract', 'intersect', 'difference', 'none'];
+const TEXT_PRESETS = ['fadeUp', 'typewriter', 'blurIn', 'scalePop', 'slideIn', 'tracking', 'rotateIn', 'dropIn'];
+const PARTICLES = ['dust', 'snow', 'embers', 'sparks', 'confetti', 'bokeh', 'stars'];
 const EASES = Object.keys(curves.PRESETS).filter(k => curves.PRESETS[k].fn.bezier).concat(['hold', 'linear']);
 // expressions: a few safe building blocks only (no file / system access ever reaches AE)
-const BAD_EXPR = /system|callSystem|\$\.|File\(|Folder\(|eval\s*\(|app\./;
+const BAD_EXPR = /system|callSystem|\$\.|File\(|Folder\(|eval\s*\(|app\.|Socket|\$\[/;
+const MATCH_RE = /^[\w .&()'+-]{2,80}$/;
 
 function hex(c, def = [1, 1, 1, 1]) {
   if (Array.isArray(c)) return [+c[0] || 0, +c[1] || 0, +c[2] || 0, c[3] === undefined ? 1 : +c[3]];
-  const m = /^#?([0-9a-f]{6})$/i.exec(String(c || '').trim());
+  const s = String(c || '').trim();
+  let m = /^#?([0-9a-f]{6})$/i.exec(s);
+  if (!m) { const m3 = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(s); if (m3) m = [0, m3[1] + m3[1] + m3[2] + m3[2] + m3[3] + m3[3]]; }
   if (!m) return def;
   const n = parseInt(m[1], 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1];
 }
+const isColor = v => typeof v === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v.trim());
 /** "50%" → pixels of the comp (x by width, y by height); numbers stay */
 function px(v, axis, comp) {
   if (typeof v === 'string' && /%$/.test(v.trim())) return (parseFloat(v) / 100) * (axis === 1 ? comp.height : comp.width);
@@ -42,21 +73,186 @@ function vec(v, comp, n = 2) {
   for (let i = 0; i < n; i++) out.push(px(a[i] === undefined ? (i === 2 ? 0 : a[0]) : a[i], i, comp));
   return out;
 }
-function propValue(name, v, comp, threeD) {
-  if (name === 'position' || name === 'anchor') return vec(v, comp, threeD ? 3 : 2);
-  if (name === 'scale') { const a = Array.isArray(v) ? v : [v, v, v]; return threeD ? [+a[0], +a[1], +(a[2] === undefined ? a[0] : a[2])] : [+a[0], +a[1]]; }
-  if (name.indexOf('fx:') === 0) return Array.isArray(v) || /^#/.test(String(v)) ? (String(v).charAt(0) === '#' ? hex(v) : v.map(Number)) : +v;
-  return +v;
-}
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function bz(ease) {
   if (Array.isArray(ease) && ease.length === 4) return ease.map(Number);
   const p = curves.PRESETS[ease];
   return p && p.fn.bezier ? p.fn.bezier : null;
 }
 
+/** a path value: svg "M…", points [[x,y]…], {points, smooth, closed} or an already-made path → AE path */
+function pathValue(v, comp, { center = false, size = null } = {}) {
+  let paths;
+  if (v && v.v && v.i && v.o) paths = [v];
+  else if (typeof v === 'string') paths = svg.parse(v);
+  else if (Array.isArray(v)) paths = [svg.fromPoints(v.map(p => vec(p, comp)), {})];
+  else if (v && Array.isArray(v.points)) paths = [svg.fromPoints(v.points.map(p => vec(p, comp)), { closed: !!v.closed, smooth: !!v.smooth })];
+  else if (v && (v.svg || v.d)) paths = svg.parse(v.svg || v.d);
+  else return null;
+  paths = (paths || []).filter(p => p.v.length > 1);
+  if (!paths.length) return null;
+  return center ? svg.fit(paths, size) : paths;
+}
+
+/**
+ * A property key the scene may set / animate → its canonical form, or null if unknown:
+ * transform names · shape:<prop> · mask:<n>.<prop> · camera:<prop> · light:<prop> · fx:<effect>.<param>
+ */
+function keyTarget(k, effects) {
+  if (PROPS.indexOf(k) >= 0) return { key: k, kind: k };
+  let m = /^shape:(\w+)$/.exec(k);
+  if (m && SHAPE_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: 'shape:' + m[1] };
+  m = /^mask:(\d+)\.(\w+)$/.exec(k);
+  if (m && MASK_PROPS.indexOf(m[2]) >= 0 && +m[1] >= 1 && +m[1] <= 10) return { key: k, kind: 'mask:' + m[2] };
+  m = /^camera:(\w+)$/.exec(k);
+  if (m && CAMERA_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: k };
+  m = /^light:(\w+)$/.exec(k);
+  if (m && LIGHT_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: k };
+  if (k.indexOf('fx:') === 0) {
+    const body = k.slice(3), dot = body.lastIndexOf('.');
+    if (dot < 1) return null;
+    const fxName = body.slice(0, dot), param = body.slice(dot + 1);
+    const def = EFFECTS[fxName];
+    if (def) {
+      if (!def.params[param]) return null;
+      if (effects && !effects.some(e => e.match === def.match)) effects.push({ name: fxName, match: def.match, params: {} });
+      return { key: 'fx:' + def.match + '|' + def.params[param], kind: 'fx' };
+    }
+    // a raw / plugin effect already on the layer (by match name)
+    if (MATCH_RE.test(fxName) && MATCH_RE.test(param) && effects && effects.some(e => e.match === fxName)) return { key: 'fx:' + fxName + '|' + param, kind: 'fx' };
+    return null;
+  }
+  return null;
+}
+/** a value for a target kind */
+function valueFor(kind, v, comp, threeD, ctx = {}) {
+  if (kind === 'position' || kind === 'anchor') return vec(v, comp, threeD ? 3 : 2);
+  if (kind === 'orientation') return vec(v, comp, 3);
+  if (kind === 'scale') { const a = Array.isArray(v) ? v : [v, v, v]; return threeD ? [+a[0], +a[1], +(a[2] === undefined ? a[0] : a[2])] : [+a[0], +(a[1] === undefined ? a[0] : a[1])]; }
+  if (kind === 'shape:fillColor' || kind === 'shape:strokeColor' || kind === 'light:color') return hex(v);
+  if (kind === 'shape:path') { const p = pathValue(v, comp, { center: true, size: ctx.size }); return p ? p[0] : null; }
+  if (kind === 'mask:path') { const p = pathValue(v, comp); return p ? p[0] : null; }
+  if (kind === 'mask:feather') return Array.isArray(v) ? [+v[0], +(v[1] === undefined ? v[0] : v[1])] : [+v, +v];
+  if (/^shape:(size|groupPosition|repeaterPosition)$/.test(kind)) return vec(v, comp);
+  if (/^shape:(groupScale|repeaterScale)$/.test(kind)) { const a = Array.isArray(v) ? v : [v, v]; return [+a[0], +(a[1] === undefined ? a[0] : a[1])]; }
+  if (kind === 'fx') {
+    if (isColor(v)) return hex(v);
+    if (Array.isArray(v)) return v.length === 4 && v.every(x => typeof x === 'number' && x <= 1) ? v.map(Number) : vec(v, comp, v.length > 2 ? 3 : 2);
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    return +v;
+  }
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  return +v;
+}
+function effectList(list, comp, warnings) {
+  const out = [];
+  for (const fx of (list || []).slice(0, 20)) {
+    if (!fx) continue;
+    const def = EFFECTS[fx.name];
+    if (def) {
+      const params = {};
+      for (const k of Object.keys(fx.params || {})) {
+        if (def.params[k]) params[def.params[k]] = valueFor('fx', fx.params[k], comp);
+        else warnings.push('باراميتر مش معروف: ' + fx.name + '.' + k);
+      }
+      out.push({ name: fx.name, match: def.match, params });
+    } else if (fx.match && MATCH_RE.test(String(fx.match))) {
+      const params = {};
+      for (const k of Object.keys(fx.params || {}).slice(0, 30)) if (MATCH_RE.test(k)) params[k] = valueFor('fx', fx.params[k], comp);
+      out.push({ name: 'raw', match: String(fx.match), params });
+    } else warnings.push('إفكت مش متاح: ' + (fx.name || fx.match));
+  }
+  return out;
+}
+function keyList(raw, kind, comp, threeD, ctx) {
+  const list = (raw || []).map(x => Array.isArray(x) ? { t: x[0], v: x[1], ease: x[2] } : x).filter(x => x && isFinite(+x.t));
+  list.sort((a, b) => a.t - b.t);
+  return list.slice(0, 80).map(x => {
+    const e = x.ease || 'easeInOut';
+    const v = valueFor(kind, x.v, comp, threeD, ctx);
+    return v === null ? null : { t: Math.max(0, +x.t), v, bz: e === 'hold' || e === 'linear' ? null : bz(e), hold: e === 'hold' };
+  }).filter(Boolean);
+}
+
+/** shape contents: one or more items (rect / ellipse / star / polygon / path) sharing fill, stroke, trim paths, repeater */
+function shapeSpec(s, comp, warnings) {
+  s = s || {};
+  const items = [];
+  const src = Array.isArray(s.items) && s.items.length ? s.items : [s];
+  for (const it of src.slice(0, 30)) {
+    const kind = ['rect', 'ellipse', 'star', 'polygon', 'path'].indexOf(it.kind) >= 0 ? it.kind : (it.path || it.svg || it.points ? 'path' : 'rect');
+    const pos = it.position !== undefined ? vec(it.position, comp) : null;
+    if (kind === 'path') {
+      const paths = pathValue(it.path || it.svg ? (it.path || it.svg) : { points: it.points, closed: it.closed, smooth: it.smooth }, comp, { center: true, size: it.size ? vec(it.size, comp) : (src.length === 1 && s.size ? vec(s.size, comp) : null) });
+      if (!paths) { warnings.push('مسار مش مفهوم'); continue; }
+      items.push({ kind, paths, position: pos });
+    } else {
+      const size = vec(it.size || s.size || [400, 200], comp);
+      items.push({ kind, size, round: Math.max(0, +it.round || 0), points: clamp(+it.points || 5, 3, 40), outer: +it.outer || size[0] / 2, inner: +it.inner || size[0] / 4, position: pos });
+    }
+  }
+  const open = items.length && items.every(it => it.kind === 'path' && it.paths.every(p => !p.c));
+  const o = { items };
+  const fill = s.fill === undefined ? (open ? null : '#f97316') : s.fill;
+  if (fill) o.fill = hex(fill);
+  if (s.stroke || (open && !fill)) { o.stroke = hex(s.stroke || '#ffffff'); o.strokeWidth = clamp(+s.strokeWidth || 6, 0.5, 400); }
+  if (s.lineCap) o.lineCap = { butt: 1, round: 2, square: 3 }[s.lineCap] || 2;
+  else if (s.trim) o.lineCap = 2;
+  if (s.dash) o.dash = clamp(+s.dash, 1, 2000);
+  if (s.trim) o.trim = { start: clamp(+s.trim.start || 0, 0, 100), end: clamp(s.trim.end === undefined ? 100 : +s.trim.end, 0, 100), offset: +s.trim.offset || 0 };
+  if (s.repeater) {
+    const r = s.repeater;
+    o.repeater = { copies: clamp(+r.copies || 3, 1, 200), offset: +r.offset || 0, position: r.position !== undefined ? vec(r.position, comp) : [100, 0], scale: r.scale !== undefined ? valueFor('shape:repeaterScale', r.scale, comp) : [100, 100], rotation: +r.rotation || 0, startOpacity: r.startOpacity === undefined ? 100 : +r.startOpacity, endOpacity: r.endOpacity === undefined ? 100 : +r.endOpacity };
+  }
+  return o;
+}
+function masksSpec(list, comp, warnings) {
+  const out = [];
+  for (const m of (list || []).slice(0, 10)) {
+    if (!m) continue;
+    let path = null;
+    if (m.rect) { const r = m.rect, xy = vec([r[0], r[1]], comp), wh = vec([r[2], r[3]], comp); path = svg.rect(xy[0], xy[1], wh[0], wh[1]); }
+    else if (m.ellipse) { const e = m.ellipse, c = vec([e[0], e[1]], comp), wh = vec([e[2], e[3]], comp); path = svg.ellipse(c[0], c[1], wh[0], wh[1]); }
+    else { const p = pathValue(m.path || m.points ? (m.path || { points: m.points, closed: true, smooth: m.smooth }) : null, comp); path = p && p[0]; if (path) path.c = true; }
+    if (!path) { warnings.push('ماسك من غير شكل'); continue; }
+    out.push({ path, mode: MASK_MODES.indexOf(m.mode) >= 0 ? m.mode : 'add', feather: valueFor('mask:feather', m.feather || 0, comp), expansion: +m.expansion || 0, opacity: m.opacity === undefined ? 100 : +m.opacity, inverted: !!m.inverted });
+  }
+  return out;
+}
+
+/** particles → a precomp of small shape layers moved by expressions (works in every AE, no plugin) */
+function particleLayers(L, comp) {
+  const P = PARTICLES.indexOf(L.preset) >= 0 ? L.preset : 'dust';
+  const n = clamp(Math.round(+L.count || { dust: 40, snow: 50, embers: 35, sparks: 40, confetti: 45, bokeh: 18, stars: 50 }[P]), 1, 80);
+  const W = comp.width, H = comp.height;
+  const colors = (Array.isArray(L.colors) ? L.colors : [L.color || { snow: '#ffffff', embers: '#fb923c', sparks: '#fde68a', confetti: '#f97316', bokeh: '#fdba74', stars: '#ffffff' }[P] || '#ffffff']).slice(0, 6);
+  if (P === 'confetti' && !L.colors && !L.color) colors.push('#fbbf24', '#ffffff', '#22c55e', '#3b82f6');
+  const sz = Array.isArray(L.size) ? L.size : [+L.size || { dust: 3, snow: 6, embers: 4, sparks: 3, confetti: 10, bokeh: 60, stars: 3 }[P], (+L.size || { dust: 3, snow: 6, embers: 4, sparks: 3, confetti: 10, bokeh: 60, stars: 3 }[P]) * 2.5];
+  const speed = +L.speed || { dust: 20, snow: 90, embers: 70, sparks: 700, confetti: 500, bokeh: 15, stars: 0 }[P];
+  const at = +L.burstAt || 0, origin = L.origin !== undefined ? vec(L.origin, comp) : [W / 2, H / 2];
+  const life = +L.life || 2.5;
+  const R = `seedRandom(index,true);`;
+  const exprs = {
+    dust: { position: `${R}var x=random(0,${W}),y=random(0,${H}),a=random(0,6.28),v=random(${speed * 0.5},${speed});[(x+Math.sin(time*0.4+a)*40+${W})%${W},((y-time*v)%${H}+${H})%${H}]`, opacity: `${R}var b=random(20,70);b+Math.sin(time*random(1,3)+index)*20` },
+    snow: { position: `${R}var x=random(0,${W}),y=random(0,${H}),v=random(${speed * 0.5},${speed});[x+Math.sin(time+index)*30,((y+time*v)%${H}+${H})%${H}]`, opacity: `${R}random(60,100)` },
+    embers: { position: `${R}var x=random(0,${W}),y=random(0,${H}),v=random(${speed * 0.5},${speed});[x+Math.sin(time*2+index)*25,((y-time*v)%${H}+${H})%${H}]`, opacity: `${R}var f=random(2,6);50+Math.sin(time*f+index)*50` },
+    sparks: { position: `${R}var a=random(0,6.28),v=random(${speed * 0.4},${speed}),t=Math.max(0,time-${at});[${origin[0]}+Math.cos(a)*v*t,${origin[1]}+Math.sin(a)*v*t+400*t*t]`, opacity: `${R}var t=time-${at};t<0?0:linear(t,0,random(${life * 0.4},${life}),100,0)` },
+    confetti: { position: `${R}var a=random(-2.6,-0.5),v=random(${speed * 0.5},${speed}),t=Math.max(0,time-${at});[${origin[0]}+Math.cos(a)*v*t+Math.sin(t*4+index)*20,${origin[1]}+Math.sin(a)*v*t+600*t*t]`, opacity: `time<${at}?0:linear(time-${at},${life * 0.7},${life},100,0)`, rotation: `${R}time*random(-400,400)` },
+    bokeh: { position: `${R}var x=random(0,${W}),y=random(0,${H});[x+Math.sin(time*0.3+index)*60,y+Math.cos(time*0.25+index)*40]`, opacity: `${R}var b=random(15,45);b+Math.sin(time*random(0.5,1.5)+index)*12` },
+    stars: { position: `${R}[random(0,${W}),random(0,${H})]`, opacity: `${R}var f=random(1,4);40+Math.sin(time*f+index*3)*40` }
+  }[P];
+  exprs.scale = `${R}var s=random(${sz[0]},${sz[1]})/${sz[0]}*100;[s,s]`;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ type: 'shape', name: 'Particle ' + (i + 1), shape: { kind: P === 'confetti' ? 'rect' : P === 'stars' ? 'star' : 'ellipse', size: P === 'confetti' ? [sz[0], sz[0] * 0.5] : [sz[0], sz[0]], points: 4, fill: colors[i % colors.length] }, blend: P === 'bokeh' || P === 'embers' || P === 'sparks' ? 'add' : 'normal', expressions: exprs });
+  }
+  const fx = { embers: [{ name: 'glow', params: { radius: 20, intensity: 1.5 } }], sparks: [{ name: 'glow', params: { radius: 15, intensity: 2 } }], bokeh: [{ name: 'blur', params: { amount: 18 } }], stars: [{ name: 'glow', params: { radius: 10, intensity: 1 } }] }[P] || [];
+  return { layers: out, effects: fx, blend: P === 'snow' || P === 'confetti' ? 'normal' : 'screen' };
+}
+
 /**
  * The AI's scene → what the AE host builds. Unknown things are dropped (never sent), numbers clamped,
- * colours → [r,g,b,a], "%" → pixels, eases → cubic-bezier. → { spec, warnings }
+ * colours → [r,g,b,a], "%" → pixels, eases → cubic-bezier, svg → AE paths. → { spec, warnings }
  */
 function normalize(raw, compInfo = {}) {
   const warnings = [];
@@ -64,108 +260,181 @@ function normalize(raw, compInfo = {}) {
   const comp = {
     create: !!(raw && raw.comp && (raw.comp.create !== false)) || !compInfo.width,
     name: String(c.name || 'EditFast Scene').slice(0, 60),
-    width: Math.round(Math.min(7680, Math.max(64, +c.width || compInfo.width || 1920))),
-    height: Math.round(Math.min(4320, Math.max(64, +c.height || compInfo.height || 1080))),
-    fps: Math.min(120, Math.max(1, +c.fps || compInfo.fps || 30)),
-    duration: Math.min(600, Math.max(0.5, +c.duration || compInfo.duration || 8)),
+    width: Math.round(clamp(+c.width || compInfo.width || 1920, 64, 7680)),
+    height: Math.round(clamp(+c.height || compInfo.height || 1080, 64, 4320)),
+    fps: clamp(+c.fps || compInfo.fps || 30, 1, 120),
+    duration: clamp(+c.duration || compInfo.duration || 8, 0.5, 600),
     bg: c.bg ? hex(c.bg) : null
   };
-  const layers = [];
-  let keyCount = 0;
-  for (const L of (raw && raw.layers) || []) {
-    if (layers.length >= 80) { warnings.push('أكتر من 80 لير — الباقي اتساب'); break; }
-    if (!L || TYPES.indexOf(L.type) < 0) { warnings.push('نوع لير مش معروف: ' + (L && L.type)); continue; }
-    const threeD = !!L.threeD || L.type === 'camera' || L.type === 'light';
-    const o = { type: L.type, name: String(L.name || L.type).slice(0, 60), threeD, start: Math.max(0, +L.start || 0), end: L.end === undefined ? null : Math.max(0, +L.end) };
-    if (L.parent) o.parent = String(L.parent);
-    if (L.blend && BLEND.indexOf(L.blend) >= 0) o.blend = L.blend;
-    if (L.motionBlur) o.motionBlur = true;
-    if (L.type === 'text') {
-      o.text = String(L.text === undefined ? 'نص' : L.text).slice(0, 400);
-      o.size = Math.min(1000, Math.max(4, +L.size || 80)); o.color = hex(L.color || '#ffffff');
-      if (L.font) o.font = String(L.font).slice(0, 80);
-      o.align = ['left', 'center', 'right'].indexOf(L.align) >= 0 ? L.align : 'center';
-      if (L.tracking) o.tracking = +L.tracking;
-      if (L.stroke) { o.stroke = hex(L.stroke); o.strokeWidth = Math.min(50, +L.strokeWidth || 2); }
-      // a number that counts up: 0 → to over duration (an expression on the Source Text)
-      if (L.counter && isFinite(+L.counter.to)) o.counter = { to: +L.counter.to, from: +L.counter.from || 0, start: +L.counter.start || o.start, duration: Math.max(0.1, +L.counter.duration || 2) };
-    }
-    if (L.type === 'shape') {
-      const s = L.shape || {};
-      o.shape = { kind: ['rect', 'ellipse', 'star', 'polygon'].indexOf(s.kind) >= 0 ? s.kind : 'rect', size: vec(s.size || [400, 200], compInfo.width ? compInfo : comp), round: Math.max(0, +s.round || 0), points: Math.min(40, Math.max(3, +s.points || 5)) };
-      if (s.fill !== null && s.fill !== false) o.shape.fill = hex(s.fill || '#f97316');
-      if (s.stroke) { o.shape.stroke = hex(s.stroke); o.shape.strokeWidth = Math.min(200, +s.strokeWidth || 6); }
-    }
-    if (L.type === 'solid' || L.type === 'adjustment') o.color = hex(L.color || (L.type === 'adjustment' ? '#ffffff' : '#000000'));
-    if (L.type === 'footage') {
-      if (!L.file) { warnings.push('فوتيج من غير ملف'); continue; }
-      o.file = String(L.file); o.srcIn = Math.max(0, +L.srcIn || 0); o.cover = L.cover !== false;
-    }
-    if (L.type === 'light') o.lightType = ['spot', 'point', 'parallel', 'ambient'].indexOf(L.lightType) >= 0 ? L.lightType : 'point';
-    // still values
-    o.transform = {};
-    for (const p of PROPS) if (L.transform && L.transform[p] !== undefined) o.transform[p] = propValue(p, L.transform[p], comp, threeD);
-    // effects with still parameters
-    o.effects = [];
-    for (const fx of L.effects || []) {
-      const def = EFFECTS[fx && fx.name];
-      if (!def) { warnings.push('إفكت مش متاح: ' + (fx && fx.name)); continue; }
-      const params = {};
-      for (const k of Object.keys(fx.params || {})) if (def.params[k]) params[def.params[k]] = propValue('fx:', fx.params[k], comp);
-      o.effects.push({ name: fx.name, match: def.match, params });
-    }
-    // keyframes: { prop: [[t, value, ease], …] } or [{t, v, ease}]; effect params as "fx:glow.intensity"
-    o.keys = {};
-    for (const k of Object.keys(L.keys || {})) {
-      let target = k;
-      if (k.indexOf('fx:') === 0) {
-        const [fxName, param] = k.slice(3).split('.');
-        const def = EFFECTS[fxName];
-        if (!def || !def.params[param]) { warnings.push('كي فريمز لإفكت مش معروف: ' + k); continue; }
-        if (!o.effects.some(e => e.name === fxName)) o.effects.push({ name: fxName, match: def.match, params: {} });
-        target = 'fx:' + def.match + '|' + def.params[param];
-      } else if (PROPS.indexOf(k) < 0) { warnings.push('خاصية مش معروفة: ' + k); continue; }
-      const list = (L.keys[k] || []).map(x => Array.isArray(x) ? { t: x[0], v: x[1], ease: x[2] } : x).filter(x => x && isFinite(+x.t));
-      list.sort((a, b) => a.t - b.t);
-      const keys = list.slice(0, 60).map(x => {
-        const e = x.ease || 'easeInOut';
-        return { t: Math.max(0, +x.t), v: propValue(k.indexOf('fx:') === 0 ? 'fx:' : k, x.v, comp, threeD), bz: e === 'hold' || e === 'linear' ? null : bz(e), hold: e === 'hold' };
-      });
-      if (keys.length) { o.keys[target] = keys; keyCount += keys.length; }
-    }
-    if (keyCount > 1500) { warnings.push('كي فريمز كتير قوي — اتقلّلت'); break; }
-    if (L.textAnimator && L.type === 'text') o.textAnimator = { preset: String(L.textAnimator.preset || 'fadeUp'), by: L.textAnimator.by || 'chars', duration: +L.textAnimator.duration || 1, start: +L.textAnimator.start || o.start };
-    o.expressions = {};
-    for (const k of Object.keys(L.expressions || {})) {
-      if (PROPS.indexOf(k) < 0) continue;
-      const ex = String(L.expressions[k]).slice(0, 600);
-      if (BAD_EXPR.test(ex)) { warnings.push('إكسبريشن اترفض'); continue; }
-      o.expressions[k] = ex;
-    }
-    layers.push(o);
-  }
+  const ctx = { layers: 0, keys: 0, warnings };
+  const layers = layerList((raw && raw.layers) || [], comp, ctx, 0);
   return { spec: { comp, layers }, warnings };
+}
+function layerList(list, comp, ctx, depth) {
+  const out = [];
+  for (const L of list) {
+    if (ctx.layers >= 250) { ctx.warnings.push('أكتر من 250 لير — الباقي اتساب'); break; }
+    if (ctx.keys > 5000) { ctx.warnings.push('كي فريمز كتير قوي — اتقلّلت'); break; }
+    if (!L || TYPES.indexOf(L.type) < 0) { ctx.warnings.push('نوع لير مش معروف: ' + (L && L.type)); continue; }
+    const made = layerSpec(L, comp, ctx, depth);
+    for (const m of made) { out.push(m); ctx.layers++; }
+  }
+  return out;
+}
+/** one layer of the scene (a gradient shape comes back as the shape + its gradient under it) */
+function layerSpec(L, comp, ctx, depth) {
+  const warnings = ctx.warnings;
+  const threeD = !!L.threeD || L.type === 'camera' || L.type === 'light';
+  const o = { type: L.type, name: String(L.name || L.type).slice(0, 60), threeD, start: Math.max(0, +L.start || 0), end: L.end === undefined || L.end === null ? null : Math.max(0, +L.end) };
+  if (L.parent) o.parent = String(L.parent);
+  if (L.blend && BLEND.indexOf(L.blend) >= 0) o.blend = L.blend;
+  if (L.motionBlur) o.motionBlur = true;
+  if (L.matte && L.matte.layer) o.matte = { layer: String(L.matte.layer), type: MATTES.indexOf(L.matte.type) >= 0 ? L.matte.type : 'alpha' };
+  o.effects = effectList(L.effects, comp, warnings);
+  const extra = [];
+  if (L.type === 'text') {
+    o.text = String(L.text === undefined ? 'نص' : L.text).slice(0, 600);
+    o.size = clamp(+L.size || 80, 4, 1500); o.color = hex(L.color || '#ffffff');
+    if (L.font) o.font = String(L.font).slice(0, 80);
+    o.align = ['left', 'center', 'right'].indexOf(L.align) >= 0 ? L.align : 'center';
+    if (L.tracking) o.tracking = +L.tracking;
+    if (L.leading) o.leading = +L.leading;
+    if (L.allCaps) o.allCaps = true;
+    if (L.stroke) { o.stroke = hex(L.stroke); o.strokeWidth = clamp(+L.strokeWidth || 2, 0, 100); }
+    if (L.counter && isFinite(+L.counter.to)) o.counter = { to: +L.counter.to, from: +L.counter.from || 0, start: +L.counter.start || o.start, duration: Math.max(0.1, +L.counter.duration || 2), decimals: clamp(+L.counter.decimals || 0, 0, 4), prefix: String(L.counter.prefix || '').slice(0, 10), suffix: String(L.counter.suffix || '').slice(0, 10) };
+    const anims = [].concat(L.textAnimators || [], L.textAnimator ? [L.textAnimator] : [], L.textOut ? [Object.assign({ out: true }, L.textOut)] : []);
+    o.textAnimators = anims.slice(0, 4).filter(a => a).map(a => ({ preset: TEXT_PRESETS.indexOf(a.preset) >= 0 ? a.preset : 'fadeUp', by: ['chars', 'words', 'lines'].indexOf(a.by) >= 0 ? a.by : 'chars', duration: clamp(+a.duration || 1, 0.05, 30), start: a.start === undefined ? (a.out && o.end ? o.end - (+a.duration || 1) : o.start) : +a.start, out: !!a.out }));
+  }
+  if (L.type === 'shape') {
+    o.shape = shapeSpec(L.shape, comp, warnings);
+    if (!o.shape.items.length) { warnings.push('شكل فاضي: ' + o.name); return []; }
+    const g = L.shape && L.shape.gradient;
+    if (g && Array.isArray(g.colors) && g.colors.length >= 2) {
+      // a gradient fill = a gradient solid matted by the shape (scripts can't set gradient-fill colours)
+      const from = g.from !== undefined ? vec(g.from, comp) : [0, comp.height / 2], to = g.to !== undefined ? vec(g.to, comp) : [comp.width, comp.height / 2];
+      extra.push({ type: 'solid', name: o.name + ' Gradient', threeD: false, start: o.start, end: o.end, color: hex('#000000'), transform: {}, keys: {}, expressions: {}, masks: [],
+        effects: [{ name: 'gradient', match: EFFECTS.gradient.match, params: { 'ADBE Ramp-0001': from, 'ADBE Ramp-0002': hex(g.colors[0]), 'ADBE Ramp-0003': to, 'ADBE Ramp-0004': hex(g.colors[g.colors.length - 1]), 'ADBE Ramp-0005': g.type === 'radial' ? 2 : 1 } }],
+        matte: { layer: o.name, type: 'alpha' }, blend: o.blend });
+    }
+  }
+  if (L.type === 'solid' || L.type === 'adjustment') o.color = hex(L.color || (L.type === 'adjustment' ? '#ffffff' : '#000000'));
+  if (L.type === 'footage') {
+    if (!L.file) { warnings.push('فوتيج من غير ملف'); return []; }
+    o.file = String(L.file); o.srcIn = Math.max(0, +L.srcIn || 0); o.cover = L.cover !== false;
+  }
+  if (L.type === 'light') o.lightType = ['spot', 'point', 'parallel', 'ambient'].indexOf(L.lightType) >= 0 ? L.lightType : 'point';
+  if (L.type === 'precomp' || L.type === 'particles') {
+    if (depth >= 3) { warnings.push('بري كومب جوه بري كومب أكتر من 3 مرات'); return []; }
+    const sub = L.comp || {};
+    o.comp = { name: String(sub.name || o.name).slice(0, 60), width: Math.round(clamp(+sub.width || comp.width, 16, 7680)), height: Math.round(clamp(+sub.height || comp.height, 16, 4320)), fps: comp.fps, duration: clamp(+sub.duration || (o.end ? o.end - o.start : comp.duration), 0.1, 600), bg: sub.bg ? hex(sub.bg) : null };
+    if (L.type === 'particles') {
+      const p = particleLayers(L, o.comp);
+      o.layers = layerList(p.layers, o.comp, ctx, depth + 1);
+      o.effects = effectList(p.effects, comp, warnings).concat(o.effects);
+      if (!o.blend) o.blend = p.blend;
+      o.type = 'precomp'; o.particles = L.preset || 'dust';
+    } else o.layers = layerList(L.layers || [], o.comp, ctx, depth + 1);
+    if (L.collapse) o.collapse = true;
+  }
+  o.masks = masksSpec(L.masks, comp, warnings);
+  const shapeSize = o.shape && o.shape.items[0] && o.shape.items[0].paths ? (L.shape && L.shape.size ? vec(L.shape.size, comp) : null) : null;
+  // still values: transform names and every other target (shape:…, mask:…, camera:…, light:…, fx:…)
+  o.transform = {};
+  const sets = Object.assign({}, L.transform || {});
+  if (L.camera) for (const k of Object.keys(L.camera)) sets['camera:' + k] = L.camera[k];
+  if (L.light) for (const k of Object.keys(L.light)) sets['light:' + k] = L.light[k];
+  for (const k of Object.keys(sets)) {
+    const t = keyTarget(k, o.effects);
+    if (!t) { warnings.push('خاصية مش معروفة: ' + k); continue; }
+    const v = valueFor(t.kind, sets[k], comp, threeD, { size: shapeSize });
+    if (v !== null) o.transform[t.key] = v;
+  }
+  // keyframes: { prop: [[t, value, ease], …] } or [{t, v, ease}] — times from the layer's start
+  o.keys = {};
+  for (const k of Object.keys(L.keys || {})) {
+    const t = keyTarget(k, o.effects);
+    if (!t) { warnings.push('خاصية مش معروفة: ' + k); continue; }
+    const keys = keyList(L.keys[k], t.kind, comp, threeD, { size: shapeSize });
+    if (keys.length) { o.keys[t.key] = keys; ctx.keys += keys.length; }
+  }
+  o.expressions = {};
+  for (const k of Object.keys(L.expressions || {})) {
+    const t = keyTarget(k, o.effects);
+    if (!t) continue;
+    const ex = String(L.expressions[k]).slice(0, 1500);
+    if (BAD_EXPR.test(ex)) { warnings.push('إكسبريشن اترفض'); continue; }
+    o.expressions[t.key] = ex;
+  }
+  return [o].concat(extra);
+}
+
+/** an edit's look (the chat's "make it bigger / slower / orange") → the same checked shape as a layer's */
+function normalizeLook(look, comp, { threeD = false, type = 'null' } = {}) {
+  const warnings = [];
+  look = look || {};
+  const ctx = { layers: 0, keys: 0, warnings };
+  void type;
+  const [L] = layerSpec({ type: 'null', name: 'x', threeD, transform: look.transform, keys: look.keys, effects: look.effects, expressions: look.expressions, masks: look.masks, matte: look.matte, camera: look.camera, light: look.light }, comp, ctx, 0);
+  const o = { transform: L.transform, keys: L.keys, effects: L.effects, expressions: L.expressions };
+  if (look.masks) o.masks = L.masks;
+  if (look.matte) o.matte = L.matte;
+  if (look.text !== undefined) o.text = String(look.text).slice(0, 600);
+  if (look.color) o.color = hex(look.color);
+  if (+look.size > 0) o.size = clamp(+look.size, 4, 1500);
+  if (look.font) o.font = String(look.font).slice(0, 80);
+  if (look.textAnimator) o.textAnimators = [{ preset: TEXT_PRESETS.indexOf(look.textAnimator.preset) >= 0 ? look.textAnimator.preset : 'fadeUp', by: look.textAnimator.by || 'chars', duration: +look.textAnimator.duration || 1, start: +look.textAnimator.start || 0, out: false }];
+  return { look: o, warnings };
 }
 
 /** the scene language, as the AI is told it */
 function promptDoc() {
   return [
-    'اكتب المشهد JSON بالشكل ده بس:',
-    '{"comp":{"create":true,"name":"…","width":1920,"height":1080,"fps":30,"duration":6,"bg":"#0b0806"},',
-    ' "layers":[ // أول لير = فوق خالص',
-    '  {"type":"text|shape|solid|adjustment|null|footage|camera|light","name":"…","start":0,"end":6,"parent":"اسم لير","threeD":false,"blend":"normal|add|screen|multiply|overlay","motionBlur":true,',
-    '   "text":"…","size":120,"color":"#fff","font":"Cairo-Bold","align":"center","tracking":20,',
-    '   "shape":{"kind":"rect|ellipse|star|polygon","size":[600,120],"round":30,"fill":"#f97316","stroke":"#fff","strokeWidth":4,"points":5},',
-    '   "color":"#hex (للـ solid)", "file":"مسار (للـ footage)",',
-    '   "transform":{"position":["50%","50%"],"scale":100,"rotation":0,"opacity":100,"anchor":[0,0]},',
-    '   "keys":{"position":[[0,["50%","120%"],"expoOut"],[0.8,["50%","50%"]]],"scale":[[0,0,"backOut"],[0.5,100]],"opacity":[[0,0],[0.3,100]],"fx:glow.intensity":[[0,0],[1,3]]},',
-    '   "effects":[{"name":"' + Object.keys(EFFECTS).join('|') + '","params":{…}}],',
-    '   "textAnimator":{"preset":"fadeUp|typewriter|blurIn|scalePop|slideIn|tracking","by":"chars|words|lines","duration":1,"start":0},',
-    '   "counter":{"to":250,"duration":2} (رقم بيعد — للـ text),',
-    '   "expressions":{"position":"wiggle(1,8)"}}]}',
-    'المنحنيات (آخر عنصر في كل كي): ' + EASES.join('، ') + '. المكان بالبكسل أو "%" من الكومب. الوقت بالثواني. الألوان #hex.',
-    'باراميترز الإفكتات: ' + Object.entries(EFFECTS).map(([k, v]) => k + '(' + Object.keys(v.params).join(',') + ')').join('، '),
-    'اعمل حركة احترافية: دخول بمنحنى expoOut/backOut، تأخير بسيط بين العناصر (stagger 0.05-0.15s)، حركة خفيفة مستمرة، خروج، ألوان متناسقة، مساحات وتباين واضح.'
+    'اكتب المشهد JSON بالشكل ده بس (أول لير في الليستة = فوق خالص):',
+    '{"comp":{"create":true,"name":"…","width":1920,"height":1080,"fps":30,"duration":6,"bg":"#0b0806"},"layers":[ … ]}',
+    'كل لير: {"type":"' + TYPES.join('|') + '","name":"اسم مميز","start":0,"end":6,"parent":"اسم لير","threeD":false,"blend":"' + BLEND.join('|') + '","motionBlur":true,',
+    '  "matte":{"layer":"اسم اللير اللي هيبقى ماط","type":"' + MATTES.join('|') + '"},',
+    '  "masks":[{"rect":[x,y,w,h] أو "ellipse":[cx,cy,w,h] أو "path":"M… (SVG)","mode":"add|subtract|intersect","feather":20,"expansion":0,"inverted":false}],',
+    '  "transform":{"position":["50%","50%"],"scale":100,"rotation":0,"opacity":100,"anchor":[0,0]},',
+    '  "keys":{"<خاصية>":[[ثانية, قيمة, "منحنى"], …]},  "expressions":{"<خاصية>":"wiggle(2,10)"},',
+    '  "effects":[{"name":"<اسم من القايمة>","params":{…}}] أو إفكت متسطب بالـ matchName: {"match":"ADBE Fractal Noise","params":{"Contrast":150}}}',
+    'حسب النوع:',
+    '- text: "text","size":120,"color":"#fff","font":"PostScript name زي Cairo-Bold","align":"center","tracking":20,"leading":0,"allCaps":false,"stroke":"#000","strokeWidth":4,',
+    '   "textAnimators":[{"preset":"' + TEXT_PRESETS.join('|') + '","by":"chars|words|lines","duration":1,"start":0}],"textOut":{"preset":"fadeUp","by":"words","duration":0.6} (خروج),',
+    '   "counter":{"from":0,"to":250,"duration":2,"decimals":0,"prefix":"$","suffix":"+"}',
+    '- shape: "shape":{"kind":"rect|ellipse|star|polygon|path","size":[600,120],"round":30,"points":5,',
+    '   "path":"SVG path d (أيقونات، لوجوهات، خطوط منحنية — بيتسنتر ويتقاس على size)","points":[[x,y],…],"closed":true,"smooth":true,',
+    '   "items":[{"kind":"…","position":[x,y],…}] (أكتر من شكل في لير واحد),',
+    '   "fill":"#f97316" أو null,"stroke":"#fff","strokeWidth":6,"lineCap":"round","dash":20,',
+    '   "gradient":{"colors":["#f97316","#7c2d12"],"type":"linear|radial","from":["0%","50%"],"to":["100%","50%"]},',
+    '   "trim":{"start":0,"end":100,"offset":0} (خط بيترسم: حرّك shape:trimEnd من 0 لـ 100),',
+    '   "repeater":{"copies":8,"position":[0,0],"rotation":45,"scale":100,"startOpacity":100,"endOpacity":30}}',
+    '- solid / adjustment: "color":"#hex" · footage: "file":"مسار","srcIn":0 · light: "lightType":"spot|point|parallel|ambient","light":{"intensity":100,"color":"#fff","castsShadows":1}',
+    '- camera: "camera":{"zoom":2000,"dof":1,"focusDistance":2000,"aperture":50,"blurLevel":100}',
+    '- precomp: "comp":{"width","height","duration"},"layers":[…] (مشاهد جوه مشاهد — استخدمه لتقسيم الفيديو لمشاهد ورا بعض بترانزيشن)',
+    '- particles: "preset":"' + PARTICLES.join('|') + '","count":40,"color":"#hex","colors":[…],"size":[3,8],"speed":60,"burstAt":0.5,"origin":["50%","50%"],"life":2.5',
+    'الخصايص اللي تتحط في transform / keys / expressions:',
+    '  ' + PROPS.join(', '),
+    '  shape:' + SHAPE_PROPS.join(', shape:') + '  (shape:path قيمته SVG path أو نقط — كي فريمز بين شكلين = morph)',
+    '  mask:1.path, mask:1.feather, mask:1.expansion, mask:1.opacity  ·  camera:' + CAMERA_PROPS.join(', camera:') + '  ·  light:' + LIGHT_PROPS.join(', light:'),
+    '  fx:<اسم الإفكت>.<باراميتر> زي fx:glow.intensity، أو fx:<matchName>.<Display Name> لإفكت متسطب',
+    'المنحنيات (آخر عنصر في الكي): ' + EASES.join('، ') + '. المكان بالبكسل أو "%" من الكومب. الوقت بالثواني من أول اللير. الألوان #hex.',
+    'الإفكتات بالاسم: ' + Object.entries(EFFECTS).map(([k, v]) => k + '(' + Object.keys(v.params).join(',') + ')').join('، '),
+    'الماسكات بإحداثيات اللير نفسه (للسوليد والفوتيج = بكسل الكومب). للكلام والأشكال استخدم matte بدل الماسك.'
+  ].join('\n');
+}
+
+/** how a pro motion designer thinks — sent with every scene request */
+function designGuide() {
+  return [
+    'إنت مصمم موشن محترف (مستوى Behance / Motion Collective). قواعدك:',
+    '- كل عنصر داخل بمنحنى قوي (expoOut / backOut / quintOut) — مفيش linear غير للحاجات المستمرة (لف، تكرار).',
+    '- overlap و stagger: العناصر بتدخل ورا بعض بفرق 0.05–0.15 ثانية، والحركة الكبيرة بتتبعها حركة صغيرة (follow-through).',
+    '- مستويات: خلفية فيها حركة هادية (جرادينت، particles، أشكال بتطفو)، وسط، وعنصر رئيسي واضح. عمق بالـ blur والـ scale والـ parallax.',
+    '- ألوان محدودة متناسقة (2–3 + محايد)، تباين قوي، مساحات بيضا كفاية، الكلام مقروء (حجم كبير، تراكينج مظبوط).',
+    '- تفاصيل بتفرق: خطوط بتترسم (trim paths)، ماسك ريفيل، motion blur على الحركة السريعة، glow خفيف، grain بسيط، camera drift.',
+    '- كل مشهد: دخول (0–1 ثانية) ← ثبات بحركة خفيفة مستمرة ← خروج نظيف (آخر 0.5 ثانية) لو مش loop.',
+    '- للفيديوهات الطويلة: precomp لكل مشهد وترانزيشن بينهم (wipe، zoom، shape reveal، matte).',
+    '- اسامي الليرز واضحة ومميزة (هتتعدّل بالاسم بعدين).'
   ].join('\n');
 }
 
@@ -223,6 +492,47 @@ const SCENES = [
     { type: 'shape', name: 'Card 2', threeD: true, shape: { kind: 'rect', size: [W(c) * 0.35, H(c) * 0.45], round: 30, fill: '#fbbf24' }, transform: { position: ['70%', '50%', 600], rotationY: -25, opacity: 85 } },
     { type: 'light', name: 'Key', lightType: 'point', transform: { position: ['30%', '20%', -800] } }
   ] }) }
+,
+  { id: 'line-logo', name: 'لوجو بيترسم بخط', fields: ['title', 'subtitle', 'color'], build: (p, c) => ({ comp: { create: true, name: 'Line Logo', duration: 5, bg: '#0a0705' }, layers: [
+    { type: 'text', name: 'Brand', text: p.title || 'BRAND', size: Math.round(H(c) * 0.08), color: '#ffffff', tracking: 60, transform: { position: ['50%', '72%'] }, textAnimators: [{ preset: 'tracking', by: 'chars', duration: 1.2, start: 1.4 }], keys: { opacity: [[1.4, 0], [1.8, 100]] } },
+    { type: 'text', name: 'Tagline', text: p.subtitle || 'tagline', size: Math.round(H(c) * 0.03), color: '#fdba74', transform: { position: ['50%', '79%'] }, textAnimators: [{ preset: 'fadeUp', by: 'words', duration: 0.6, start: 2 }] },
+    { type: 'shape', name: 'Check', shape: { path: 'M -60 0 L -15 45 L 70 -50', fill: null, stroke: p.color || '#f97316', strokeWidth: 16, trim: { end: 0 } }, transform: { position: ['50%', '42%'] }, keys: { 'shape:trimEnd': [[0.7, 0, 'expoOut'], [1.4, 100]] } },
+    { type: 'shape', name: 'Ring', motionBlur: true, shape: { kind: 'ellipse', size: [H(c) * 0.36, H(c) * 0.36], fill: null, stroke: p.color || '#f97316', strokeWidth: 10, trim: { end: 0 } }, transform: { position: ['50%', '42%'] }, keys: { 'shape:trimEnd': [[0, 0, 'expoInOut'], [1, 100]], 'shape:trimOffset': [[0, -90, 'expoInOut'], [1.2, 0]], scale: [[1, 100, 'backOut'], [1.3, 108], [1.6, 100]] }, effects: [{ name: 'glow', params: { radius: 30, intensity: 0.8 } }] }
+  ] }) },
+  { id: 'particles-title', name: 'عنوان بشرار طاير', fields: ['title', 'subtitle', 'color'], build: (p, c) => ({ comp: { create: true, name: 'Embers Title', duration: 6, bg: '#070403' }, layers: [
+    { type: 'text', name: 'Title', text: p.title || 'العنوان', size: Math.round(H(c) * 0.12), color: '#fff7ed', transform: { position: ['50%', '50%'] }, textAnimators: [{ preset: 'blurIn', by: 'chars', duration: 1.4, start: 0.3 }], textOut: { preset: 'fadeUp', by: 'chars', duration: 0.6, start: 5.2 }, effects: [{ name: 'glow', params: { radius: 40, intensity: 0.6 } }], keys: { scale: [[0.3, 92, 'easeOut'], [6, 100, 'linear']] } },
+    { type: 'text', name: 'Subtitle', text: p.subtitle || '', size: Math.round(H(c) * 0.035), color: p.color || '#fb923c', transform: { position: ['50%', '62%'] }, textAnimators: [{ preset: 'tracking', by: 'chars', duration: 1, start: 1.2 }] },
+    { type: 'particles', name: 'Embers', preset: 'embers', count: 45, color: p.color || '#fb923c' },
+    { type: 'shape', name: 'Heat Glow', shape: { kind: 'ellipse', size: [W(c) * 0.9, H(c) * 0.5], gradient: { colors: [p.color || '#ea580c', '#070403'], type: 'radial', from: ['50%', '100%'], to: ['50%', '40%'] } }, transform: { position: ['50%', '100%'], opacity: 70 }, effects: [{ name: 'blur', params: { amount: 120 } }], expressions: { opacity: '60+Math.sin(time*2)*10' } }
+  ] }) },
+  { id: 'blob-morph', name: 'بلوب بيتشكّل (Morph)', fields: ['title', 'color'], build: (p, c) => ({ comp: { create: true, name: 'Blob Morph', duration: 6, bg: '#fff7ed' }, layers: [
+    { type: 'text', name: 'Title', text: p.title || 'العنوان', size: Math.round(H(c) * 0.11), color: '#ffffff', transform: { position: ['50%', '53%'] }, textAnimators: [{ preset: 'scalePop', by: 'words', duration: 0.7, start: 0.6 }] },
+    { type: 'shape', name: 'Blob', motionBlur: true, shape: { path: 'M0 -200 C110 -200 210 -120 200 0 C190 120 110 210 0 200 C-120 190 -210 110 -200 0 C-190 -110 -110 -200 0 -200 Z', size: [H(c) * 0.75, H(c) * 0.75], gradient: { colors: [p.color || '#f97316', '#c2410c'], from: ['30%', '20%'], to: ['70%', '80%'] } }, transform: { position: ['50%', '50%'] },
+      keys: { 'shape:path': [[0, 'M0 -200 C110 -200 210 -120 200 0 C190 120 110 210 0 200 C-120 190 -210 110 -200 0 C-190 -110 -110 -200 0 -200 Z', 'easeInOut'], [2, 'M0 -230 C150 -190 190 -90 220 20 C200 160 80 190 -20 210 C-150 180 -230 90 -190 -30 C-170 -150 -90 -210 0 -230 Z', 'easeInOut'], [4, 'M0 -190 C90 -220 230 -140 190 10 C170 140 120 230 10 190 C-110 210 -190 90 -220 0 C-200 -120 -130 -170 0 -190 Z', 'easeInOut'], [6, 'M0 -200 C110 -200 210 -120 200 0 C190 120 110 210 0 200 C-120 190 -210 110 -200 0 C-190 -110 -110 -200 0 -200 Z']],
+        scale: [[0, 0, 'backOut'], [0.7, 100]], rotation: [[0, 0, 'linear'], [6, 40]] } }
+  ] }) },
+  { id: 'mask-reveal', name: 'كلام بيطلع من ورا خط', fields: ['title', 'subtitle', 'color'], build: (p, c) => ({ comp: { create: true, name: 'Matte Reveal', duration: 5, bg: '#0b0806' }, layers: [
+    { type: 'shape', name: 'Reveal Box', shape: { kind: 'rect', size: [W(c), H(c) * 0.16], fill: '#ffffff' }, transform: { position: ['50%', '48%'] } },
+    { type: 'text', name: 'Title', text: p.title || 'العنوان', size: Math.round(H(c) * 0.11), color: '#ffffff', matte: { layer: 'Reveal Box', type: 'alpha' }, transform: { position: ['50%', '52%'] }, keys: { position: [[0.3, ['50%', '68%'], 'expoOut'], [1.1, ['50%', '52%']], [4.2, ['50%', '52%'], 'expoIn'], [4.8, ['50%', '36%']]] } },
+    { type: 'shape', name: 'Line', shape: { kind: 'rect', size: [W(c) * 0.5, 6], round: 3, fill: p.color || '#f97316' }, transform: { position: ['50%', '57%'] }, keys: { scale: [[0, [0, 100], 'expoInOut'], [0.6, [100, 100]], [4.3, [100, 100], 'expoInOut'], [4.9, [0, 100]]] } },
+    { type: 'text', name: 'Subtitle', text: p.subtitle || 'سطر تحت', size: Math.round(H(c) * 0.035), color: '#fed7aa', transform: { position: ['50%', '64%'] }, textAnimators: [{ preset: 'fadeUp', by: 'words', duration: 0.6, start: 1 }], textOut: { preset: 'fadeUp', by: 'words', duration: 0.4, start: 4.2 } }
+  ] }) },
+  { id: 'burst-loader', name: 'بيرست خطوط (Repeater)', fields: ['title', 'color'], build: (p, c) => ({ comp: { create: true, name: 'Burst', duration: 4, bg: '#0b0806' }, layers: [
+    { type: 'text', name: 'Label', text: p.title || 'WOW', size: Math.round(H(c) * 0.09), color: '#ffffff', transform: { position: ['50%', '53%'] }, keys: { scale: [[0.2, 0, 'backOut'], [0.7, 100]] } },
+    { type: 'shape', name: 'Rays', shape: { items: [{ kind: 'rect', size: [8, 70], round: 4, position: [0, -H(c) * 0.2] }], fill: p.color || '#f97316', repeater: { copies: 16, position: [0, 0], rotation: 22.5 } }, transform: { position: ['50%', '50%'] }, keys: { scale: [[0, 40, 'expoOut'], [0.8, 100]], 'shape:groupScale': [[0, [100, 0], 'expoOut'], [0.6, [100, 100]], [1.6, [100, 100], 'expoIn'], [2.2, [100, 0]]] }, expressions: { rotation: 'time*20' } }
+  ] }) },
+  { id: 'promo-3', name: 'برومو 3 مشاهد بترانزيشن', fields: ['title', 'subtitle', 'color'], build: (p, c) => {
+    const words = String(p.title || 'جديد • أسرع • أقوى').split(/[•|,،]/).map(x => x.trim()).filter(Boolean).slice(0, 3);
+    while (words.length < 3) words.push(['جديد', 'أسرع', 'أقوى'][words.length]);
+    const scene = (w, i) => ({ type: 'precomp', name: 'Scene ' + (i + 1), start: i * 2, end: i * 2 + 2.4, comp: { duration: 2.4, bg: i % 2 ? '#fff7ed' : (p.color || '#ea580c') }, layers: [
+      { type: 'text', name: 'Word', text: w, size: Math.round(H(c) * 0.16), color: i % 2 ? '#1f140c' : '#ffffff', transform: { position: ['50%', '54%'] }, textAnimators: [{ preset: i === 1 ? 'dropIn' : 'scalePop', by: 'chars', duration: 0.6, start: 0.1 }], keys: { scale: [[0, 100, 'linear'], [2.4, 110]] } },
+      { type: 'particles', name: 'Dust', preset: 'dust', count: 20, color: i % 2 ? '#fdba74' : '#ffffff' }
+    ], keys: i ? { 'mask:1.expansion': [[0, -W(c), 'expoInOut'], [0.5, 0]] } : {}, masks: i ? [{ ellipse: ['50%', '50%', '160%', '160%'] }] : [] });
+    return { comp: { create: true, name: 'Promo', duration: 6.4 }, layers: [
+      { type: 'text', name: 'CTA', start: 5.2, text: p.subtitle || 'جرّبه دلوقتي', size: Math.round(H(c) * 0.05), color: '#ffffff', transform: { position: ['50%', '82%'] }, textAnimators: [{ preset: 'fadeUp', by: 'words', duration: 0.5, start: 5.3 }] },
+      scene(words[2], 2), scene(words[1], 1), scene(words[0], 0)
+    ] };
+  } }
 ];
 /** a library scene with the user's words / colour → raw scene (then normalize) */
 function buildLibrary(id, params = {}, compInfo = {}) {
@@ -289,4 +599,4 @@ function montageScene({ clips = [], beats = [], style = 'energetic', ratio = '16
   return { scene: { comp: { create: true, name, width: W0, height: H0, fps: 30, duration: Math.max(1, +total.toFixed(2)), bg: '#000000' }, layers }, cuts };
 }
 
-module.exports = { EFFECTS, TYPES, PROPS, EASES, SCENES, STYLES, RATIOS, normalize, promptDoc, buildLibrary, montageScene, hex };
+module.exports = { EFFECTS, TYPES, PROPS, SHAPE_PROPS, EASES, PARTICLES, TEXT_PRESETS, SCENES, STYLES, RATIOS, normalize, normalizeLook, keyTarget, promptDoc, designGuide, buildLibrary, montageScene, hex };

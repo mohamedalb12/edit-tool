@@ -230,84 +230,146 @@ class AEServices {
   async sceneEdit(ops, state) {
     const st = state || await this.host('sceneState', {});
     const comp = st.comp || {}, out = [], warnings = [];
-    for (const op of (ops || []).slice(0, 40)) {
+    const one = raw => { const n = aeScene.normalize({ comp: { create: false }, layers: [raw] }, comp); warnings.push(...n.warnings); return n.spec.layers; };
+    for (const op of (ops || []).slice(0, 60)) {
       if (!op || !op.op) continue;
       if (op.op === 'delete' && op.layer) out.push({ op: 'delete', layer: String(op.layer) });
       else if (op.op === 'retime') { const f = +op.factor; if (f > 0) out.push({ op: 'retime', factor: Math.min(5, Math.max(0.2, f)) }); }
-      else if (op.op === 'add') {
-        const n = aeScene.normalize({ comp: { create: false }, layers: [op.layer || op.spec] }, comp);
-        warnings.push(...n.warnings);
-        if (n.spec.layers[0]) out.push({ op: 'add', spec: n.spec.layers[0] });
+      else if (op.op === 'comp') { const d = +op.duration; if (d > 0) out.push({ op: 'comp', duration: Math.min(600, d) }); }
+      else if (op.op === 'add') { for (const L of one(op.layer || op.spec)) out.push({ op: 'add', spec: L }); }
+      else if (op.op === 'replace' && op.layer) {
+        const made = one(Object.assign({ name: op.layer }, op.spec || op.with || {}));
+        if (made.length) { out.push({ op: 'replace', layer: String(op.layer), spec: made[0] }); for (const extra of made.slice(1)) out.push({ op: 'add', spec: extra }); }
       } else if (op.op === 'set' && op.layer) {
-        const look = op.look || {}, known = (st.layers || []).find(l => l.name === op.layer);
-        const n = aeScene.normalize({ comp: { create: false }, layers: [{ type: 'null', name: op.layer, threeD: known && known.threeD, transform: look.transform, keys: look.keys, effects: look.effects, expressions: look.expressions }] }, comp);
+        const known = (st.layers || []).find(l => l.name === op.layer);
+        const n = aeScene.normalizeLook(op.look, comp, { threeD: !!(known && known.threeD) });
         warnings.push(...n.warnings);
-        const L = n.spec.layers[0], o = { transform: L.transform, keys: L.keys, effects: L.effects, expressions: L.expressions };
-        if (look.text !== undefined) o.text = String(look.text).slice(0, 400);
-        if (look.color) o.color = aeScene.hex(look.color);
-        if (+look.size > 0) o.size = Math.min(1000, Math.max(4, +look.size));
-        out.push({ op: 'set', layer: String(op.layer), look: o });
+        out.push({ op: 'set', layer: String(op.layer), look: n.look });
       }
     }
     if (!out.length) throw new Error('مفيش تعديل يتعمل' + (warnings.length ? ': ' + warnings.slice(0, 3).join('، ') : ''));
     const r = await this.host('editScene', { ops: out });
     return Object.assign({}, r, { warnings });
   }
-  /** frames of reference images / videos for the vision model (a video → 4 moments) */
-  async refFrames(files, { width = 512, perVideo = 4, max = 10 } = {}) {
-    const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe, frames = [];
-    for (const f of (files || []).slice(0, 6)) {
+  /**
+   * Frames of reference images / videos for the vision model. A video → evenly spaced moments (with their times, so
+   * the motion between them reads) + its pacing (cuts per second) from shot detection.
+   */
+  async refFrames(files, { width = 512, perVideo = 8, max = 14 } = {}) {
+    const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe, frames = [], notes = [];
+    const list = (files || []).slice(0, 6), per = Math.max(2, Math.min(perVideo, Math.floor(max / Math.max(1, list.length))));
+    for (const f of list) {
       if (frames.length >= max) break;
       const name = path.basename(f);
       if (STILL.test(f)) { frames.push({ label: name, time: 0, b64: await vision.frameJpeg(ffmpeg, f, 0, { width }) }); continue; }
       let dur = 0; try { dur = probe ? (await ff.probe(probe, f)).duration : 0; } catch (_) {}
-      const n = dur > 0 ? perVideo : 1;
+      if (dur > 0) {
+        try {
+          const cuts = await vision.detectShots(ffmpeg, f, { duration: Math.min(dur, 120) });
+          notes.push(`${name}: ${dur.toFixed(1)} ثانية، ${cuts.length} قطع (لقطة كل ${(dur / (cuts.length + 1)).toFixed(1)} ثانية تقريبًا)`);
+        } catch (_) {}
+      }
+      const n = dur > 0 ? per : 1;
       for (let i = 0; i < n && frames.length < max; i++) {
         const t = dur > 0 ? dur * (i + 0.5) / n : 0;
-        try { frames.push({ label: name + ' @' + t.toFixed(1) + 's', time: t, b64: await vision.frameJpeg(ffmpeg, f, t, { width }) }); } catch (_) {}
+        try { frames.push({ label: name + ' @' + t.toFixed(2) + 's', time: t, b64: await vision.frameJpeg(ffmpeg, f, t, { width }) }); } catch (_) {}
       }
     }
     if (files && files.length && !frames.length) throw new Error('مقدرتش أطلع صور من الريفرانس');
+    frames.notes = notes;
     return frames;
   }
-  async askJson(system, content, maxTokens = 8000) {
-    const messages = [{ role: 'system', content: system + '\nرد بـ JSON صالح فقط من غير أي كلام زيادة.' }, ...this.history.slice(-8), { role: 'user', content }];
+  async askJson(system, content, maxTokens = 16000, { history = true } = {}) {
+    const messages = [{ role: 'system', content: system + '\nرد بـ JSON صالح فقط من غير أي كلام زيادة.' }, ...(history ? this.history.slice(-8) : []), { role: 'user', content }];
     let m;
     try { m = await this.llm.chat({ model: this.model('motion_ai'), messages, maxTokens, jsonMode: true }); }
     catch (e) { if (e.status === 400) m = await this.llm.chat({ model: this.model('motion_ai'), messages, maxTokens }); else throw e; }
     return extractJson(m.content) || {};
   }
+  /** plugins installed in AE (Saber, Deep Glow, Particular…) — asked once per session */
+  async plugins() {
+    if (!this._plugins) { try { this._plugins = ((await this.host('effectsList', {})) || {}).effects || []; } catch (_) { this._plugins = []; } }
+    return this._plugins;
+  }
+  /** PNG frames of what's in the active comp now (needs AE's "write files" permission) → [{label, b64, mime}] */
+  async snapshot(n = 4) {
+    const st = await this.host('sceneState', {});
+    if (!st.comp) return [];
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'editfast-snap-'));
+    const times = Array.from({ length: n }, (_, i) => +(st.comp.duration * (i + 0.6) / (n + 0.2)).toFixed(2));
+    const r = await this.host('snapshot', { times, dir });
+    const out = [];
+    for (const [i, f] of (r.files || []).entries()) {
+      for (let k = 0; k < 40 && !fs.existsSync(f); k++) await new Promise(res => setTimeout(res, 100)); // AE may write it a moment later
+      try { out.push({ label: times[i] + 's', b64: fs.readFileSync(f).toString('base64'), mime: 'image/png' }); } catch (_) {}
+    }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    return out;
+  }
+  sceneSystem(where, refCount, plugins) {
+    return [
+      'أنت مونتير ومصمم موشن جرافيك محترف جوه أفتر إفكتس. بتحوّل وصف المستخدم (بالمصري) لمشهد حقيقي بليرز وكي فريمز هو يقدر يعدّل عليها.',
+      aeScene.designGuide(),
+      'ردّك JSON بواحد من الأشكال دي:',
+      '1) مشهد جديد: {"action":"build","say":"جملة بالمصري","scene":{…}}',
+      '2) تعديل على الليرز الموجودة بأساميها بالظبط: {"action":"edit","say":"…","ops":[',
+      '   {"op":"set","layer":"اسم","look":{"transform":{…},"keys":{…},"effects":[…],"expressions":{…},"masks":[…],"matte":{…},"text":"…","color":"#hex","size":90,"font":"…","textAnimator":{…}}},',
+      '   {"op":"add","layer":{…لير كامل…}}, {"op":"replace","layer":"اسم","spec":{…اللير من جديد…}}, {"op":"delete","layer":"اسم"},',
+      '   {"op":"retime","factor":1.5 (أكبر من 1 = أبطأ)}, {"op":"comp","duration":10}]}',
+      '3) مشهد جاهز من المكتبة لو مناسب بالظبط: {"action":"library","say":"…","use":"id","params":{"title":"…","subtitle":"…","color":"#hex"}} — المكتبة: ' + aeScene.SCENES.map(s => s.id + ' (' + s.name + ')').join('، '),
+      aeScene.promptDoc(),
+      plugins && plugins.length ? 'بلاجنز متسطبة عند المستخدم (استخدمها بالـ match لو هتفرق، الباراميترز بأساميها الإنجليزي): ' + plugins.slice(0, 80).map(p => p.name + ' = ' + p.match).join('، ') : '',
+      where === 'new' ? 'المستخدم عايز مشهد جديد في كومب جديد (build).' : where === 'here' ? 'المستخدم عايز المشهد جوه الكومب المفتوح: build مع comp.create=false، أو edit.' : 'لو بيطلب تغيير في اللي موجود استخدم edit، ولو حاجة جديدة build.',
+      refCount ? 'المستخدم بعت ريفرانس (الصور تحت، بتوقيتها). حلّل: الألوان بالظبط (#hex)، الخط ووزنه وحجمه، التكوين والمسافات، الإيقاع (من التوقيتات وعدد القطعات)، شكل الحركة بين الفريمات، الإفكتات (جلو، بلور، جرين، particles…). واعمل مشهد قريب منه جداً بنفس الإحساس — لو فيه حاجة مش متاحة اعمل أقرب بديل. اكتب التحليل في "reference" بالمصري في سطرين.' : ''
+    ].filter(Boolean).join('\n');
+  }
   /**
    * The director: "اعمل إنترو بلوجو برتقالي بيلف" / "خلّي العنوان أكبر وأبطأ" / a reference image or video →
-   * builds a new scene, edits the open one by layer names, or customises a library scene. Remembers the chat.
-   * where: auto | new | here
+   * builds a new scene, edits the open one by layer names, or customises a library scene; then (review) looks at
+   * frames of what it built and fixes what doesn't match. Remembers the chat. where: auto | new | here
    */
-  async director({ message, refs = [], where = 'auto' }) {
+  async director({ message, refs = [], where = 'auto', review = true, onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
     if (!this.settings.keys.openrouter) throw new Error('حط مفتاح OpenRouter من الإعدادات الأول');
     if (!String(message || '').trim() && !refs.length) throw new Error('اكتب المشهد اللي عايزه');
     const state = await this.host('sceneState', {}).catch(() => ({ comp: null, layers: [] }));
+    if (refs.length) step('بيحلّل الريفرانس…');
     const frames = refs.length ? await this.refFrames(refs) : [];
-    const sys = [
-      'أنت مونتير ومصمم موشن جرافيك محترف جوه أفتر إفكتس. بتحوّل وصف المستخدم (بالمصري) لمشهد حقيقي بليرز وكي فريمز هو يقدر يعدّل عليها.',
-      'ردّك JSON بواحد من الأشكال دي:',
-      '1) مشهد جديد: {"action":"build","say":"جملة بالمصري","scene":{…}}',
-      '2) تعديل على الليرز الموجودة بأساميها بالظبط: {"action":"edit","say":"…","ops":[{"op":"set","layer":"اسم اللير","look":{"transform":{…},"keys":{…},"effects":[…],"expressions":{…},"text":"…","color":"#hex","size":90}},{"op":"add","layer":{…لير كامل بنفس شكل المشهد…}},{"op":"delete","layer":"اسم"},{"op":"retime","factor":1.5 (أكبر من 1 = أبطأ)}]}',
-      '3) مشهد جاهز من المكتبة لو مناسب: {"action":"library","say":"…","use":"id","params":{"title":"…","subtitle":"…","color":"#hex"}} — المكتبة: ' + aeScene.SCENES.map(s => s.id + ' (' + s.name + ')').join('، '),
-      aeScene.promptDoc(),
-      where === 'new' ? 'المستخدم عايز مشهد جديد في كومب جديد (build).' : where === 'here' ? 'المستخدم عايز المشهد جوه الكومب المفتوح: build مع comp.create=false، أو edit.' : 'لو بيطلب تغيير في اللي موجود استخدم edit، ولو حاجة جديدة build.',
-      frames.length ? 'المستخدم بعت ريفرانس (الصور تحت). حلّل: الألوان بالظبط (#hex)، الخط ووزنه، التكوين والمسافات، الإيقاع وشكل الحركة المتوقع، الإفكتات (جلو، بلور، جرين…). واعمل مشهد قريب منه جداً بنفس الإحساس، واكتب التحليل في "reference" بالمصري في سطرين.' : ''
-    ].filter(Boolean).join('\n');
-    const ctx = state.comp ? 'الكومب المفتوح: ' + JSON.stringify(state).slice(0, 6000) : 'مفيش كومب مفتوح.';
-    const text = ctx + '\nالطلب: ' + (message || 'اعمل مشهد زي الريفرانس');
-    const res = await this.askJson(sys, frames.length ? vision.imageMessage(frames, text).content : text);
-    this.history.push({ role: 'user', content: String(message || '').slice(0, 1500) + (frames.length ? ' [+ريفرانس]' : '') }, { role: 'assistant', content: JSON.stringify(res).slice(0, 4000) });
+    const plugins = await this.plugins();
+    const ctx = state.comp ? 'الكومب المفتوح: ' + JSON.stringify(state).slice(0, 8000) : 'مفيش كومب مفتوح.';
+    const text = ctx + (frames.notes && frames.notes.length ? '\nالريفرانس: ' + frames.notes.join(' · ') : '') + (frames.length ? '\nصور الريفرانس بالترتيب: ' + frames.map((f, i) => '#' + (i + 1) + ' ' + f.label).join('، ') : '') + '\nالطلب: ' + (message || 'اعمل مشهد زي الريفرانس');
+    step('بيصمّم المشهد…');
+    const res = await this.askJson(this.sceneSystem(where, frames.length, plugins), frames.length ? vision.imageMessage(frames, text).content : text);
+    this.history.push({ role: 'user', content: String(message || '').slice(0, 1500) + (frames.length ? ' [+ريفرانس]' : '') }, { role: 'assistant', content: JSON.stringify(res).slice(0, 6000) });
     this.history = this.history.slice(-12);
-    const out = { action: res.action, say: String(res.say || '').slice(0, 400), reference: res.reference ? String(res.reference).slice(0, 600) : '' };
+    const out = { action: res.action, say: String(res.say || '').slice(0, 500), reference: res.reference ? String(res.reference).slice(0, 800) : '' };
+    step('بيبني الليرز…');
     if (res.action === 'edit') out.result = await this.sceneEdit(res.ops, state);
     else if (res.action === 'library') out.result = await this.libraryScene(res.use, res.params || {}, where);
     else if (res.scene) { out.action = 'build'; out.result = await this.sceneBuild(res.scene, { where }); }
     else throw new Error('الموديل مارجّعش مشهد — جرّب توصف تاني' + (out.say ? ': ' + out.say : ''));
+    if (review) {
+      try { out.review = await this.reviewScene({ message, frames, step }); } catch (e) { out.review = { skipped: e.message }; this.log('review: ' + e.message); }
+    }
     return out;
+  }
+  /**
+   * Self-review: frames of the built comp go back to the model next to the request (and the reference); it answers
+   * {"ok":true} or edit ops that fix what's off (overlaps, unreadable text, empty frames, wrong colours…), applied once.
+   */
+  async reviewScene({ message, frames = [], step } = {}) {
+    step && step('بيراجع شغله…');
+    const shots = await this.snapshot(4);
+    if (!shots.length) return { skipped: 'مفيش صور من الكومب' };
+    const state = await this.host('sceneState', {});
+    const content = [{ type: 'text', text: 'الطلب: ' + (message || 'زي الريفرانس') + '\nالكومب دلوقتي: ' + JSON.stringify(state).slice(0, 8000) + '\nالصور الجاية: ' + shots.map((s, i) => '#' + (i + 1) + ' عند ' + s.label).join('، ') + (frames.length ? ' — وبعدها الريفرانس' : '') }]
+      .concat(shots.map(s => ({ type: 'image_url', image_url: { url: 'data:' + s.mime + ';base64,' + s.b64 } })))
+      .concat(frames.slice(0, 6).map(f => ({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + f.b64 } })));
+    const res = await this.askJson('أنت مدير فني (art director) بتراجع مشهد موشن اتعمل في أفتر. بص على الفريمات: كلام مقطوع أو طالع برّه الكادر أو مش مقروء، عناصر فوق بعض غلط، فريم فاضي، ألوان مش متناسقة أو بعيدة عن الطلب/الريفرانس، حركة ناقصة. لو كله تمام رجّع {"ok":true,"say":"…"}، لو لأ رجّع {"ok":false,"say":"اللي اتصلّح بالمصري","ops":[…]} بنفس شكل تعديلات المونتير (set/add/replace/delete) على أسامي الليرز بالظبط.\n' + aeScene.promptDoc(), content, 8000, { history: false });
+    if (res.ok !== false || !Array.isArray(res.ops) || !res.ops.length) return { ok: true, say: String(res.say || '').slice(0, 300) };
+    step && step('بيصلّح…');
+    const r = await this.sceneEdit(res.ops, state);
+    return { ok: false, fixed: r.done, say: String(res.say || '').slice(0, 300) };
   }
   directorReset() { this.history = []; return true; }
   /**

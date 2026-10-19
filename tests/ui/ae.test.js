@@ -122,7 +122,8 @@ test('director: describe → chat answer; reference attached; library scene with
   await page.fill('#view textarea', 'إنترو بلوجو بيلف');
   await click('ابعت');
   await page.waitForSelector('#view .msg.ai');
-  assert.deepEqual(await call('director'), { message: 'إنترو بلوجو بيلف', refs: ['/refs/look.jpg'], where: 'new' });
+  assert.deepEqual(await call('director'), { message: 'إنترو بلوجو بيلف', refs: ['/refs/look.jpg'], where: 'new', review: true });
+  assert.match(await page.locator('#view .msg.ai').first().textContent(), /راجع وصلّح 1/);
   assert.match(await page.locator('#view .msg.ai').first().textContent(), /برتقالي وخط عريض/);
   assert.equal(await page.locator('#view .chips .chip', { hasText: 'look.jpg' }).count(), 0, 'refs cleared after sending');
   await page.locator('[data-scene="kinetic-title"]').click();

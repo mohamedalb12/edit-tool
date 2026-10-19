@@ -239,18 +239,19 @@
   });
 
   /* ——— المونتير الذكي: وصف / ريفرانس → مشهد بليرز وكي فريمز، ومونتاج لوحده ——— */
-  var chat = [], refs = [], where = 'auto', lib = { id: null, p: {} }, ed = { files: [], music: null, style: 'energetic', ratio: '16:9', duration: 0, brief: '' };
+  var chat = [], refs = [], where = 'auto', review = true, lib = { id: null, p: {} }, ed = { files: [], music: null, style: 'energetic', ratio: '16:9', duration: 0, brief: '' };
   function base(f) { return String(f).split(/[\\/]/).pop(); }
   function summary(r) {
     var x = r && r.result || r || {};
     var t = x.layers !== undefined ? x.layers + ' لير' + (x.keys ? ' · ' + x.keys + ' كي فريم' : '') + (x.comp ? ' في "' + x.comp + '"' : '') : x.done !== undefined ? x.done + ' تعديل' + (x.missing && x.missing.length ? ' (مش لاقي: ' + x.missing.join('، ') + ')' : '') : '';
-    return t + (x.warnings && x.warnings.length ? ' — ⚠ ' + x.warnings.slice(0, 2).join('، ') : '');
+    var w = (x.warnings || []).concat(x.skipped || []);
+    return t + (w.length ? ' — ⚠ اتساب: ' + w.slice(0, 3).join('، ') + (w.length > 3 ? ' (+' + (w.length - 3) + ')' : '') : '');
   }
   EF.tabs.push({
     id: 'director', label: 'المونتير', title: 'المونتير الذكي',
     render: function (view) {
       var log = h('div', { class: 'chat' }), q = h('textarea', { rows: 3, placeholder: 'مثلًا: إنترو 5 ثواني، لوجو بيلف ويظهر بجلو برتقالي، تحته اسم القناة حرف حرف، وخلفية غامقة فيها دواير بتتحرك ببطء' });
-      var refBox = h('div', { class: 'chips' });
+      var refBox = h('div', { class: 'chips' }), live = h('p', { class: 'hint' });
       function drawLog() {
         UI.empty(log);
         if (!chat.length) log.appendChild(UI.hint('وصّف المشهد بالمصري — بيبني ليرز وكي فريمز حقيقية في كومب جديد، وبعدها قولّه "كبّر العنوان" أو "خلّيها أبطأ" أو "غيّر اللون لأزرق" ويعدّل على نفس الليرز.'));
@@ -269,20 +270,23 @@
         chat.push({ who: 'user', text: text || 'اعمل زي الريفرانس', info: refs.length ? '📎 ' + refs.map(base).join('، ') : '' });
         drawLog();
         var r0 = refs.slice();
-        return S().director({ message: text, refs: r0, where: where }).then(function (r) {
-          chat.push({ who: 'ai', text: r.say || (r.action === 'edit' ? 'عدّلت ✓' : 'المشهد جاهز ✓'), ref: r.reference, info: summary(r) });
+        return S().director({ message: text, refs: r0, where: where, review: review, onStep: function (m) { live.textContent = m; } }).then(function (r) {
+          live.textContent = '';
+          var rv = r.review || {};
+          chat.push({ who: 'ai', text: r.say || (r.action === 'edit' ? 'عدّلت ✓' : 'المشهد جاهز ✓'), ref: r.reference, info: summary(r) + (rv.fixed ? ' · 🔁 راجع وصلّح ' + rv.fixed + ': ' + (rv.say || '') : rv.ok && rv.say ? ' · ✓ ' + rv.say : '') });
           q.value = ''; refs = []; drawRefs(); drawLog();
           ok(r.action === 'edit' ? 'اتعدّل ✓' : 'المشهد اتبنى ✓');
-        }, function (e) { chat.push({ who: 'ai', text: '✗ ' + e.message }); drawLog(); throw e; });
+        }, function (e) { live.textContent = ''; chat.push({ who: 'ai', text: '✗ ' + e.message }); drawLog(); throw e; });
       }, 'primary');
       q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send.click(); });
       view.appendChild(UI.card('قولّه المشهد',
-        log, q, refBox,
+        log, live, q, refBox,
         UI.row(UI.seg([{ value: 'auto', label: 'هو يقرر' }, { value: 'new', label: 'كومب جديد' }, { value: 'here', label: 'في الكومب المفتوح' }], where, function (v) { where = v; }),
           UI.btn('📎 ريفرانس', function () { var f = EF.pickFiles('صور أو فيديو ريفرانس', ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mkv']); if (f && f.length) { refs = refs.concat(f).slice(0, 6); drawRefs(); } }, 'small')),
+        UI.row(h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: review, 'data-review': '1', onchange: function (e) { review = e.target.checked; } }), ' يراجع شغله ويصلّحه (بيشوف فريمات من اللي عمله)')),
         UI.modelPicker('motion_ai'),
         UI.row(send, UI.btn('محادثة جديدة', function () { chat = []; S().directorReset(); drawLog(); }, 'small ghost')),
-        UI.hint('الريفرانس: صورة أو فيديو (بياخد منه 4 لقطات) — بيحلّل الألوان والخط والتكوين والحركة ويعمل مشهد قريب منه. كل مشهد أو تعديل Undo واحد (Ctrl+Z). الـ AI بيكتب وصف المشهد بس — الإضافة هي اللي بتبني الليرز، ومفيش كود بيتشغّل.')));
+        UI.hint('بيعمل: كلام وأشكال وأيقونات SVG وخطوط بتترسم (Trim Paths) وماسكات وTrack Matte وجرادينت وRepeater وMorph وبري كومب وparticles وكاميرا ثري دي وأي إفكت متسطب (حتى البلاجنز زي Saber). الريفرانس: صورة أو فيديو (بياخد منه 8 لقطات بتوقيتها وإيقاع القطعات) — بيحلّل الألوان والخط والتكوين والحركة ويعمل مشهد قريب منه. كل مشهد أو تعديل Undo واحد (Ctrl+Z). الـ AI بيكتب وصف المشهد بس — الإضافة هي اللي بتبني الليرز، ومفيش كود بيتشغّل.')));
       drawLog(); drawRefs();
 
       // pro scenes, ready to customise

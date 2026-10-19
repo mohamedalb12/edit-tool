@@ -51,7 +51,7 @@
     aiRun: function (steps) { return rec('aiRun', steps, { done: steps.map(function (s) { return s.action; }), failed: [] }); },
     sceneLibrary: function () { return [{ id: 'kinetic-title', name: 'عنوان كاينتك', fields: ['title', 'subtitle', 'color'] }, { id: 'logo-reveal', name: 'ظهور لوجو', fields: ['title', 'color', 'file'] }]; },
     editStyles: function () { return [{ id: 'energetic', name: 'سريع وحماسي' }, { id: 'cinematic', name: 'سينمائي' }]; },
-    director: function (o) { return rec('director', o, { action: o.refs.length ? 'build' : 'edit', say: 'تمام', reference: o.refs.length ? 'برتقالي وخط عريض' : '', result: { layers: 4, keys: 12, comp: 'Intro', warnings: [] } }); },
+    director: function (o) { o.onStep && o.onStep('بيصمّم المشهد…'); return rec('director', { message: o.message, refs: o.refs, where: o.where, review: o.review }, { action: o.refs.length ? 'build' : 'edit', say: 'تمام', reference: o.refs.length ? 'برتقالي وخط عريض' : '', result: { layers: 4, keys: 12, comp: 'Intro', warnings: [], skipped: ['VIDEOCOPILOT 3DSaber'] }, review: { ok: false, fixed: 1, say: 'كبّرت الكلام' } }); },
     directorReset: function () { calls.push({ name: 'directorReset' }); return true; },
     libraryScene: function (id, p) { return rec('libraryScene', { id: id, p: p }, { layers: 4, keys: 9, comp: 'Kinetic Title', warnings: [] }); },
     autoEdit: function (o) { o.onStep && o.onStep('بيبني'); return rec('autoEdit', { files: o.files, music: o.music, style: o.style, ratio: o.ratio, brief: o.brief }, { comp: 'EditFast Edit', cuts: 16, bpm: 120, note: '' }); },

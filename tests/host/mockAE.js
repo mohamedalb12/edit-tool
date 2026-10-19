@@ -67,7 +67,9 @@ class Group {
   add(child) { child.parentProperty = this; this.children.push(child); return child; }
   addProperty(matchName) { if (!this.factory) throw new Error('cannot add to ' + this.matchName); const c = this.factory(matchName); if (!c) throw new Error('unknown ' + matchName); return this.add(c); }
   canAddProperty(m) { return !!this.factory && !!this.factory(m); }
+  remove() { const c = this.parentProperty.children; c.splice(c.indexOf(this), 1); }
 }
+class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
 
 /* ---- effects ---- */
 function effect(matchName) {
@@ -79,22 +81,31 @@ function effect(matchName) {
   else if (matchName === 'ADBE Fill') { g.add(new Prop('ADBE Fill-0001', 'Fill Mask', 0, PVT.OneD)); g.add(new Prop('ADBE Fill-0002', 'Color', [1, 0, 0, 1], PVT.COLOR)); }
   else if (matchName === 'ADBE Gaussian Blur 2') g.add(new Prop('ADBE Gaussian Blur 2-0001', 'Blurriness', 0, PVT.OneD));
   else if (/^ADBE (Glo2|Drop Shadow|Ramp|Tint|Motion Blur|Noise|Turbulent Displace)$/.test(matchName)) {
-    const n = { 'ADBE Glo2': 4, 'ADBE Drop Shadow': 5, 'ADBE Ramp': 4, 'ADBE Tint': 3, 'ADBE Motion Blur': 2, 'ADBE Noise': 1, 'ADBE Turbulent Displace': 3 }[matchName];
+    const n = { 'ADBE Glo2': 4, 'ADBE Drop Shadow': 5, 'ADBE Ramp': 5, 'ADBE Tint': 3, 'ADBE Motion Blur': 2, 'ADBE Noise': 1, 'ADBE Turbulent Displace': 3 }[matchName];
     const colors = { 'ADBE Drop Shadow-0001': 1, 'ADBE Ramp-0002': 1, 'ADBE Ramp-0004': 1, 'ADBE Tint-0001': 1, 'ADBE Tint-0002': 1 };
     for (let i = 1; i <= n; i++) { const m = matchName + '-000' + i; g.add(colors[m] ? new Prop(m, m, [0, 0, 0, 1], PVT.COLOR) : new Prop(m, m, 0, PVT.OneD)); }
   }
-  else return null;
+  else {
+    const def = Object.values(require('../../core/aeScene').EFFECTS).find(d => d.match === matchName);
+    const plugin = { 'VIDEOCOPILOT 3DSaber': ['Glow Intensity', 'Core Size', 'Start Offset'] }[matchName];
+    if (!def && !plugin) return null;
+    for (const pm of def ? Object.values(def.params) : plugin) if (!g.property(pm) && !(matchName === 'ADBE Fractal Noise' && pm === 'Scale')) g.add(new Prop(pm, pm, /Color|Highlights|Midtones|Shadows$/.test(pm) && !/Shadows/.test(matchName) ? [0, 0, 0, 1] : /Center|^Start$|^End$|-0001$|-0003$/.test(pm) && matchName !== 'ADBE Gaussian Blur 2' && matchName !== 'ADBE Noise' && !/Motion Blur|Tint|Turbulent|Glo2/.test(matchName) ? [0, 0] : 0, PVT.OneD));
+    if (matchName === 'ADBE Fractal Noise') g.add(new Group('ADBE Fractal Noise Transform', 'Transform')).add(new Prop('Scale', 'Scale', 100, PVT.OneD));
+  }
   return g;
 }
 
 /* ---- shape contents ---- */
 function vectorItem(m) {
-  if (m === 'ADBE Vector Group') { const g = new Group(m, 'Group 1', PropertyType.INDEXED_GROUP); g.add(new Group('ADBE Vectors Group', 'Contents', PropertyType.INDEXED_GROUP, vectorItem)); g.add(new Group('ADBE Vector Transform Group', 'Transform')); return g; }
+  if (m === 'ADBE Vector Group') { const g = new Group(m, 'Group 1', PropertyType.INDEXED_GROUP); g.add(new Group('ADBE Vectors Group', 'Contents', PropertyType.INDEXED_GROUP, vectorItem)); const t = g.add(new Group('ADBE Vector Transform Group', 'Transform')); t.add(new Prop('ADBE Vector Position', 'Position', [0, 0], PVT.TwoD_SPATIAL)); t.add(new Prop('ADBE Vector Scale', 'Scale', [100, 100], PVT.TwoD)); t.add(new Prop('ADBE Vector Rotation', 'Rotation', 0, PVT.OneD)); return g; }
+  if (m === 'ADBE Vector Shape - Group') { const g = new Group(m, 'Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Shape', 'Path', new Shape(), PVT.SHAPE)); return g; }
+  if (m === 'ADBE Vector Filter - Trim') { const g = new Group(m, 'Trim Paths 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Trim Start', 'Start', 0, PVT.OneD)); g.add(new Prop('ADBE Vector Trim End', 'End', 100, PVT.OneD)); g.add(new Prop('ADBE Vector Trim Offset', 'Offset', 0, PVT.OneD)); return g; }
+  if (m === 'ADBE Vector Filter - Repeater') { const g = new Group(m, 'Repeater 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Repeater Copies', 'Copies', 3, PVT.OneD)); g.add(new Prop('ADBE Vector Repeater Offset', 'Offset', 0, PVT.OneD)); const t = g.add(new Group('ADBE Vector Repeater Transform', 'Transform')); t.add(new Prop('ADBE Vector Repeater Position', 'Position', [100, 0], PVT.TwoD_SPATIAL)); t.add(new Prop('ADBE Vector Repeater Scale', 'Scale', [100, 100], PVT.TwoD)); t.add(new Prop('ADBE Vector Repeater Rotation', 'Rotation', 0, PVT.OneD)); t.add(new Prop('ADBE Vector Repeater Opacity 1', 'Start Opacity', 100, PVT.OneD)); t.add(new Prop('ADBE Vector Repeater Opacity 2', 'End Opacity', 100, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Rect') { const g = new Group(m, 'Rectangle Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Rect Size', 'Size', [100, 100], PVT.TwoD)); g.add(new Prop('ADBE Vector Rect Roundness', 'Roundness', 0, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Ellipse') { const g = new Group(m, 'Ellipse Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Ellipse Size', 'Size', [100, 100], PVT.TwoD)); return g; }
-  if (m === 'ADBE Vector Shape - Star') { const g = new Group(m, 'Polystar Path 1', PropertyType.INDEXED_GROUP); ['ADBE Vector Star Type', 'ADBE Vector Star Points', 'ADBE Vector Star Outer Radius', 'ADBE Vector Star Inner Radius'].forEach(x => g.add(new Prop(x, x, 1, PVT.OneD))); return g; }
+  if (m === 'ADBE Vector Shape - Star') { const g = new Group(m, 'Polystar Path 1', PropertyType.INDEXED_GROUP); ['ADBE Vector Star Type', 'ADBE Vector Star Points', 'ADBE Vector Star Outer Radius', 'ADBE Vector Star Inner Radius', 'ADBE Vector Star Rotation'].forEach(x => g.add(new Prop(x, x, 1, PVT.OneD))); return g; }
   if (m === 'ADBE Vector Graphic - Fill') { const g = new Group(m, 'Fill 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Fill Color', 'Color', [1, 0, 0, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Fill Opacity', 'Opacity', 100, PVT.OneD)); return g; }
-  if (m === 'ADBE Vector Graphic - Stroke') { const g = new Group(m, 'Stroke 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Stroke Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Stroke Width', 'Stroke Width', 2, PVT.OneD)); return g; }
+  if (m === 'ADBE Vector Graphic - Stroke') { const g = new Group(m, 'Stroke 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Stroke Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Stroke Width', 'Stroke Width', 2, PVT.OneD)); g.add(new Prop('ADBE Vector Stroke Line Cap', 'Line Cap', 1, PVT.OneD)); g.add(new Prop('ADBE Vector Stroke Line Join', 'Line Join', 1, PVT.OneD)); g.add(new Group('ADBE Vector Stroke Dashes', 'Dashes', PropertyType.INDEXED_GROUP, dm => dm === 'ADBE Vector Stroke Dash 1' ? new Prop(dm, 'Dash', 10, PVT.OneD) : null)); return g; }
   return null;
 }
 
@@ -112,7 +123,7 @@ function textAnimatorItem(m) {
   }));
   void sels;
   an.add(new Group('ADBE Text Animator Properties', 'Properties', PropertyType.NAMED_GROUP, pm => {
-    const T = { 'ADBE Text Opacity': [100, PVT.OneD], 'ADBE Text Position 3D': [[0, 0, 0], PVT.ThreeD], 'ADBE Text Blur': [[0, 0], PVT.TwoD], 'ADBE Text Scale 3D': [[100, 100, 100], PVT.ThreeD], 'ADBE Text Tracking Amount': [0, PVT.OneD] }[pm];
+    const T = { 'ADBE Text Opacity': [100, PVT.OneD], 'ADBE Text Position 3D': [[0, 0, 0], PVT.ThreeD], 'ADBE Text Blur': [[0, 0], PVT.TwoD], 'ADBE Text Scale 3D': [[100, 100, 100], PVT.ThreeD], 'ADBE Text Tracking Amount': [0, PVT.OneD], 'ADBE Text Rotation': [0, PVT.OneD] }[pm];
     return T ? new Prop(pm, pm.replace('ADBE Text ', ''), T[0], T[1]) : null;
   }));
   return an;
@@ -130,7 +141,13 @@ class Layer {
     tr.add(new Prop('ADBE Position', 'Position', [comp.width / 2, comp.height / 2, 0], PVT.ThreeD_SPATIAL));
     tr.add(new Prop('ADBE Scale', 'Scale', [100, 100, 100], PVT.ThreeD));
     tr.add(new Prop('ADBE Rotate X', 'X Rotation', 0, PVT.OneD)); tr.add(new Prop('ADBE Rotate Y', 'Y Rotation', 0, PVT.OneD)); tr.add(new Prop('ADBE Rotate Z', 'Rotation', 0, PVT.OneD));
-    tr.add(new Prop('ADBE Opacity', 'Opacity', 100, PVT.OneD));
+    tr.add(new Prop('ADBE Opacity', 'Opacity', 100, PVT.OneD)); tr.add(new Prop('ADBE Orientation', 'Orientation', [0, 0, 0], PVT.ThreeD_SPATIAL));
+    this.root.add(new Group('ADBE Mask Parade', 'Masks', PropertyType.INDEXED_GROUP, mm => {
+      if (mm !== 'ADBE Mask Atom') return null;
+      const g = new Group(mm, 'Mask', PropertyType.INDEXED_GROUP); g.maskMode = 6812; g.inverted = false;
+      g.add(new Prop('ADBE Mask Shape', 'Mask Path', new Shape(), PVT.SHAPE)); g.add(new Prop('ADBE Mask Feather', 'Mask Feather', [0, 0], PVT.TwoD)); g.add(new Prop('ADBE Mask Opacity', 'Mask Opacity', 100, PVT.OneD)); g.add(new Prop('ADBE Mask Offset', 'Mask Expansion', 0, PVT.OneD));
+      return g;
+    }));
     this.root.add(new Group('ADBE Effect Parade', 'Effects', PropertyType.INDEXED_GROUP, effect));
     this.root.add(new Group('ADBE Material Options Group', 'Material Options')).add(new Prop('ADBE Casts Shadows', 'Casts Shadows', 0, PVT.OneD));
     this.root.add(new Group('ADBE Extrsn Options Group', 'Geometry Options')).add(new Prop('ADBE Extrsn Depth', 'Extrusion Depth', 0, PVT.OneD));
@@ -144,6 +161,8 @@ class Layer {
   sourceRectAtTime() { return this._rect || { left: -100, top: -50, width: 200, height: 100 }; }
   duplicate() { return this; }
   remove() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); }
+  moveToEnd() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.push(this); }
+  setTrackMatte(m, type) { this.trackMatteLayer = m; this.trackMatteType = type; }
 }
 // 2D layers report 2D position / scale values
 function twoD(L) { const t = L.transform; ['ADBE Anchor Point', 'ADBE Position'].forEach(m => { const p = t.property(m); p.value = p.value.slice(0, 2); p.propertyValueType = PVT.TwoD_SPATIAL; }); const s = t.property('ADBE Scale'); s.value = s.value.slice(0, 2); s.propertyValueType = PVT.TwoD; }
@@ -204,8 +223,8 @@ function loadAE({ dir } = {}) {
         tp.add(new Group('ADBE Text Animators', 'Animators', PropertyType.INDEXED_GROUP, textAnimatorItem));
         return L;
       },
-      addCamera(name) { const L = push(new K.CameraLayer(c, name, 'camera'), false); L.root.add(new Group('ADBE Camera Options Group', 'Camera Options')).add(new Prop('ADBE Camera Zoom', 'Zoom', 2666.7, PVT.OneD)); return L; },
-      addLight(name) { const L = push(new K.LightLayer(c, name, 'light'), false); L.lightType = 0; const o = L.root.add(new Group('ADBE Light Options Group', 'Light Options')); ['ADBE Light Intensity', 'ADBE Light Casts Shadows', 'ADBE Light Shadow Diffusion'].forEach(m => o.add(new Prop(m, m, 0, PVT.OneD))); o.add(new Prop('ADBE Light Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); return L; },
+      addCamera(name) { const L = push(new K.CameraLayer(c, name, 'camera'), false); const co = L.root.add(new Group('ADBE Camera Options Group', 'Camera Options')); [['ADBE Camera Zoom', 'Zoom', 2666.7], ['ADBE Camera Depth of Field', 'Depth of Field', 0], ['ADBE Camera Focus Distance', 'Focus Distance', 2666.7], ['ADBE Camera Aperture', 'Aperture', 25], ['ADBE Camera Blur Level', 'Blur Level', 100]].forEach(x => co.add(new Prop(x[0], x[1], x[2], PVT.OneD))); return L; },
+      addLight(name) { const L = push(new K.LightLayer(c, name, 'light'), false); L.lightType = 0; const o = L.root.add(new Group('ADBE Light Options Group', 'Light Options')); ['ADBE Light Intensity', 'ADBE Light Casts Shadows', 'ADBE Light Shadow Diffusion', 'ADBE Light Cone Angle', 'ADBE Light Cone Feather 2'].forEach(m => o.add(new Prop(m, m, 0, PVT.OneD))); o.add(new Prop('ADBE Light Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); return L; },
       addSolid(color, name, w, hh) { const L = push(new K.AVLayer(c, name, 'solid')); L.source = { name, width: w, height: hh, mainSource: Object.assign(new K.SolidSource(), { color }) }; return L; },
       add(item) { const L = push(new K.AVLayer(c, item.name, 'footage')); L.source = item; if (item.usedIn) item.usedIn.push(c); return L; }
     };
@@ -253,18 +272,18 @@ function loadAE({ dir } = {}) {
   }
 
   const app = {
-    version: '25.0', project, undo: [], preferences: { scriptsCanWrite: 1, getPrefAsLong(sec, key) { return key === 'Pref_SCRIPTING_FILE_NETWORK_SECURITY' ? this.scriptsCanWrite : 0; } },
+    version: '25.0', project, undo: [], effects: [{ displayName: 'Glow', matchName: 'ADBE Glo2', category: 'Stylize' }, { displayName: 'Saber', matchName: 'VIDEOCOPILOT 3DSaber', category: 'Video Copilot' }, { displayName: 'Old', matchName: 'X Old', category: '_Obsolete' }], preferences: { scriptsCanWrite: 1, getPrefAsLong(sec, key) { return key === 'Pref_SCRIPTING_FILE_NETWORK_SECURITY' ? this.scriptsCanWrite : 0; } },
     beginUndoGroup(n) { app.undo.push(n); }, endUndoGroup() {},
     open(f) { project.file = f; project.opened = f.fsName; return project; }
   };
   const ctx = vm.createContext({
     app, File, ImportOptions, KeyframeEase, PropertyType, PropertyValueType: PVT, KeyframeInterpolationType: KIT,
-    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, ParagraphJustification: { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7415, RIGHT_JUSTIFY: 7414 }, BlendingMode: { NORMAL: 5212, ADD: 5220, SCREEN: 5219, MULTIPLY: 5216, OVERLAY: 5224, SOFT_LIGHT: 5225, COLOR_DODGE: 5221 },
+    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, ParagraphJustification: { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7415, RIGHT_JUSTIFY: 7414 }, Shape, MaskMode: { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 }, TrackMatteType: { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 }, BlendingMode: { LIGHTEN: 5213, DARKEN: 5214, DIFFERENCE: 5226, NORMAL: 5212, ADD: 5220, SCREEN: 5219, MULTIPLY: 5216, OVERLAY: 5224, SOFT_LIGHT: 5225, COLOR_DODGE: 5221 },
     ...K, Math, String, Number, Array, Object, Error, isFinite, parseInt, parseFloat
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'ae.jsx'), 'utf8'), ctx);
   const call = (name, args) => { const r = JSON.parse(ctx.efm_call(name, JSON.stringify(args || {}))); if (!r.ok) { const e = new Error(r.error); e.line = r.line; throw e; } return r.data; };
-  return { app, project, K, newComp, call, ctx, File, rendered, Prop, Group, PVT };
+  return { app, project, K, newComp, call, ctx, File, rendered, Prop, Group, PVT, Shape };
 }
 
 module.exports = { loadAE, KeyframeEase, PVT, KIT };
