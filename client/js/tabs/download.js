@@ -49,7 +49,8 @@
 
       var analyze = UI.btn('حلّل اللينك', function () {
         if (!links().length) return UI.toast('حط اللينك الأول', true);
-        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(links()[0]).then(function (i) { o.info = i; o.start = ''; o.end = ''; drawInfo(); drawQual(); drawRange(); }); }, analyze);
+        o.info = null; drawInfo(); // never show the previous link's video while reading a new one
+        UI.safe('بيقرا اللينك', function () { return S.downloadInfo(links()[0]).then(function (i) { drawTool(); o.info = i; o.start = ''; o.end = ''; drawInfo(); drawQual(); drawRange(); }); }, analyze);
       });
       // range slider over the video's length: drag the start and end handles (or type m:ss)
       var rangeBox = h('div', { class: 'dl-range' });
@@ -77,7 +78,7 @@
         ta.addEventListener('change', function () { var v = Y.parseTime(ta.value); if (v !== null) { lo.value = Math.min(v, D); sync('lo'); } });
         tb.addEventListener('change', function () { var v = Y.parseTime(tb.value); if (v !== null) { hi.value = Math.min(v, D); sync('hi'); } });
         // minute ticks
-        var ticks = h('div', { class: 'rs-ticks ltr' }), stepM = D > 3600 ? 10 : D > 1200 ? 5 : D > 300 ? 1 : 0.5;
+        var ticks = h('div', { class: 'rs-ticks ltr' }), stepM = [0.5, 1, 2, 5, 10, 15, 30, 60].find(function (m) { return D / 60 / m <= 5; }) || 120;
         for (var m = 0; m * 60 <= D; m += stepM) ticks.appendChild(h('span', { style: { left: (m * 60 / D * 100) + '%' } }, mmss(m * 60)));
         function nudge(which, d) { return UI.btn((d > 0 ? '+' : '−') + Math.abs(d) + 's', function () { var el = which === 'lo' ? lo : hi; el.value = Math.max(0, Math.min(D, +el.value + d)); sync(which); }, 'small'); }
         rangeBox.appendChild(h('div', { class: 'rs ltr' }, track, fill, lo, hi));
@@ -98,7 +99,7 @@
               var one = list.length === 1;
               return S.downloadMedia({ url: u, quality: o.quality, start: one ? (o.start || undefined) : undefined, end: one ? (o.end || undefined) : undefined, place: o.place, onProgress: function (x, phase) {
                 prog.set((i + x) / list.length);
-                UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : 'تحميل ' + Math.round(x * 100) + '%'), 'busy');
+                UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : phase === 'update' ? 'بيحدّث yt-dlp لآخر نسخة (أول مرة بس)…' : phase === 'retry' ? 'يوتيوب رفض — بيجرّب بطريقة تانية…' : 'تحميل ' + Math.round(x * 100) + '%'), 'busy');
               } }).then(function () { done++; }, function (e) { if (list.length === 1) throw e; failed.push(u + ' — ' + e.message); });
             });
           }, Promise.resolve()).then(function () {

@@ -1450,14 +1450,37 @@ ${JSON.stringify(lite)}
     return { bin, version: this._ytdlpVer.v, jsRuntime, cookiesFrom: this.settings.ytdlpCookies || null };
   }
   async ytdlpStatus() { const o = await this.ytdlpOpts(); return { installed: !!o.bin, path: o.bin, version: o.version || '', jsRuntime: o.jsRuntime, managed: !!o.bin && o.bin === require('./ytdlp').managedPath(config.dataDir()), cookiesFrom: o.cookiesFrom }; }
-  async downloadInfo(url) { const o = await this.ytdlpOpts(); return require('./ytdlp').info(o.bin, url, o); }
+  /**
+   * Run a yt-dlp step; when the site asks for a login, borrow it from the browsers on this Mac one by one
+   * (Chrome first). The browser that works is remembered.
+   */
+  async withLogin(fn, o) {
+    const Y = require('./ytdlp');
+    try { return await fn(o); } catch (e) {
+      if (!e.login) throw e;
+      const tried = new Set([o.cookiesFrom].filter(Boolean));
+      for (const b of Y.installedBrowsers()) {
+        if (tried.has(b)) continue; tried.add(b);
+        try { const r = await fn({ ...o, cookiesFrom: b }); this.saveSettings({ ytdlpCookies: b }); return r; } catch (e2) { if (!e2.login && !/cookie|keyring|decrypt|permission|Operation not permitted/i.test(e2.raw || e2.message)) throw e2; }
+      }
+      throw e;
+    }
+  }
+  async downloadInfo(url) { const Y = require('./ytdlp'); const o = await this.ytdlpOpts(); return this.withLogin(x => Y.info(o.bin, url, x), o); }
   async downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
     const Y = require('./ytdlp'), W = require('./websearch');
     const pf = Y.platformOf(url);
     if (!pf) throw new Error('اللينك مش صح');
     const dir = await this.projectMediaDir('Downloads');
-    const o = await this.ytdlpOpts();
-    const base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom };
+    let o = await this.ytdlpOpts();
+    // an old yt-dlp (e.g. a Homebrew one from months ago) is the #1 cause of "403": get the current one first
+    const managed = Y.managedPath(config.dataDir());
+    const upgrade = async () => {
+      onProgress && onProgress(0, 'update');
+      try { await this.ytdlpInstall({}); o = await this.ytdlpOpts(); return o.bin === managed; } catch (_) { return false; }
+    };
+    if (o.bin && o.bin !== managed && !this.settings.paths.ytdlp && Y.ageDays(o.version) > 45) await upgrade();
+    let base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom };
     let file, type = quality === 'audio' ? 'audio' : 'video';
     const cut = Y.parseTime(start) !== null || Y.parseTime(end) !== null;
     const cutHere = async full => {
@@ -1473,12 +1496,21 @@ ${JSON.stringify(lite)}
       const attempts = [() => Y.download(o.bin, { ...base, start, end }, onProgress).then(r => r.file)];
       if (cut) attempts.push(async () => { onProgress && onProgress(0, 'full'); return cutHere((await Y.download(o.bin, { ...base, sections: false }, onProgress)).file); });
       attempts.push(async () => { onProgress && onProgress(0, 'simple'); const f = (await Y.download(o.bin, { ...base, sections: false, simple: true }, onProgress)).file; return cut ? cutHere(f) : f; });
-      let lastErr = null;
-      for (const tryIt of attempts) {
-        try { file = await tryIt(); break; } catch (e) {
+      let lastErr = null, triedFix = false;
+      for (let i = 0; i < attempts.length; i++) {
+        try { file = await this.withLogin(x => { base = { ...base, cookiesFrom: x.cookiesFrom }; return attempts[i](); }, { cookiesFrom: base.cookiesFrom }); break; } catch (e) {
           lastErr = e;
-          // these won't get better by retrying with another format
-          if (/تسجيل دخول|خاص|مش متاح|مش مدعوم|مش متثبّت|JavaScript|403/.test(e.message)) break;
+          if (/403|Forbidden|JavaScript|challenge/i.test(e.message + ' ' + (e.raw || '')) && !triedFix) {
+            // 403 / challenge: newest yt-dlp + another YouTube client, then the same attempt again
+            triedFix = true;
+            if (o.bin !== managed && !this.settings.paths.ytdlp) await upgrade();
+            if (pf.id === 'youtube') base = { ...base, jsRuntime: o.jsRuntime, extra: Y.youtubeRetryArgs(o.version) };
+            onProgress && onProgress(0, 'retry');
+            i--; continue;
+          }
+          // these won't get better by retrying another way; a 403 still gets the next way (cutting while downloading
+          // makes YouTube refuse ffmpeg's request: the whole file + a cut here usually works)
+          if (/تسجيل دخول|خاص|مش متاح|مش مدعوم|مش متثبّت/.test(e.message)) break;
         }
       }
       if (!file) throw lastErr;

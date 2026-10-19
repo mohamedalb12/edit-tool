@@ -378,3 +378,68 @@ test('مكتبتي: sorts a folder into categories, thumbnails + waveforms, fast
   const rm = S.libraryRemoveDir(lib);
   assert.equal(rm.total, 0); assert.ok(fs.existsSync(path.join(lib, 'Music', 'calm bed.wav')));
 });
+
+test('download 403: an old system yt-dlp is replaced by the current one, and YouTube is retried with another player client', async () => {
+  const mk = (file, body) => { fs.writeFileSync(file, `#!${process.execPath}\nconst a = process.argv.slice(2), fs = require('fs');\n${body}`); fs.chmodSync(file, 0o755); return file; };
+  const okOut = `const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'yt [x]').replace('%(ext)s', 'mp4'); console.log('EFPROG 100%'); fs.writeFileSync(out, 'v'); console.log('EFFILE ' + out);`;
+  const oldBin = mk(path.join(TMP, 'yt-old'), `if (a[0] === '--version') { console.log('2026.03.17'); process.exit(0); }\nconsole.error('ERROR: unable to download video data: HTTP Error 403: Forbidden'); process.exit(1);`);
+  const { S, h } = world({ settings: { paths: { ...config.DEFAULTS.paths, ytdlp: '' } } });
+  h.ctx.app.project.path = path.join(TMP, 'Projects', 'yt.prproj');
+  const managed = require('../../core/ytdlp').managedPath(require('../../core/config').dataDir());
+  try { fs.unlinkSync(managed); } catch (_) {}
+  let installs = 0;
+  // the "latest" build still gets a 403 on the default client, but works with the retry client
+  S.ytdlpInstall = async () => { installs++; fs.mkdirSync(path.dirname(managed), { recursive: true }); mk(managed, `if (a[0] === '--version') { console.log('2026.10.15'); process.exit(0); }\nif (!a.includes('youtube:player_client=tv,web_safari,mweb')) { console.error('ERROR: HTTP Error 403: Forbidden'); process.exit(1); }\n${okOut}`); return { file: managed }; };
+  const origBin = S.ytdlpBin.bind(S);
+  S.ytdlpBin = () => (fs.existsSync(managed) ? managed : oldBin);
+  const phases = [];
+  const r = await S.downloadMedia({ url: 'https://youtu.be/abc', quality: '720', place: false, onProgress: (p, ph) => ph && phases.push(ph) });
+  assert.match(r.file, /yt \[x\]\.mp4$/);
+  assert.equal(installs, 1, 'updated once (the system one was 7 months old)');
+  assert.ok(phases.includes('update') && phases.includes('retry'), phases.join(','));
+  S.ytdlpBin = origBin; try { fs.unlinkSync(managed); } catch (_) {}
+});
+
+test('download 403 only while cutting (YouTube refuses ffmpeg\'s section request): falls back to the whole file + an exact cut here', async () => {
+  const fake = path.join(TMP, 'yt-sections-403');
+  fs.writeFileSync(fake, `#!${process.execPath}
+const a = process.argv.slice(2), fs = require('fs');
+if (a[0] === '--version') { console.log('2026.10.15'); process.exit(0); }
+if (a.includes('--download-sections')) { console.error('ERROR: [download] Got error: HTTP Error 403: Forbidden'); process.exit(1); }
+const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'full [x]').replace('%(ext)s', 'mp4');
+fs.copyFileSync(process.env.EF_SRC, out); console.log('EFPROG 100%'); console.log('EFFILE ' + out);
+`); fs.chmodSync(fake, 0o755);
+  process.env.EF_SRC = video('yt-src-10s.mp4', 10);
+  const { S, h } = world({ settings: { paths: { ...config.DEFAULTS.paths, ytdlp: fake } } });
+  h.ctx.app.project.path = path.join(TMP, 'Projects', 'yt2.prproj');
+  const r = await S.downloadMedia({ url: 'https://youtu.be/abc', quality: '720', start: '0:02', end: '0:05', place: false });
+  const d = +require('child_process').execFileSync(require('../../core/ffmpeg').findBinary('ffprobe'), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', r.file]).toString();
+  assert.ok(Math.abs(d - 3) < 0.2, 'cut to 3 s here: ' + d);
+  delete process.env.EF_SRC;
+});
+
+test('Instagram asks for a login: the browsers\' cookies are tried one by one, the one that works is remembered; the error names the right site', async () => {
+  const fake = path.join(TMP, 'yt-insta');
+  fs.writeFileSync(fake, `#!${process.execPath}
+const a = process.argv.slice(2), fs = require('fs');
+if (a[0] === '--version') { console.log('2026.10.15'); process.exit(0); }
+const c = a.indexOf('--cookies-from-browser') >= 0 ? a[a.indexOf('--cookies-from-browser') + 1] : null;
+if (c !== process.env.EF_GOOD_BROWSER) { console.error('ERROR: [Instagram] DepEQ: Requested content is not available, rate-limit reached or login required. Use --cookies-from-browser or --cookies for the authentication.'); process.exit(1); }
+if (a.includes('-J')) { console.log(JSON.stringify({ id: 'DepEQ', title: 'ريل', duration: 12, formats: [{ vcodec: 'h264', height: 1920 }] })); process.exit(0); }
+const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'reel [x]').replace('%(ext)s', 'mp4'); fs.writeFileSync(out, 'v'); console.log('EFFILE ' + out);
+`); fs.chmodSync(fake, 0o755);
+  const { S, h } = world({ settings: { paths: { ...config.DEFAULTS.paths, ytdlp: fake }, ytdlpCookies: '' } });
+  h.ctx.app.project.path = path.join(TMP, 'Projects', 'insta.prproj');
+  const Y = require('../../core/ytdlp');
+  assert.ok(Y.needsLogin('Requested content is not available, rate-limit reached or login required'));
+  process.env.EF_GOOD_BROWSER = Y.installedBrowsers()[1]; // not the first one: it has to keep trying
+  const info = await S.downloadInfo('https://www.instagram.com/reels/DepEQ/');
+  assert.equal(info.title, 'ريل');
+  assert.equal(S.settings.ytdlpCookies, process.env.EF_GOOD_BROWSER, 'remembered');
+  const r = await S.downloadMedia({ url: 'https://www.instagram.com/reels/DepEQ/', place: false });
+  assert.match(r.file, /reel \[x\]\.mp4$/);
+  process.env.EF_GOOD_BROWSER = 'nobody';
+  S.saveSettings({ ytdlpCookies: '' });
+  await assert.rejects(S.downloadInfo('https://www.instagram.com/reels/DepEQ/'), e => /إنستجرام طالب تسجيل دخول/.test(e.message) && !/يوتيوب/.test(e.message));
+  delete process.env.EF_GOOD_BROWSER;
+});

@@ -62,13 +62,25 @@ async function installManaged(dataDir, { fetchImpl, onProgress } = {}) {
 function version(bin) {
   return new Promise((resolve, reject) => execFile(bin, ['--version'], { timeout: 30000, windowsHide: true }, (err, so) => (err ? reject(err) : resolve(String(so).trim()))));
 }
+/** how many days old a yt-dlp version ("2026.03.17") is — sites change often, old builds start failing with 403 */
+function ageDays(ver, now = Date.now()) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})/.exec(ver || '');
+  return m ? Math.floor((now - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 864e5) : Infinity;
+}
+/** a YouTube 403 often goes away with another player client and the up-to-date challenge solver */
+function youtubeRetryArgs(ver) {
+  return ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb', ...(needsJsRuntime(ver) ? ['--remote-components', 'ejs:github'] : [])];
+}
 /** yt-dlp ≥ 2025.11 solves YouTube's JS challenges with an outside runtime (deno, or node) */
 function needsJsRuntime(ver) { const m = /^(\d{4})\.(\d{2})/.exec(ver || ''); return !!m && (+m[1] > 2025 || (+m[1] === 2025 && +m[2] >= 11)); }
 
 /** turn yt-dlp's last ERROR line into what to do, in Arabic */
-function friendlyError(msg) {
-  const m = String(msg || '');
-  if (/Sign in to confirm|not a bot|cookies/i.test(m)) return 'يوتيوب طالب تسجيل دخول (فاكر إنك بوت). من الإعدادات اختار "كوكيز المتصفح" (Chrome أو Safari أو Firefox اللي فاتح فيه يوتيوب) وجرّب تاني.';
+/** the site asks to be logged in (YouTube "not a bot", Instagram/TikTok/X/Facebook login walls) */
+function needsLogin(msg) { return /Sign in to confirm|not a bot|cookies|login required|log in|rate-limit|Requested content is not available|Restricted Video|empty media response|authentication|This content isn.t available|use --cookies/i.test(String(msg || '')); }
+
+function friendlyError(msg, site) {
+  const m = String(msg || ''), who = site || 'الموقع';
+  if (needsLogin(m)) return `${who} طالب تسجيل دخول. افتح ${who} في Chrome أو Safari وسجّل دخول، وبعدين اختار المتصفح ده في "كوكيز المتصفح" فوق وجرّب تاني.`;
   if (/Private video|members-only|This video is private/i.test(m)) return 'الفيديو خاص أو للأعضاء بس — لازم كوكيز حساب عنده صلاحية (من الإعدادات).';
   if (/Video unavailable|has been removed|not available in your country/i.test(m)) return 'الفيديو مش متاح (اتشال أو مقفول في بلدك).';
   if (/Unsupported URL/i.test(m)) return 'اللينك ده مش مدعوم — اتأكد إنه لينك الفيديو نفسه مش صفحة.';
@@ -81,11 +93,21 @@ function friendlyError(msg) {
   return m;
 }
 
+function siteOf(args) { const u = args[args.length - 1]; const p = platformOf(u); return p && p.id !== 'other' ? p.label : null; }
+
+/** the browsers on this Mac whose login yt-dlp can borrow, most likely first */
+function installedBrowsers(platform = process.platform) {
+  if (platform !== 'darwin') return ['chrome', 'firefox', 'edge', 'brave'];
+  const apps = [['chrome', 'Google Chrome.app'], ['brave', 'Brave Browser.app'], ['edge', 'Microsoft Edge.app'], ['firefox', 'Firefox.app'], ['safari', 'Safari.app']];
+  const home = require('os').homedir();
+  return apps.filter(([id, app]) => id === 'safari' || fs.existsSync(path.join('/Applications', app)) || fs.existsSync(path.join(home, 'Applications', app))).map(([id]) => id);
+}
+
 /** yt-dlp arguments (pure — tested without the network). */
-function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true, jsRuntime, cookiesFrom, simple = false }) {
+function buildArgs({ url, quality = '1080', start, end, outDir, ffmpeg, name, sections = true, jsRuntime, cookiesFrom, simple = false, extra = [] }) {
   const args = ['--no-playlist', '--newline', '--no-colors', '--windows-filenames', '--no-mtime', '--progress',
     '--progress-template', 'download:EFPROG %(progress._percent_str)s %(progress._speed_str)s',
-    '--no-simulate', '--print', 'after_move:EFFILE %(filepath)s'];
+    '--no-simulate', '--print', 'after_move:EFFILE %(filepath)s', ...extra];
   if (ffmpeg) args.push('--ffmpeg-location', ffmpeg);
   if (jsRuntime) args.push('--js-runtimes', jsRuntime);
   if (cookiesFrom) args.push('--cookies-from-browser', cookiesFrom);
@@ -117,7 +139,10 @@ function runJson(bin, args, timeout = 150000) {
       if (err) {
         const lines = String(stderr || err.message).trim().split('\n');
         const last = lines.filter(x => /ERROR/.test(x)).pop() || lines.pop() || 'فشل';
-        return reject(new Error(err.killed ? 'yt-dlp خد وقت أكتر من اللازم — النت بطيء أو الموقع مش بيرد' : friendlyError(last.replace(/^ERROR:\s*/, ''))));
+        const raw = last.replace(/^ERROR:\s*/, '');
+        const e2 = new Error(err.killed ? 'yt-dlp خد وقت أكتر من اللازم — النت بطيء أو الموقع مش بيرد' : friendlyError(raw, siteOf(args)));
+        e2.raw = raw; e2.login = needsLogin(raw);
+        return reject(e2);
       }
       try { resolve(JSON.parse(stdout)); } catch (e) { reject(new Error('yt-dlp رجّع رد مش مفهوم')); }
     });
@@ -164,10 +189,10 @@ function download(bin, opts, onProgress) {
       if (code === 0 && file && fs.existsSync(file)) resolve({ file });
       else {
         const last = (err.trim().split('\n').filter(x => /ERROR/.test(x)).pop() || err.trim().split('\n').pop() || 'exit ' + code).replace(/^ERROR:\s*/, '');
-        const e = new Error('التحميل فشل: ' + friendlyError(last)); e.raw = last; reject(e);
+        const e = new Error('التحميل فشل: ' + friendlyError(last, siteOf(args))); e.raw = last; e.login = needsLogin(last); reject(e);
       }
     });
   });
 }
 
-module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim, assetName, managedPath, installManaged, version, needsJsRuntime, friendlyError, RELEASE_URL };
+module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim, assetName, managedPath, installManaged, version, needsJsRuntime, friendlyError, RELEASE_URL, ageDays, youtubeRetryArgs, needsLogin, installedBrowsers };

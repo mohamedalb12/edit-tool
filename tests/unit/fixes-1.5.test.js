@@ -67,3 +67,11 @@ test('error log: one file per day, keys redacted, tail returns the newest entrie
   assert.doesNotMatch(JSON.stringify(t), /abcdefabcdef|1234567890ab/);
   assert.equal(fs.readdirSync(path.join(dir, 'logs')).length, 1);
 });
+
+test('yt-dlp age + the YouTube retry flags', () => {
+  assert.equal(Y.ageDays('2026.03.17', Date.UTC(2026, 9, 19)), 216);
+  assert.equal(Y.ageDays('', Date.now()), Infinity);
+  assert.deepEqual(Y.youtubeRetryArgs('2026.03.17'), ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb', '--remote-components', 'ejs:github']);
+  assert.deepEqual(Y.youtubeRetryArgs('2025.06.01'), ['--extractor-args', 'youtube:player_client=tv,web_safari,mweb']);
+  assert.ok(Y.buildArgs({ url: 'u', outDir: '/o', extra: ['--x', 'y'] }).includes('--x'));
+});
