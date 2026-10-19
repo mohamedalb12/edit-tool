@@ -15,6 +15,7 @@
   EF.app = window.EF_APP || 'premiere';
   EF.hostScript = EF.app === 'ae' ? 'host/ae.jsx' : 'host/host.jsx';
   EF.appName = EF.app === 'ae' ? 'أفتر إفكتس' : 'بريمير';
+  EF.callFn = EF.app === 'ae' ? 'efm_call' : 'ef_call';
 
   EF.node = function (mod) {
     if (EF.test && EF.test.node) return EF.test.node(mod);
@@ -35,11 +36,11 @@
     // non-ASCII (Arabic text, paths) is \u-escaped: evalScript can garble raw UTF-8 on some Premiere builds
     var payload = JSON.stringify(JSON.stringify(args || {})).replace(/[\u007f-\uffff]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); });
     var ms = LONG[name] ? 20 * 60000 : 3 * 60000, timer;
-    var call = EF.evalScript('ef_call(' + JSON.stringify(name) + ',' + payload + ')').then(function (res) {
+    var call = EF.evalScript(EF.callFn + '(' + JSON.stringify(name) + ',' + payload + ')').then(function (res) {
       clearTimeout(timer);
       var r;
       try { r = JSON.parse(res); } catch (e) {
-        var why = EF.hostLoaded && EF.hostLoaded !== true ? ' — سكريبت الإضافة جوه بريمير ماتحمّلش: ' + EF.hostLoaded : (String(res) === 'EvalScript error.' ? ' — سكريبت الإضافة جوه بريمير مش شغال؛ اقفل اللوحة وافتحها تاني، ولو فضل كده شغّل "افحص بريمير بتاعي" من الإعدادات' : '');
+        var why = EF.hostLoaded && EF.hostLoaded !== true ? ' — سكريبت الإضافة جوه ' + EF.appName + ' ماتحمّلش: ' + EF.hostLoaded : (String(res) === 'EvalScript error.' ? ' — سكريبت الإضافة جوه ' + EF.appName + ' مش شغال؛ اقفل اللوحة وافتحها تاني' : '');
         throw hostErr(name, 'رد غريب من بريمير: ' + String(res).slice(0, 160) + why);
       }
       if (!r.ok) throw hostErr(name, (r.error || 'خطأ في بريمير'), r.line);
@@ -60,9 +61,9 @@
   EF.loadHostScript = function () {
     if (!EF.isCEP) return Promise.resolve();
     var p = (EF.extRoot + '/' + EF.hostScript).replace(/\\/g, '/');
-    return EF.evalScript('(function(){try{$.evalFile("' + p + '");return typeof ef_call==="function"?"ok":"ef_call missing";}catch(e){return "ERR "+e.message+" (line "+e.line+")";}})()').then(function (r) {
+    return EF.evalScript('(function(){try{$.evalFile("' + p + '");return typeof ' + EF.callFn + '==="function"?"ok":"' + EF.callFn + ' missing";}catch(e){return "ERR "+e.message+" (line "+e.line+")";}})()').then(function (r) {
       EF.hostLoaded = r === 'ok' ? true : String(r || 'no answer');
-      if (EF.hostLoaded !== true) throw new Error('سكريبت الإضافة جوه بريمير ماتحمّلش: ' + EF.hostLoaded);
+      if (EF.hostLoaded !== true) throw new Error('سكريبت الإضافة جوه ' + EF.appName + ' ماتحمّلش: ' + EF.hostLoaded);
       return true;
     });
   };

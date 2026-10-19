@@ -1,8 +1,8 @@
 {
-  "version": "1.7.1",
-  "url": "EditFast-1.7.1.zip",
-  "sha256": "557e798311e77b46ed8d6de1a531cc34b43b9d36de4d1661b495d7f7a1491b3c",
-  "size": 3313598,
-  "notes": "EditFast Motion بقى إضافة لوحده لأفتر إفكتس (بيتثبّت لوحده لما تفتح EditFast في بريمير) — اقفل الأفتر وافتحه وهتلاقيه في Window ← Extensions.",
+  "version": "1.7.2",
+  "url": "EditFast-1.7.2.zip",
+  "sha256": "4f6e1e2ab947f496f7c9ba8f88031c46b6ab4817544b4937d6497de758473dcb",
+  "size": 3315024,
+  "notes": "اتصال EditFast Motion بالأفتر اتصلح، ولو مش متصل بيقولك السبب بالظبط.",
   "date": "2026-10-19"
 }

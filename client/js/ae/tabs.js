@@ -267,6 +267,16 @@
       var out = h('pre', { class: 'ltr hint' });
       view.appendChild(UI.card('مفتاح OpenRouter (لمساعد الموشن)', UI.row(key, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { openrouter: key.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); })),
         UI.hint('المفاتيح والمكتبة والإعدادات واحدة مع EditFast في بريمير.')));
+      var conn = h('div', { class: 'hint' });
+      function drawConn() {
+        UI.empty(conn);
+        conn.appendChild(h('div', null, 'السكريبت: ', h('b', { class: 'ltr' }, EF.hostLoaded === true ? 'اتحمّل ✓' : EF.hostLoaded ? String(EF.hostLoaded) : 'لسه')));
+        if (EF.aeError) conn.appendChild(h('div', { class: 'err' }, EF.aeError));
+        if (EF.aeInfo) conn.appendChild(h('div', null, 'After Effects ' + EF.aeInfo.version + (EF.aeInfo.canWrite === false ? ' — ⚠️ فعّل "Allow Scripts to Write Files and Access Network"' : ' — الكتابة مسموحة ✓')));
+      }
+      drawConn();
+      view.appendChild(UI.card('الاتصال بالأفتر', conn, UI.row(action('اتصل تاني', 'بيتصل', function () { return EF.connect().then(drawConn); })),
+        UI.hint('لو مش متصل: اقفل اللوحة وافتحها، واتأكد إن Settings ← Scripting & Expressions ← "Allow Scripts to Write Files and Access Network" متعلّمة.')));
       view.appendChild(UI.card('فحص الأفتر', UI.row(action('افحص', 'بيفحص', function () { return S().selfTest().then(function (r) { out.textContent = JSON.stringify(r, null, 1); }); })), out,
         UI.hint('فولدر القوالب: ' + S().templatesDir())));
     }

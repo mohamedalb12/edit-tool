@@ -244,7 +244,7 @@ function loadAE({ dir } = {}) {
   }
 
   const app = {
-    version: '25.0', project, undo: [],
+    version: '25.0', project, undo: [], preferences: { scriptsCanWrite: 1, getPrefAsLong(sec, key) { return key === 'Pref_SCRIPTING_FILE_NETWORK_SECURITY' ? this.scriptsCanWrite : 0; } },
     beginUndoGroup(n) { app.undo.push(n); }, endUndoGroup() {},
     open(f) { project.file = f; project.opened = f.fsName; return project; }
   };
@@ -254,7 +254,7 @@ function loadAE({ dir } = {}) {
     ...K, Math, String, Number, Array, Object, Error, isFinite, parseInt, parseFloat
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'ae.jsx'), 'utf8'), ctx);
-  const call = (name, args) => { const r = JSON.parse(ctx.ef_call(name, JSON.stringify(args || {}))); if (!r.ok) { const e = new Error(r.error); e.line = r.line; throw e; } return r.data; };
+  const call = (name, args) => { const r = JSON.parse(ctx.efm_call(name, JSON.stringify(args || {}))); if (!r.ok) { const e = new Error(r.error); e.line = r.line; throw e; } return r.data; };
   return { app, project, K, newComp, call, ctx, File, rendered, Prop, Group, PVT };
 }
 

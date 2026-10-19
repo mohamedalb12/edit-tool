@@ -243,3 +243,13 @@ test('motion assistant: the AI turns a request into known steps only, they run i
   assert.deepEqual(r.done, ['lowerThird', 'textAnimate', 'cameraRig']); assert.deepEqual(r.failed, []);
   assert.ok(c.layerList.some(L => L.name === 'LT Name') && c.layerList.some(L => L.name === 'EF Camera'));
 });
+
+test('AE engine is shared by every panel: our globals are EFM / EFMAPI / efm_call (no EF), and writing files needs AE\'s scripting permission', () => {
+  assert.doesNotMatch(SRC, /\bEF\.|\bef_call\b|\bEFAPI\b|var EF\b/);
+  const ae = loadAE(); scene(ae);
+  assert.equal(ae.call('ping', {}).canWrite, true);
+  ae.app.preferences.scriptsCanWrite = 0;
+  assert.throws(() => ae.call('templateSave', { name: 'x', path: path.join(TMP, 'mgt', 'x.mogrt'), editable: { text: true } }), /Allow Scripts to Write Files/);
+  assert.throws(() => ae.call('render', { path: path.join(TMP, 'r.mp4') }), /Allow Scripts to Write Files/);
+  assert.equal(ae.call('selfTest', {}).canWrite, false);
+});

@@ -50,11 +50,28 @@
     EF.GROUPS.forEach(function (g) {
       nav.appendChild(h('button', { type: 'button', 'data-id': g.id, title: g.title, onclick: function () { show(g.id); } }, h('span', { class: 'ic' }, UI.icon(g.icon)), g.label));
     });
+    var st = document.getElementById('status'); if (st) { st.style.cursor = 'pointer'; st.addEventListener('click', function () { if (EF.aeError) { UI.toast(EF.aeError, true); EF.connect(); } }); }
     var pb = document.getElementById('pal-btn'); if (pb) pb.addEventListener('click', function () { if (EF.palette) EF.palette.open(); });
     var first = null; try { first = localStorage.getItem('ef-ae-tab'); } catch (e) {}
     show(first || 'templates');
-    EF.loadHostScript().then(function () { return EF.host('ping', {}); }).then(function (r) { UI.status('متصل بـ ' + (r.app || 'After Effects')); }).catch(function (e) { UI.status('مش متصل بالأفتر', 'err'); console.warn(e); });
+    EF.connect();
   }
+  /** load the AE script and say hello; the status pill shows why when it fails (and retries on click) */
+  EF.connect = function () {
+    UI.status('بيتصل بالأفتر…', 'busy');
+    return EF.loadHostScript().then(function () { return EF.host('ping', {}); }).then(function (r) {
+      EF.aeInfo = r; EF.aeError = null;
+      UI.status('متصل بـ ' + (r.app || 'After Effects') + (r.version ? ' ' + String(r.version).split('x')[0] : ''));
+      if (r.canWrite === false) UI.toast('فعّل في الأفتر: Settings ← Scripting & Expressions ← "Allow Scripts to Write Files and Access Network" — عشان حفظ القوالب والريندر', true);
+      return r;
+    }).catch(function (e) {
+      EF.aeError = (e && e.message) || String(e);
+      UI.status('مش متصل بالأفتر — دوس هنا', 'err');
+      console.warn(e);
+      // is AE's script engine answering at all? (tells "our script" apart from "scripting blocked")
+      if (EF.isCEP) EF.evalScript('app.version').then(function (v) { EF.aeError += ' — [محرك السكريبت: ' + (v && v !== 'EvalScript error.' ? 'شغال، AE ' + v : 'مش بيرد') + ' · ' + EF.extRoot + ']'; });
+    });
+  };
   function failed(err) {
     var v = document.getElementById('view');
     v.appendChild(UI.card('EditFast Motion مااشتغلش', h('p', null, 'Node.js جوه اللوحة مااشتغلش. اقفل الأفتر وافتحه تاني، ولو فضل كده شغّل المثبّت تاني.'), h('pre', { class: 'err ltr' }, String(err && err.stack || err))));
