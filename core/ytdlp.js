@@ -176,14 +176,14 @@ function streamUrl(bin, url, { jsRuntime, cookiesFrom } = {}) {
 }
 
 /** Cut [start, end] out of a downloaded file exactly (frame-accurate re-encode). */
-function trim(ffmpeg, file, { start, end, audioOnly, out }) {
+function trim(ffmpeg, file, { start, end, audioOnly, out, onChild }) {
   const a = parseTime(start) || 0, b = parseTime(end);
   const args = ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(a), '-i', file];
   if (b !== null && b > a) args.push('-t', String(b - a));
   if (audioOnly) args.push('-vn', '-c:a', 'libmp3lame', '-q:a', '2');
   else args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
   args.push(out);
-  return new Promise((resolve, reject) => execFile(ffmpeg, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, so, se) => (err ? reject(new Error('القص فشل: ' + String(se || err.message).trim().split('\n').pop())) : resolve({ file: out }))));
+  return new Promise((resolve, reject) => { const ch = execFile(ffmpeg, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, so, se) => (err ? reject(new Error('القص فشل: ' + String(se || err.message).trim().split('\n').pop())) : resolve({ file: out }))); if (onChild) onChild(ch); });
 }
 
 /** Download with progress → { file }. */
@@ -192,7 +192,10 @@ function download(bin, opts, onProgress) {
   fs.mkdirSync(opts.outDir, { recursive: true });
   const args = buildArgs(opts);
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { windowsHide: true });
+    // its own process group: stopping it also stops the ffmpeg it started
+    const child = spawn(bin, args, { windowsHide: true, detached: process.platform !== 'win32' });
+    child.efGroup = process.platform !== 'win32';
+    if (opts.onChild) opts.onChild(child); // so the panel's stop button can end it
     let file = null, err = '', buf = '';
     const line = l => {
       const p = /EFPROG\s+([\d.]+)%/.exec(l); if (p && onProgress) onProgress(Math.min(1, +p[1] / 100));

@@ -21,7 +21,7 @@ function makeResponse(res, buf, url) {
  * `onBytes(got, total)` also reports when the size isn't known; `headersOnly` resolves on the headers and drops the body.
  */
 function nodeFetch(url, opts = {}) {
-  const { method = 'GET', headers = {}, body, timeout = 120000, toFile, onProgress, onBytes, headersOnly, redirects = 5 } = opts;
+  const { method = 'GET', headers = {}, body, timeout = 120000, toFile, onProgress, onBytes, headersOnly, onRequest, redirects = 5 } = opts;
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'http:' ? http : https;
@@ -42,14 +42,19 @@ function nodeFetch(url, opts = {}) {
       if (toFile && res.statusCode >= 200 && res.statusCode < 300) {
         const tmp = toFile + '.part';
         const out = fs.createWriteStream(tmp);
+        let broke = false;
         res.on('data', d => { got += d.length; if (onProgress && total) onProgress(got / total); if (onBytes) onBytes(got, total); });
         res.pipe(out);
         out.on('finish', () => {
+          if (broke) return;
           // a dropped connection still "finishes" the file: never accept a truncated download as good
           if (total && got < total) { try { fs.unlinkSync(tmp); } catch (_) {} return reject(new Error(`التحميل اتقطع (${Math.round(got / 1e6)} من ${Math.round(total / 1e6)} ميجا) — جرّب تاني`)); }
           fs.renameSync(tmp, toFile); resolve(makeResponse(res, Buffer.alloc(0), url));
         });
-        out.on('error', reject); res.on('error', reject);
+        const stop = e => { if (broke) return; broke = true; out.destroy(); try { fs.unlinkSync(tmp); } catch (_) {} reject(e); };
+        res.on('aborted', () => stop(new Error('التحميل اتقطع')));
+        req.on('error', stop);
+        out.on('error', reject); res.on('error', stop);
         return;
       }
       const chunks = [];
@@ -57,6 +62,7 @@ function nodeFetch(url, opts = {}) {
       res.on('end', () => resolve(makeResponse(res, Buffer.concat(chunks), url)));
       res.on('error', reject);
     });
+    if (onRequest) onRequest(req); // lets a caller stop a big download (req.destroy())
     req.setTimeout(timeout, () => req.destroy(new Error('انتهى وقت الاتصال: ' + u.host)));
     req.on('error', reject);
     if (payload) req.write(payload);

@@ -185,6 +185,8 @@
     UI.status(label + '…', 'busy');
     if (btn) btn.disabled = true;
     return Promise.resolve().then(fn).then(function (r) { UI.status('جاهز'); return r; }, function (e) {
+      // stopped on purpose (stop button): not an error
+      if (e && e.cancelled) { UI.status('اتوقف'); UI.toast(e.message || 'اتوقف'); throw e; }
       var msg = (e && e.message) || String(e);
       UI.status('خطأ', 'err'); UI.toast(msg, true); console.error(e);
       UI.lastError = { label: label, message: msg };

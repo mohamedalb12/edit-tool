@@ -166,10 +166,11 @@ function previewClip(ffmpeg, url, t, len, out, opts) {
 }
 
 /** cut a part out of the remote file → { file } (progress 0..1 from ffmpeg's out_time) */
-function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total }, onProgress) {
+function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total, onChild }, onProgress) {
   const args = rangeArgs(url, { start, end, audioOnly, out });
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { windowsHide: true });
+    if (onChild) onChild(child);
     let err = '', buf = '';
     child.stdout.on('data', d => {
       buf += d; let i;

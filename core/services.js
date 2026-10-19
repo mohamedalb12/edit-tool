@@ -30,6 +30,15 @@ function clipSig(clips) {
   return clips.map(c => [c.mediaPath, (+c.start).toFixed(3), (+c.end).toFixed(3), (+c.inPoint).toFixed(3), (+(c.speed || 1)).toFixed(3)].join('|')).join(';');
 }
 
+/** end a download's process (its whole group: yt-dlp's own ffmpeg too) or HTTP request */
+function killJob(k) {
+  try {
+    if (k.efGroup && k.pid) { try { process.kill(-k.pid, 'SIGTERM'); return; } catch (_) {} }
+    if (typeof k.kill === 'function') k.kill('SIGTERM'); else if (typeof k.destroy === 'function') k.destroy(new Error('stopped'));
+  } catch (_) {}
+}
+function cancelError() { const e = new Error('اتوقف التحميل'); e.cancelled = true; return e; }
+
 class Services {
   /**
    * host(name, args) → Promise<data>   (calls host/host.jsx via CEP evalScript)
@@ -1716,6 +1725,7 @@ ${JSON.stringify(lite)}
    * part comes down; a shared folder comes as a zip that's unpacked, added to مكتبتي and imported into its own bin.
    */
   async cloudDownload({ url, quality = 'best', start, end, place = true, time, onProgress } = {}) {
+    const track = this._dlTrack();
     const C = require('./cloud'), Y = require('./ytdlp');
     const pf = Y.platformOf(url);
     const h = await C.head(url, { fetchImpl: this.fetch });
@@ -1723,7 +1733,7 @@ ${JSON.stringify(lite)}
     const bytes = (got, total) => { if (!total && onProgress) onProgress(0, 'bytes', got); };
     const whole = async name => {
       const f = C.outName(dir, name);
-      await this.fetch(h.url, { toFile: f, timeout: 600000, redirects: 8, onProgress: p => onProgress && onProgress(p), onBytes: bytes });
+      await this.fetch(h.url, { toFile: f, timeout: 600000, redirects: 8, onProgress: p => onProgress && onProgress(p), onBytes: bytes, onRequest: track });
       // a "download" that's really a sign-in page
       if (fs.statSync(f).size < 64 * 1024 && /<html/i.test(fs.readFileSync(f, 'utf8').slice(0, 2000))) { try { fs.unlinkSync(f); } catch (_) {} throw new Error('اللينك رجّع صفحة مش ملف — خلّيه "Anyone with the link" وجرّب تاني'); }
       return f;
@@ -1732,6 +1742,7 @@ ${JSON.stringify(lite)}
       const zip = await whole(/\.zip$/i.test(h.name) ? h.name : h.name + '.zip');
       onProgress && onProgress(1, 'unzip');
       const folder = C.outName(dir, C.safeName(h.name).replace(/\.zip$/i, ''), { ext: '' });
+      this._dlCheck();
       const files = await C.extract(zip, folder);
       try { fs.unlinkSync(zip); } catch (_) {}
       if (!files.length) throw new Error('الفولدر اتفك بس مفيهوش فيديو أو صوت أو صور');
@@ -1755,15 +1766,17 @@ ${JSON.stringify(lite)}
       const audioOut = audioOnly || h.type === 'audio';
       const out = C.outName(dir, h.name, { start: cut ? a : undefined, end: b, ext: audioOut ? '.mp3' : '.mp4' });
       try {
-        file = (await C.downloadRange(ff, h.finalUrl, { start: a, end: b, audioOnly: audioOut, out, total }, onProgress)).file;
+        file = (await C.downloadRange(ff, h.finalUrl, { start: a, end: b, audioOnly: audioOut, out, total, onChild: track }, onProgress)).file;
       } catch (e) {
+        this._dlCheck();
         // the server didn't let ffmpeg jump inside the file: bring the whole file and cut it here
         onProgress && onProgress(0, 'full');
         const full = await whole(h.name);
-        file = (await Y.trim(ff, full, { start: a, end: b, audioOnly: audioOut, out })).file;
+        file = (await Y.trim(ff, full, { start: a, end: b, audioOnly: audioOut, out, onChild: track })).file;
         try { fs.unlinkSync(full); } catch (_) {}
       }
     } else file = await whole(h.name);
+    this._dlCheck();
     onProgress && onProgress(1);
     let placed = null;
     if (place && type !== 'other' && C.typeOf(file) !== 'other') {
@@ -1772,8 +1785,49 @@ ${JSON.stringify(lite)}
     } else if (place) await this.hostRaw('importFiles', { paths: [file], bin: 'EditFast/Downloads' }).catch(() => null);
     return { file, type, platform: pf, placed };
   }
-  async downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
+  /* ---------- إيقاف التحميل ---------- */
+  /**
+   * Stop the download that's running: yt-dlp / ffmpeg / the HTTP transfer are ended, half-written files removed,
+   * nothing lands on the timeline. The running downloadMedia rejects with { cancelled: true }.
+   */
+  downloadCancel() {
+    const job = this._dlJob;
+    if (!job || job.cancelled) return { stopped: false };
+    job.cancelled = true;
+    for (const k of job.kids) killJob(k);
+    return { stopped: true };
+  }
+  /** for each process / request a download starts: remembered so the stop button can end it */
+  _dlTrack() {
+    const job = this._dlJob;
+    return k => { if (!job) return; job.kids.add(k); if (job.cancelled) killJob(k); };
+  }
+  _dlCheck() { if (this._dlJob && this._dlJob.cancelled) throw cancelError(); }
+  async downloadMedia(opts = {}) {
+    const job = { cancelled: false, kids: new Set(), start: Date.now() };
+    this._dlJob = job;
+    let dir = null;
+    try {
+      dir = await this.projectMediaDir('Downloads');
+      const r = await this._downloadMedia(opts);
+      if (job.cancelled) { try { if (r && r.file && r.type !== 'folder') fs.unlinkSync(r.file); } catch (_) {} throw cancelError(); }
+      return r;
+    } catch (e) {
+      if (!job.cancelled) throw e;
+      // half-written pieces yt-dlp / ffmpeg / the transfer left behind
+      try {
+        for (const n of fs.readdirSync(dir)) {
+          if (!/\.(part|ytdl)$|\.part[-.]|\.temp\.|\.f\d+\.\w+$/.test(n)) continue;
+          const f = path.join(dir, n);
+          try { if (fs.statSync(f).mtimeMs >= job.start - 1000) fs.unlinkSync(f); } catch (_) {}
+        }
+      } catch (_) {}
+      throw cancelError();
+    } finally { if (this._dlJob === job) this._dlJob = null; }
+  }
+  async _downloadMedia({ url, quality = '1080', start, end, place = true, time, onProgress } = {}) {
     const Y = require('./ytdlp'), W = require('./websearch');
+    const track = this._dlTrack();
     if (require('./cloud').kindOf(url)) return this.cloudDownload({ url, quality, start, end, place, time, onProgress });
     const pf = Y.platformOf(url);
     if (!pf) throw new Error('اللينك مش صح');
@@ -1786,13 +1840,13 @@ ${JSON.stringify(lite)}
       try { await this.ytdlpInstall({}); o = await this.ytdlpOpts(); return o.bin === managed; } catch (_) { return false; }
     };
     if (o.bin && o.bin !== managed && !this.settings.paths.ytdlp && Y.ageDays(o.version) > 45) await upgrade();
-    let base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom };
+    let base = { url, quality, outDir: dir, ffmpeg: this.tools.ffmpeg, jsRuntime: o.jsRuntime, cookiesFrom: o.cookiesFrom, onChild: track };
     let file, type = quality === 'audio' ? 'audio' : 'video';
     const cut = Y.parseTime(start) !== null || Y.parseTime(end) !== null;
     const cutHere = async full => {
       const a = Y.parseTime(start) || 0, b = Y.parseTime(end);
       const out = full.replace(/(\.[^.]+)$/, `-${a}-${b === null ? 'end' : b}${quality === 'audio' ? '.mp3' : '.mp4'}`);
-      const f = (await Y.trim(this.ffmpeg(), full, { start, end, audioOnly: quality === 'audio', out })).file;
+      const f = (await Y.trim(this.ffmpeg(), full, { start, end, audioOnly: quality === 'audio', out, onChild: track })).file;
       try { fs.unlinkSync(full); } catch (_) {}
       return f;
     };
@@ -1804,7 +1858,8 @@ ${JSON.stringify(lite)}
       attempts.push(async () => { onProgress && onProgress(0, 'simple'); const f = (await Y.download(o.bin, { ...base, sections: false, simple: true }, onProgress)).file; return cut ? cutHere(f) : f; });
       let lastErr = null, triedFix = false;
       for (let i = 0; i < attempts.length; i++) {
-        try { file = await this.withLogin(x => { base = { ...base, cookiesFrom: x.cookiesFrom }; return attempts[i](); }, { cookiesFrom: base.cookiesFrom }); break; } catch (e) {
+        try { file = await this.withLogin(x => { this._dlCheck(); base = { ...base, cookiesFrom: x.cookiesFrom }; return attempts[i](); }, { cookiesFrom: base.cookiesFrom }); break; } catch (e) {
+          this._dlCheck(); // stopped: no other way, no other browser
           lastErr = e;
           if (/403|Forbidden|JavaScript|challenge/i.test(e.message + ' ' + (e.raw || '')) && !triedFix) {
             // 403 / challenge: newest yt-dlp + another YouTube client, then the same attempt again
@@ -1822,10 +1877,11 @@ ${JSON.stringify(lite)}
       if (!file) throw lastErr;
     } catch (e) {
       // Pinterest photo pins aren't videos: grab the picture itself
-      if (pf.id !== 'pinterest') throw e;
+      if (pf.id !== 'pinterest' || e.cancelled) throw e;
       const m = await W.pinterestMedia(url, { fetchImpl: this.fetch });
       file = await W.downloadUrl(m.url, dir, { fetchImpl: this.fetch, name: m.title || 'pinterest' }); type = m.type;
     }
+    this._dlCheck();
     if (/\.(jpe?g|png|webp|gif)$/i.test(file)) type = 'photo';
     let placed = null;
     if (place) {

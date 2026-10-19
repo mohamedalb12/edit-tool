@@ -698,6 +698,17 @@ test('تحميل: analyse a link, qualities from the video, start/end, download 
   const all = await page.evaluate(() => window.__calls.filter(x => x.name === 'downloadMedia').map(x => x.args.url));
   assert.deepEqual(all, ['https://youtu.be/one', 'https://www.tiktok.com/@x/video/2']);
   assert.ok(await page.evaluate(() => window.__calls.filter(x => x.name === 'downloadMedia').every(x => x.args.start === undefined)));
+  // stop button: only while downloading; stops it and the links after it
+  assert.equal(await page.locator('button', { hasText: 'وقف التحميل' }).isVisible(), false);
+  await clearCalls();
+  await page.fill('textarea.dl-urls', 'https://youtu.be/slow1\nhttps://youtu.be/two');
+  await clickText('نزّل');
+  await page.locator('button', { hasText: 'وقف التحميل' }).waitFor({ state: 'visible' });
+  await page.locator('button', { hasText: 'وقف التحميل' }).click();
+  await page.locator('button', { hasText: 'وقف التحميل' }).waitFor({ state: 'hidden' });
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'downloadCancel')));
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(x => x.name === 'downloadMedia').map(x => x.args.url)), ['https://youtu.be/slow1'], 'the next link never started');
+  assert.match(await page.textContent('#toast, .toast, body'), /اتوقف/);
   // a Dropbox link: no quality ladder (it's the original file), pick a part of a 30-minute interview
   await clearCalls();
   await page.fill('textarea.dl-urls', 'https://www.dropbox.com/scl/fi/abc/x.mp4?rlkey=k&dl=0');

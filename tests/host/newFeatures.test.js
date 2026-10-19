@@ -548,3 +548,62 @@ test('مكتبتي: files saved as "folders" by an old version become one chip, 
   S.libraryClear();
   assert.equal(S.libraryItems().length, 0); assert.deepEqual(S.libraryStats().dirs, []);
 });
+
+test('stop button: a running yt-dlp (and the ffmpeg it started) or a Dropbox transfer is ended, half files removed, nothing placed', async () => {
+  const fake = path.join(TMP, 'yt-slow');
+  fs.writeFileSync(fake, `#!${process.execPath}
+const a = process.argv.slice(2), fs = require('fs'), cp = require('child_process');
+if (a[0] === '--version') { console.log('2026.10.15'); process.exit(0); }
+const out = a[a.indexOf('-o') + 1].replace('%(title).80B [%(id)s]', 'slow [x]').replace('%(ext)s', 'mp4');
+fs.writeFileSync(out + '.part', 'half');
+// a grandchild like yt-dlp's ffmpeg: must die with it
+const kid = cp.spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+fs.writeFileSync(process.env.EF_KID, String(kid.pid));
+let p = 0; setInterval(() => { p = Math.min(99, p + 1); console.log('EFPROG ' + p + '%'); }, 100);
+`); fs.chmodSync(fake, 0o755);
+  const kidFile = path.join(TMP, 'yt-slow-kid.pid'); try { fs.unlinkSync(kidFile); } catch (_) {}
+  process.env.EF_KID = kidFile;
+  const { S, h, seq } = world({ settings: { paths: { ...config.DEFAULTS.paths, ytdlp: fake } } });
+  h.ctx.app.project.path = path.join(TMP, 'Projects', 'stop.prproj');
+  assert.deepEqual(S.downloadCancel(), { stopped: false }, 'nothing running');
+  let ticks = 0;
+  const run = S.downloadMedia({ url: 'https://youtu.be/slow', quality: '720', place: true, onProgress: p => { if (p > 0) ticks++; } });
+  const t0 = Date.now();
+  while (ticks < 3 && Date.now() - t0 < 8000) await new Promise(r => setTimeout(r, 50));
+  assert.ok(ticks >= 3, 'it was downloading');
+  assert.deepEqual(S.downloadCancel(), { stopped: true });
+  await assert.rejects(run, e => e.cancelled === true && /اتوقف/.test(e.message));
+  assert.ok(Date.now() - t0 < 6000, 'stopped right away, no other attempts');
+  const dir = path.join(TMP, 'Projects', 'EditFast Media', 'Downloads');
+  assert.deepEqual(fs.readdirSync(dir).filter(n => /slow/.test(n)), [], 'the .part is gone');
+  assert.equal(seq.v.flatMap(t => t.items).length, 0, 'nothing on the timeline');
+  const kid = +fs.readFileSync(kidFile, 'utf8');
+  await new Promise(r => setTimeout(r, 300));
+  // gone, or a zombie waiting to be reaped (containers without an init): either way it isn't running
+  const alive = () => { try { process.kill(kid, 0); } catch (_) { return false; } try { return !/State:\s*Z/.test(fs.readFileSync('/proc/' + kid + '/status', 'utf8')); } catch (_) { return process.platform !== 'linux'; } };
+  assert.equal(alive(), false, 'the grandchild process was stopped too');
+  delete process.env.EF_KID;
+
+  // a direct (Dropbox) transfer that trickles in
+  const http = require('http'), { nodeFetch } = require('../../core/http');
+  const srv = http.createServer((req, res) => {
+    const hd = { 'Content-Type': 'video/mp4', 'Content-Disposition': 'attachment; filename="big.mp4"' };
+    if (req.headers.range) { res.writeHead(206, { ...hd, 'Content-Range': 'bytes 0-0/50000000', 'Content-Length': 1 }); return res.end('x'); }
+    res.writeHead(200, { ...hd, 'Content-Length': 50000000 });
+    const iv = setInterval(() => res.write(Buffer.alloc(64 * 1024)), 20); res.on('close', () => clearInterval(iv));
+  });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + srv.address().port;
+  try {
+    const W2 = world({ fetchImpl: (u, o) => nodeFetch(u.replace('https://www.dropbox.com', base), o) });
+    W2.h.ctx.app.project.path = path.join(TMP, 'Projects', 'stop2.prproj');
+    let got = 0;
+    const run2 = W2.S.downloadMedia({ url: 'https://www.dropbox.com/scl/fi/z/big.mp4?rlkey=k', place: false, onProgress: p => { got = p; } });
+    const t1 = Date.now(); while (got < 0.01 && Date.now() - t1 < 8000) await new Promise(r => setTimeout(r, 50));
+    assert.ok(got > 0, 'transfer running');
+    W2.S.downloadCancel();
+    await assert.rejects(run2, e => e.cancelled === true);
+    const d2 = path.join(TMP, 'Projects', 'EditFast Media', 'Downloads');
+    assert.deepEqual(fs.readdirSync(d2).filter(n => /^big/.test(n)), [], 'no big.mp4 / big.mp4.part left');
+  } finally { srv.close(); }
+});

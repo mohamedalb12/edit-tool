@@ -176,25 +176,37 @@
         var list = links();
         if (!list.length) return UI.toast('حط اللينك الأول', true);
         prog.set(0);
+        stopped = false; stop.style.display = ''; stop.disabled = false;
         UI.safe('بيحمّل', function () {
           var done = 0, failed = [], last = null;
           // several links: one after the other; the start/end range only applies to a single link
           return list.reduce(function (p, u, i) {
             return p.then(function () {
+              if (stopped) return; // stopped: the links after this one aren't started
               var one = list.length === 1;
               return S.downloadMedia({ url: u, quality: o.quality, start: one ? (o.start || undefined) : undefined, end: one ? (o.end || undefined) : undefined, place: o.place, onProgress: function (x, phase, got) {
                 prog.set((i + x) / list.length);
                 UI.status((list.length > 1 ? (i + 1) + '/' + list.length + ' · ' : '') + (phase === 'full' ? 'القص أثناء التحميل مانفعش — بينزّل الفيديو كله ويقصه هنا…' : phase === 'simple' ? 'بيجرّب نسخة جاهزة من غير دمج…' : phase === 'update' ? 'بيحدّث yt-dlp لآخر نسخة (أول مرة بس)…' : phase === 'retry' ? 'يوتيوب رفض — بيجرّب بطريقة تانية…' : phase === 'unzip' ? 'بيفك الضغط ويضيف لمكتبتي…' : phase === 'bytes' ? 'تحميل ' + Math.round((got || 0) / 1e6) + ' ميجا…' : 'تحميل ' + Math.round(x * 100) + '%'), 'busy');
-              } }).then(function (r) { done++; last = r; }, function (e) { if (list.length === 1) throw e; failed.push(u + ' — ' + e.message); });
+              } }).then(function (r) { done++; last = r; }, function (e) { if (list.length === 1 || e.cancelled) throw e; failed.push(u + ' — ' + e.message); });
             });
           }, Promise.resolve()).then(function () {
+            if (stopped) return;
             prog.set(1);
             if (failed.length) UI.toast(done + ' اتحمّلوا و' + failed.length + ' فشلوا: ' + failed[0], true);
             else if (last && last.type === 'folder') UI.toast(last.files.length + ' ملف اتحمّلوا واتضافوا لمكتبتي' + (last.imported ? ' وفي Bin "' + last.bin.split('/').pop() + '"' : '') + ' ✓');
             else UI.toast(list.length > 1 ? done + ' فيديو اتحمّلوا ✓' : (o.place ? 'نزل على التايملين ✓' : 'اتحمّل ✓'));
           });
-        }, go);
+        }, go).then(function () { stop.style.display = 'none'; if (stopped) prog.set(0); });
       }, 'primary');
+      // stop what's downloading now (yt-dlp / ffmpeg / the transfer end, half files are removed, nothing is placed)
+      var stopped = false;
+      var stop = UI.btn('⏹ وقف التحميل', function () {
+        stopped = true; stop.disabled = true;
+        var r = S.downloadCancel ? S.downloadCancel() : null;
+        UI.status('بيوقف التحميل…', 'busy');
+        if (!r || !r.stopped) { stop.style.display = 'none'; }
+      }, 'danger');
+      stop.style.display = 'none';
 
       view.appendChild(UI.card('أداة التحميل', toolBox, UI.hint('الإضافة بتنزّل نسختها من yt-dlp لوحدها (من غير Homebrew). المواقع بتغيّر حاجات كتير، فلو التحميل وقف فجأة دوس "حدّث yt-dlp".')));
       drawTool();
@@ -202,7 +214,7 @@
         UI.field('الجودة', qualWrap),
         UI.field('الجزء', rangeBox),
         UI.row(h('label', null, h('input', { type: 'checkbox', checked: o.place, onchange: function (e) { o.place = e.target.checked; } }), ' حطه على التايملين عند رأس التشغيل')),
-        prog, UI.row(go),
+        prog, UI.row(go, stop),
         UI.hint('دروبوكس وجوجل درايف: الصق لينك المشاركة (لازم يكون "Anyone with the link"). بيتحفظ جنب المشروع في فولدر "EditFast Media/Downloads" بصيغة MP4 (H.264) اللي بريمير بيفتحها على طول. نزّل بس المحتوى اللي عندك حق تستخدمه.')));
       badge(); drawQual(); drawInfo(); drawRange();
     }
