@@ -1089,4 +1089,49 @@ test('تزامن الكابشن: auto-measure from the audio sets the offset; th
   await page.evaluate(() => EF.services.saveSettings({ captions: Object.assign({}, EF.services.settings.captions, { offset: 0 }) }));
 });
 
+test('مربع الأوامر (⌘K): Arabic words find Premiere effects, Enter applies to the selection, screens and actions too', async () => {
+  await open('motion'); await clearCalls();
+  await page.keyboard.press('Control+KeyK');
+  await page.waitForSelector('.pal-in');
+  await page.fill('.pal-in', 'بلور');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.pal-item')).some(b => /Gaussian Blur/.test(b.textContent)));
+  assert.match(await page.locator('.pal-item.on').textContent(), /Gaussian Blur/);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  assert.deepEqual(await page.evaluate(() => window.__calls.find(x => x.name === 'applyEffect').args), { name: 'Gaussian Blur', kind: 'video' });
+  assert.equal(await page.locator('.pal-back').count(), 0, 'closed after running');
+  // a transition, by English name
+  await page.click('#pal-btn'); await page.fill('.pal-in', 'cross');
+  await page.waitForFunction(() => /Cross Dissolve/.test(document.querySelector('.pal-item.on') && document.querySelector('.pal-item.on').textContent));
+  await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => window.__calls.filter(x => x.name === 'applyEffect').pop().args.kind), 'transition');
+  // an EditFast action
+  await page.click('#pal-btn'); await page.fill('.pal-in', 'زووم تلقائي'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'autoZoom')));
+  // a screen
+  await page.click('#pal-btn'); await page.fill('.pal-in', 'مكتبتي'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+  assert.match(await page.textContent('#tab-title'), /مكتبتي/);
+  // recently used come first on an empty search; Esc closes
+  await page.click('#pal-btn');
+  assert.match(await page.locator('.pal-item').first().textContent(), /مكتبتي/);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.pal-back').count(), 0);
+});
+
+test('زووم تلقائي + كل المقاسات: settings reach the services', async () => {
+  await open('motion'); await clearCalls();
+  await page.locator('.card', { hasText: 'زووم تلقائي من الصوت' }).locator('button', { hasText: 'دفعة ناعمة' }).click();
+  await page.locator('.card', { hasText: 'زووم تلقائي من الصوت' }).locator('button', { hasText: 'كتير' }).click();
+  await clickText('علّم الأماكن بس');
+  const z = await page.evaluate(() => window.__calls.find(x => x.name === 'autoZoom').args);
+  assert.equal(z.style, 'smooth'); assert.equal(z.density, 'high'); assert.equal(z.mode, 'markers');
+  await open('reels'); await clearCalls();
+  await page.locator('.fmt-pick label', { hasText: '1:1' }).locator('input').check();
+  await clickText('اعمل كل المقاسات');
+  const f = await page.evaluate(() => window.__calls.find(x => x.name === 'makeFormats').args);
+  assert.deepEqual(f.formats, ['16:9', '4:5', '9:16', '1:1']); assert.equal(f.useInOut, true);
+  await page.waitForSelector('.card .item');
+  assert.match(await page.textContent('#view'), /Main - مقاطع 4:5/);
+});
+
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

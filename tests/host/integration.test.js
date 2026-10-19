@@ -627,3 +627,56 @@ test('caption sync: measures that the captions are 0.4 s early against the voice
   const T = require('../../core/transcribe');
   assert.equal(T.wordsToTimeline([{ text: 'x', start: 6, end: 7 }], info.audio[0].clips[0])[0].start, 3);
 });
+
+test('one cut → every size: In/Out range becomes 16:9 (the cut itself) + 4:5 + 9:16 reframed sequences, faces analysed once per clip', async () => {
+  const src = path.join(require('../helpers').TMP, 'wide-fmt.mp4');
+  if (!fs.existsSync(src)) require('child_process').execFileSync(require('../helpers').FFMPEG, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=20:r=25', '-f', 'lavfi', '-i', 'sine=f=300:d=20', '-shortest', '-pix_fmt', 'yuv420p', src]);
+  const { S, h, seq } = world();
+  const item = h.pr.project.importOne(src, h.pr.project.root);
+  seq.v[0].add({ projectItem: item, start: 0, end: 20, inPoint: 0 }); seq.a[0].add({ projectItem: item, start: 0, end: 20, inPoint: 0 });
+  seq.inPoint = 4; seq.outPoint = 10;
+  const jobs = [];
+  S.analyzeFacesImpl = async job => { jobs.push(job); return Array.from({ length: Math.round(job.duration * 3) }, (_, i) => ({ t: i / 3, faces: [{ cx: 0.3, cy: 0.4, w: 0.1, h: 0.2, score: 0.9 }] })); };
+  const r = await S.makeFormats({ formats: ['16:9', '4:5', '9:16'] });
+  assert.equal(r.length, 6); assert.deepEqual(r.range, [4, 10]);
+  assert.deepEqual(r.sequences.map(x => x.ratio), ['16:9', '4:5', '9:16']);
+  assert.equal(r.sequences[0].reframed, false, '16:9 = the cut itself');
+  assert.equal(jobs.length, 1, 'face track analysed once for both formats');
+  const byName = n => h.pr.project.seqs.find(x => x.name === n);
+  const cut = byName(r.sequences[0].sequence);
+  assert.ok(Math.abs(cut.v[0].items.reduce((a, c) => a + c._end - c._start, 0) - 6) < 0.1, 'only In→Out');
+  const f45 = byName(r.sequences[1].sequence), f916 = byName(r.sequences[2].sequence);
+  assert.match(f45.name, /4:5/); assert.match(f916.name, /9:16/);
+  const dims = f => require('child_process').execFileSync(require('../helpers').FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', f.v[0].items[0].projectItem.mediaPath]).toString().trim();
+  assert.equal(dims(f45), '1080,1350'); assert.equal(dims(f916), '1080,1920');
+  assert.ok(seq.v[0].items.length === 1 && seq.v[0].items[0]._end === 20, 'the original sequence is untouched');
+  await assert.rejects(S.makeFormats({ formats: [] }), /مقاس/);
+});
+
+test('auto zoom from the voice: the emphatic (louder) phrases get a zoom, the first stays wide, hold keys on Transform, markers mode only marks', async () => {
+  const Z = require('../../core/autozoom');
+  // 8 phrases: normal voice, with phrases 3 and 6 said louder
+  const parts = [];
+  for (let i = 0; i < 8; i++) parts.push({ tone: 220 + i * 10, dur: 1.6, amp: i === 3 || i === 6 ? 0.7 : 0.15 }, { silence: 0.8 });
+  const f = makeAudio('zoom-voice.wav', parts); // phrase i starts at i*2.4
+  const env = Z.envelope(await require('../../core/ffmpeg').decodePCM(require('../helpers').FFMPEG, f, { rate: 8000 }), 8000);
+  const ph = Z.phrases(env);
+  assert.equal(ph.length, 8, JSON.stringify(ph.map(p => p.start)));
+  assert.ok(ph[3].loud > ph[2].loud + 6 && ph[6].loud > ph[5].loud + 6);
+  const { S, seq } = world({ clipFile: f, clipLen: 19.2 });
+  const m = await S.autoZoom({ density: 0.25, mode: 'markers' });
+  assert.equal(m.zooms, 2);
+  assert.deepEqual(seq.markerList.map(x => Math.round(x.start.seconds * 10) / 10).sort((a, b) => a - b), [7.2, 14.4]);
+  const r = await S.autoZoom({ density: 0.25, style: 'jump', scale: 120 });
+  assert.equal(r.zooms, 2);
+  const tf = seq.v[0].items[0].comps.find(c => c.matchName === 'AE.ADBE Geometry2');
+  const sc = tf.props.find(p => p.displayName === 'Scale');
+  const at = t => { let v = 100; for (const k of sc.keys) if (k.t <= t + 1e-6) v = k.v; return v; };
+  assert.equal(at(5), 100, 'before: wide'); assert.equal(at(7.5), 120, 'loud phrase: zoomed');
+  assert.equal(at(9.5), 100, 'after it: back');
+  assert.ok(sc.keys.every(k => k.interp === 4), 'hard cuts (hold keys)');
+  assert.equal(at(15), 120, 'second zoom');
+  // never the very first phrase, never two within minGap
+  const z = Z.pick([{ start: 0, end: 1, loud: 20 }, { start: 2, end: 3, loud: 10 }, { start: 3.5, end: 4, loud: 9 }, { start: 9, end: 10, loud: 5 }], { density: 1, minGap: 3 });
+  assert.deepEqual(z.map(x => x.start), [2, 9]);
+});

@@ -750,6 +750,74 @@ EFAPI.importMGT = function (a) {
   return { track: ti, start: t, end: t + dur, textSet: set > 0, name: clip.name };
 };
 
+/* ---------------- effects by name (command palette) ---------------- */
+EF.toArr = function (x) {
+  var out = [], i;
+  if (!x) return out;
+  if (typeof x === 'string') { var p = x.split(','); for (i = 0; i < p.length; i++) if (p[i]) out.push(p[i]); return out; }
+  for (i = 0; i < x.length; i++) if (x[i]) out.push(String(x[i]));
+  return out;
+};
+/** every effect / transition name Premiere has (QE lists) */
+EFAPI.effectList = function () {
+  var r = { video: [], audio: [], transitions: [] };
+  try { r.video = EF.toArr(qe.project.getVideoEffectList()); } catch (e) {}
+  try { r.audio = EF.toArr(qe.project.getAudioEffectList()); } catch (e2) {}
+  try { r.transitions = EF.toArr(qe.project.getVideoTransitionList()); } catch (e3) {}
+  return r;
+};
+/** which track a timeline clip sits on: { kind, index } */
+EF.trackOfClip = function (seq, clip) {
+  var kinds = [['video', seq.videoTracks], ['audio', seq.audioTracks]], k, i, j, tr;
+  for (k = 0; k < kinds.length; k++) {
+    for (i = 0; i < kinds[k][1].numTracks; i++) {
+      tr = kinds[k][1][i];
+      for (j = 0; j < tr.clips.numItems; j++) if (tr.clips[j].nodeId === clip.nodeId && Math.abs(EF.sec(tr.clips[j].start) - EF.sec(clip.start)) < 0.001) return { kind: kinds[k][0], index: i };
+    }
+  }
+  return null;
+};
+EF.qeItem = function (kind, index, clip) {
+  var q = EF.qeSeq(), qtr = kind === 'audio' ? q.getAudioTrackAt(index) : q.getVideoTrackAt(index), i, it, st, s = EF.sec(clip.start);
+  for (i = 0; i < qtr.numItems; i++) {
+    it = qtr.getItemAt(i);
+    if (!it || it.type === 'Empty') continue;
+    st = it.start ? (it.start.secs !== undefined ? it.start.secs : EF.sec(it.start)) : -1;
+    if (Math.abs(st - s) < 0.02) return it;
+  }
+  return null;
+};
+/**
+ * Apply a Premiere effect / transition by name to the selected clips (or the clip under the playhead).
+ * a: { name, kind: video|audio|transition, duration (transition seconds) }
+ */
+EFAPI.applyEffect = function (a) {
+  var seq = EF.seq(), sel = [], i, c, where, it, fx, n = 0, kind = a.kind || 'video';
+  try { var s0 = seq.getSelection(); for (i = 0; i < s0.length; i++) if (s0[i]) sel.push(s0[i]); } catch (e) {}
+  if (!sel.length) { c = EF.findVideoClip(seq, EF.sec(seq.getPlayerPosition()), a.track); if (c) sel.push(c); }
+  if (!sel.length) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628 \u0641\u064a \u0627\u0644\u062a\u0627\u064a\u0645\u0644\u064a\u0646 \u0627\u0644\u0623\u0648\u0644');
+  if (kind === 'audio') fx = qe.project.getAudioEffectByName(a.name);
+  else if (kind === 'transition') fx = qe.project.getVideoTransitionByName(a.name);
+  else fx = qe.project.getVideoEffectByName(a.name);
+  if (!fx) throw new Error('\u0628\u0631\u064a\u0645\u064a\u0631 \u0645\u0627\u0644\u0642\u0627\u0634 "' + a.name + '"');
+  var durTc = EF.timecode(seq, a.duration || 0.5);
+  for (i = 0; i < sel.length; i++) {
+    where = EF.trackOfClip(seq, sel[i]);
+    if (!where) continue;
+    if ((kind === 'audio') !== (where.kind === 'audio')) continue; // a video effect never lands on the audio half of a linked clip
+    it = EF.qeItem(where.kind, where.index, sel[i]);
+    if (!it) continue;
+    try {
+      if (kind === 'audio') it.addAudioEffect(fx);
+      else if (kind === 'transition') it.addTransition(fx, true, durTc, '00:00:00:00', 0.5, false, true);
+      else it.addVideoEffect(fx);
+      n++;
+    } catch (e4) {}
+  }
+  if (!n) throw new Error(kind === 'audio' ? '\u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628 \u0635\u0648\u062a' : '\u0627\u062e\u062a\u0627\u0631 \u0643\u0644\u064a\u0628 \u0641\u064a\u062f\u064a\u0648');
+  return { applied: n, name: a.name, kind: kind };
+};
+
 /* ---------------- multicam ---------------- */
 /** a: { plan:[{start,end,trackIndex}], tracks:[video track indexes], clone } */
 EFAPI.multicamApply = function (a) {

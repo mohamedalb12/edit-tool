@@ -39,6 +39,9 @@ function killJob(k) {
 }
 function cancelError() { const e = new Error('اتوقف التحميل'); e.cancelled = true; return e; }
 
+/** 83.4 → "1:23" (names of the sequences EditFast makes) */
+function UIclock(t) { t = Math.max(0, Math.round(t)); return Math.floor(t / 60) + '.' + String(t % 60).padStart(2, '0'); }
+
 class Services {
   /**
    * host(name, args) → Promise<data>   (calls host/host.jsx via CEP evalScript)
@@ -194,7 +197,7 @@ class Services {
     let before = null;
     if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
     const r = await this.hostRaw(name, args);
-    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك' };
+    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك', applyEffect: 'إفكت' };
     if (!LABELS[name]) return r;
     const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
     if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
@@ -1027,7 +1030,15 @@ ${JSON.stringify(lite)}
     const duration = clip.end - clip.start;
     const out = path.join(config.cacheDir('reels'), `reel-${hash(clip.mediaPath + '|' + clip.inPoint + '|' + duration + '|' + ratio)}.mp4`);
     if (fs.existsSync(out)) return out;
-    const samples = await this.analyzeFacesImpl({ ffmpeg: this.ffmpeg(), file: clip.mediaPath, start: clip.inPoint, duration, srcW: info.width, srcH: info.height, fps: 3, onProgress: p => onProgress && onProgress(p * 0.7) });
+    // the face track of a clip is the same for every format: analysed once, reused for 9:16, 4:5, 1:1…
+    this._faces = this._faces || new Map();
+    const fk = clip.mediaPath + '|' + clip.inPoint + '|' + duration;
+    let samples = this._faces.get(fk);
+    if (!samples) {
+      samples = await this.analyzeFacesImpl({ ffmpeg: this.ffmpeg(), file: clip.mediaPath, start: clip.inPoint, duration, srcW: info.width, srcH: info.height, fps: 3, onProgress: p => onProgress && onProgress(p * 0.7) });
+      if (this._faces.size > 40) this._faces.delete(this._faces.keys().next().value);
+      this._faces.set(fk, samples);
+    }
     const shots = (await vision.detectShots(this.ffmpeg(), clip.mediaPath, { start: clip.inPoint, duration }).catch(() => [])).map(t => t - clip.inPoint);
     const planRes = reframe.plan(samples, { srcW: info.width, srcH: info.height, ratio, shots });
     await reframe.render(this.ffmpeg(), { file: clip.mediaPath, start: clip.inPoint, duration, srcW: info.width, srcH: info.height, planRes, ratio, out });
@@ -1046,6 +1057,44 @@ ${JSON.stringify(lite)}
       items.push({ path: file, time: +(clips[i].start - t0).toFixed(3) });
     }
     return this.op('ريلز', () => this.host('createSequenceFromClips', { name: `${s.name} - ريلز ${ratio}`, items, bin: 'EditFast/Reels' }));
+  }
+
+  /**
+   * One cut, every size (AutoPod's social clip creator): the In/Out range (or the whole sequence) becomes a copy,
+   * and each format gets its own sequence reframed on the face — e.g. 16:9 + 4:5 + 9:16 in one go.
+   * The format that matches the sequence itself is the trimmed copy (no re-render).
+   */
+  async makeFormats({ formats = ['16:9', '4:5', '9:16'], useInOut = true, captions = false, onProgress } = {}) {
+    const reframe = require('./reframe');
+    const list = Array.from(new Set((formats || []).filter(f => reframe.RATIOS[f])));
+    if (!list.length) throw new Error('اختار مقاس واحد على الأقل');
+    const s = await this.seq();
+    const io = useInOut && s.inOut && s.inOut[0] !== null && s.inOut[1] !== null && s.inOut[1] > s.inOut[0] ? s.inOut : null;
+    const a = io ? Math.max(0, io[0]) : 0, b = io ? Math.min(s.duration, io[1]) : s.duration;
+    if (!(b - a > 0.5)) throw new Error('الجزء قصير قوي — علّم In و Out على جزء أطول');
+    const srcRatio = s.width && s.height ? s.width / s.height : 16 / 9;
+    const same = f => Math.abs(reframe.RATIOS[f] - srcRatio) < 0.02;
+    const label = io ? `${UIclock(a)}-${UIclock(b)}` : 'كله';
+    return this.op('مقاسات السوشيال', async () => {
+      // 1) the cut: a copy of the sequence with only [a, b]
+      const ranges = []; if (a > 0.05) ranges.push({ start: 0, end: a }); if (b < s.duration - 0.05) ranges.push({ start: b, end: s.duration });
+      const base = ranges.length
+        ? await this.host('removeRanges', { ranges, clone: true, cloneName: `${s.name} - مقاطع ${label}`, crossfadeFrames: 0 })
+        : await this.host('cloneSequence', { name: `${s.name} - مقاطع ${label}` });
+      this.transcript = null;
+      const cut = await this.hostRaw('activeSequenceId', {});
+      const out = [];
+      const todo = list.filter(f => !same(f));
+      if (list.some(same)) out.push({ ratio: list.find(same), sequence: cut.name, reframed: false });
+      for (let i = 0; i < todo.length; i++) {
+        await this.hostRaw('openSequence', { id: cut.id }); // every format starts from the cut, not from the previous format
+        const r = await this.makeReels({ ratio: todo[i], onProgress: (p, name) => onProgress && onProgress((i + p) / todo.length, todo[i] + (name ? ' — ' + name : '')) });
+        if (captions) { try { await (this.renderCaptionsImpl ? this.addAnimatedCaptions({}) : this.addCaptions({})); } catch (e) { this.log('captions: ' + e.message); } }
+        out.push({ ratio: todo[i], sequence: r.name, reframed: true });
+      }
+      onProgress && onProgress(1);
+      return { length: +(b - a).toFixed(2), range: io ? [a, b] : null, sequences: out };
+    });
   }
 
   async findShorts({ count = 3, min = 20, max = 60 } = {}) {
@@ -1218,6 +1267,71 @@ ${JSON.stringify(lite)}
     if (id) return { source: 'pack', id, ...(await this.placeSfx({ id, time })) };
     if (this.settings.keys.elevenlabs) return { source: 'ai', ...(await this.generateSfx({ prompt, translate: false, duration, time, place: true })) };
     return { source: 'pack', id: 'whoosh', ...(await this.placeSfx({ id: 'whoosh', time })) };
+  }
+
+  /**
+   * Zoom on the emphatic moments, heard from the voice itself (no AI, no transcript, free): phrases louder than
+   * your usual level get a zoom — "jump" cut-in (YouTube style), "smooth" push or a short "punch".
+   * mode 'markers' only marks them for review.
+   */
+  async autoZoom({ density = 'medium', style = 'jump', scale = 115, minGap = 3, track = 0, mode = 'apply', onProgress } = {}) {
+    const Z = require('./autozoom');
+    const { seq: s, clips } = await this.audioClips();
+    const spans = new Map();
+    for (const c of clips) {
+      const { a, b } = transcribeMod.sourceSpan(c), sp = spans.get(c.mediaPath);
+      if (!sp) spans.set(c.mediaPath, { a, b }); else { sp.a = Math.min(sp.a, a); sp.b = Math.max(sp.b, b); }
+    }
+    const heard = new Map(); let k = 0;
+    for (const [file, sp] of spans) {
+      const rate = 8000, pcm = await ff.decodePCM(this.ffmpeg(), file, { rate, start: sp.a, duration: sp.b - sp.a });
+      heard.set(file, Z.phrases(Z.envelope(pcm, rate)).map(p => ({ ...p, start: p.start + sp.a, end: p.end + sp.a })));
+      onProgress && onProgress(0.5 * ++k / spans.size);
+    }
+    // source-time phrases → this timeline, clipped to each clip
+    const all = [];
+    for (const c of clips) {
+      const sp = Math.abs(c.speed || 1) || 1;
+      for (const p of heard.get(c.mediaPath) || []) {
+        const a = c.start + (p.start - c.inPoint) / sp, b = c.start + (p.end - c.inPoint) / sp;
+        if (b <= c.start + 0.05 || a >= c.end - 0.05) continue;
+        all.push({ start: Math.max(c.start, a), end: Math.min(c.end, b), loud: p.loud });
+      }
+    }
+    all.sort((x, y) => x.start - y.start);
+    const zooms = Z.pick(all, { density, minGap, scale, alt: Math.round(100 + (scale - 100) * 0.55) });
+    if (mode === 'markers') {
+      await this.host('addMarkers', { markers: zooms.map(z => ({ time: z.start, duration: z.end - z.start, name: 'زووم ' + z.scale + '%', comment: '+' + z.loud.toFixed(1) + ' dB', color: 'purple' })) });
+      return { zooms: zooms.length, phrases: all.length, mode };
+    }
+    const vt = s.video[track];
+    if (!vt || !vt.clips.length) throw new Error(`مفيش فيديو على V${track + 1}`);
+    const fps = Math.round(s.fps || 30);
+    let done = 0;
+    await this.op('زووم تلقائي', async () => {
+      for (const [i, z] of zooms.entries()) {
+        const c = vt.clips.find(x => z.start >= x.start - 0.01 && z.start < x.end - 0.05);
+        if (!c) continue;
+        const zz = { ...z, end: Math.min(z.end, c.end - 1 / fps) };
+        const kk = Z.keys(zz, style, fps).filter(q => zz.start + q.t >= c.start - 1e-6 && zz.start + q.t <= c.end + 1e-6);
+        await this.host('applyKeyframes', { time: zz.start, track, mode: 'at', duration: zz.end - zz.start, props: { scale: kk }, clear: false });
+        done++;
+        onProgress && onProgress(0.5 + 0.5 * (i + 1) / zooms.length);
+      }
+    });
+    return { zooms: done, phrases: all.length, style, mode };
+  }
+
+  /* ---------- مربع الأوامر: إفكتات بريمير بالاسم ---------- */
+  /** every video / audio effect and transition Premiere has (asked once, kept for the session) */
+  async effectList(refresh = false) {
+    if (!this._fxList || refresh) this._fxList = await this.hostRaw('effectList', {});
+    return this._fxList;
+  }
+  /** apply a Premiere effect / transition by name to the selected clips (or the one under the playhead) */
+  async applyEffect({ name, kind = 'video', duration } = {}) {
+    if (!name) throw new Error('اسم الإفكت ناقص');
+    return this.op((kind === 'transition' ? 'ترانزيشن: ' : 'إفكت: ') + name, () => this.host('applyEffect', { name, kind, duration }));
   }
 
   async autoEffects({ density, apply = true } = {}) {

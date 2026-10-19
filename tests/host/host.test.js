@@ -265,3 +265,17 @@ test('setVolumeKeys: ducking twice rewrites the keys from the real level instead
   assert.deepEqual(lvl.keys.map(k => +k.v.toFixed(5)), first, 'same levels, not −24 dB');
   assert.equal(lvl.keys.length, 4);
 });
+
+test('command palette: Premiere effect lists, effect / transition / audio effect by name on the selected clips', () => {
+  const h = setup(), { call, seq } = h;
+  const l = call('effectList', {});
+  assert.ok(l.video.includes('Gaussian Blur') && l.transitions.includes('Cross Dissolve') && l.audio.includes('DeNoise'));
+  seq.v[0].items[0].selected = true;
+  const r = call('applyEffect', { name: 'Gaussian Blur', kind: 'video' });
+  assert.equal(r.applied, 1);
+  assert.ok(seq.v[0].items[0].comps.some(c => c.displayName === 'Gaussian Blur'));
+  assert.equal(call('applyEffect', { name: 'Cross Dissolve', kind: 'transition', duration: 0.5 }).applied, 1);
+  assert.ok(h.pr.qeLog.some(x => x[0] === 'transition' && x[1] === 'Cross Dissolve'));
+  assert.throws(() => call('applyEffect', { name: 'Nope FX', kind: 'video' }), /Nope FX/);
+  assert.throws(() => call('applyEffect', { name: 'DeNoise', kind: 'audio' }), /صوت|\\u/);
+});

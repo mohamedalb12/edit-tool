@@ -43,6 +43,30 @@
         UI.row(h('label', null, 'القوة'), UI.seg([{ value: 1, label: 'هادي' }, { value: 2, label: 'متوسط' }, { value: 3, label: 'قوي' }], level, function (v) { level = v; })),
         UI.row(h('label', null, 'على الكليب المختار'), h('input', { type: 'checkbox', checked: useSel, onchange: function (e) { useSel = e.target.checked; } }), h('span', { class: 'hint' }, 'غير كده: الكليب اللي عند رأس التشغيل')),
         UI.hint('بيكتب كي فريمز حقيقية على Transform — افتح Effect Controls وعدّلها زي ما انت عايز. حط الماوس على القالب تشوف الحركة.')));
+      // ——— زووم تلقائي من الصوت (من غير AI) ———
+      var az = { density: 'medium', style: 'jump', scale: 115, track: 0 };
+      try { Object.assign(az, JSON.parse(localStorage.getItem('ef-autozoom') || '{}')); } catch (e) {}
+      function azSave() { try { localStorage.setItem('ef-autozoom', JSON.stringify(az)); } catch (e) {} }
+      var azProg = UI.progress(), azTxt = h('span', { class: 'hint' });
+      function azRun(mode, btn) {
+        azProg.set(0);
+        UI.safe(mode === 'markers' ? 'بيعلّم أماكن الزووم' : 'بيعمل زووم', function () {
+          return S.autoZoom({ density: az.density, style: az.style, scale: az.scale, track: az.track, mode: mode, onProgress: function (p) { azProg.set(p); } }).then(function (r) {
+            azProg.set(1);
+            azTxt.textContent = (mode === 'markers' ? r.zooms + ' ماركر بنفسجي (من ' + r.phrases + ' جملة) — شوفهم وبعدين دوس "اعمل الزووم"' : r.zooms + ' زووم ✓ (من ' + r.phrases + ' جملة) — تراجع من سجل EditFast لو مش عاجبك');
+            UI.toast(azTxt.textContent);
+          });
+        }, btn);
+      }
+      var azGo = UI.btn('اعمل الزووم', function () { azRun('apply', azGo); }, 'primary');
+      var azMark = UI.btn('علّم الأماكن بس', function () { azRun('markers', azMark); }, 'small');
+      view.appendChild(UI.card('زووم تلقائي من الصوت',
+        UI.hint('بيسمع صوتك ويلاقي الجمل اللي بتأكد فيها (صوتك أعلى من العادي) ويعمل عليها زووم — من غير AI ومن غير تفريغ، ومجاني. أول جملة في الفيديو بتفضل واسعة، ومفيش زوومين ورا بعض.'),
+        UI.row(h('label', null, 'الشكل'), UI.seg([{ value: 'jump', label: 'قطع (يوتيوب)' }, { value: 'smooth', label: 'دفعة ناعمة' }, { value: 'punch', label: 'بانش' }], az.style, function (v) { az.style = v; azSave(); })),
+        UI.row(h('label', null, 'الكمية'), UI.seg([{ value: 'low', label: 'قليل' }, { value: 'medium', label: 'متوسط' }, { value: 'high', label: 'كتير' }], az.density, function (v) { az.density = v; azSave(); })),
+        UI.field('قوة الزووم', UI.slider(105, 140, 1, az.scale, function (v) { return v + '%'; }, function (v) { az.scale = v; azSave(); })),
+        UI.field('تراك الفيديو', UI.slider(1, 6, 1, az.track + 1, function (v) { return 'V' + v; }, function (v) { az.track = v - 1; azSave(); })),
+        azProg, UI.row(azGo, azMark, azTxt)));
       view.appendChild(grids);
       draw();
     }

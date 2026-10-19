@@ -1,7 +1,7 @@
 /* ريلز وشورتس: تحويل طولي بتتبّع الوش + مقاطع شورتس من الفيديو الطويل. */
 (function () {
   var EF = window.EF, UI = EF.ui, h = UI.h;
-  var state = { ratio: '9:16', shorts: null, reframe: true, captions: true };
+  var state = { ratio: '9:16', shorts: null, reframe: true, captions: true, formats: { '16:9': true, '4:5': true, '9:16': true, '1:1': false }, useInOut: true, fmtCaptions: false };
   EF.tabs.push({
     id: 'reels', icon: '📱', label: 'ريلز وشورتس', title: 'ريلز وشورتس',
     render: function (view) {
@@ -11,6 +11,24 @@
           return S.makeReels({ ratio: state.ratio, onProgress: function (p, name) { prog.set(p); now.textContent = (name ? name + ' — ' : '') + Math.round(p * 100) + '%'; } })
             .then(function (r) { prog.set(1); UI.toast('اتعملت "' + r.name + '" ✓'); });
         }, go);
+      }, 'primary');
+      // ——— one cut, every size (16:9 + 4:5 + 9:16 …) ———
+      var fmtProg = UI.progress(), fmtNow = h('span', { class: 'hint' }), fmtOut = h('div', { class: 'list' });
+      var fmtBox = h('div', { class: 'chips fmt-pick' });
+      [['16:9', '16:9 يوتيوب'], ['4:5', '4:5 بوست'], ['9:16', '9:16 ريلز/تيك توك'], ['1:1', '1:1 مربع']].forEach(function (f) {
+        fmtBox.appendChild(h('label', { class: 'chip' }, h('input', { type: 'checkbox', checked: !!state.formats[f[0]], onchange: function (e) { state.formats[f[0]] = e.target.checked; } }), ' ' + f[1]));
+      });
+      var fmtGo = UI.btn('اعمل كل المقاسات', function () {
+        var list = Object.keys(state.formats).filter(function (k) { return state.formats[k]; });
+        if (!list.length) return UI.toast('اختار مقاس واحد على الأقل', true);
+        UI.empty(fmtOut); fmtProg.set(0);
+        UI.safe('بيعمل المقاسات', function () {
+          return S.makeFormats({ formats: list, useInOut: state.useInOut, captions: state.fmtCaptions, onProgress: function (p, name) { fmtProg.set(p); fmtNow.textContent = (name || '') + ' ' + Math.round(p * 100) + '%'; } }).then(function (r) {
+            fmtProg.set(1); fmtNow.textContent = '';
+            r.sequences.forEach(function (x) { fmtOut.appendChild(h('div', { class: 'item' }, h('b', { class: 'ltr' }, x.ratio), h('span', { class: 'grow' }, h('bdi', null, x.sequence)), h('span', { class: 'hint' }, x.reframed ? 'متتبّع الوش' : 'الأصل'))); });
+            UI.toast(r.sequences.length + ' سيكوينس جاهزين (' + Math.round(r.length) + 's) ✓');
+          });
+        }, fmtGo);
       }, 'primary');
       var shortsBox = h('div');
       function drawShorts() {
@@ -35,6 +53,11 @@
         UI.hint('بيحلل الفيديو أوفلاين ويلاقي وش اللي بيتكلم، والكاميرا بتتبعه بنعومة (من غير رعشة) وبتقطع مع تغيير اللقطة. بيعمل سيكوينس جديدة بنفس التوقيت.'),
         UI.row(h('label', null, 'المقاس'), UI.seg([{ value: '9:16', label: '9:16 ريلز' }, { value: '4:5', label: '4:5 بوست' }, { value: '1:1', label: '1:1' }], state.ratio, function (v) { state.ratio = v; })),
         prog, UI.row(go, now)));
+      view.appendChild(UI.card('قصة واحدة ← كل المقاسات',
+        UI.hint('علّم In و Out في بريمير على الجزء (أو سيبه يعمل السيكوينس كلها)، واختار المقاسات: كل مقاس بيطلع سيكوينس لوحده والكاميرا متابعة الوش. المقاس اللي زي السيكوينس الأصلية بيفضل زي ما هو من غير رندر.'),
+        fmtBox,
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: state.useInOut, onchange: function (e) { state.useInOut = e.target.checked; } }), ' الجزء اللي بين In و Out بس'), h('label', null, h('input', { type: 'checkbox', checked: state.fmtCaptions, onchange: function (e) { state.fmtCaptions = e.target.checked; } }), ' كابشن على كل مقاس')),
+        fmtProg, UI.row(fmtGo, fmtNow), fmtOut));
       view.appendChild(UI.card('شورتس من الفيديو الطويل',
         UI.hint('الذكاء الاصطناعي بيقرا الكلام ويختار أقوى مقاطع (20-60 ثانية) بتبدأ بهوك وبتخلص بفكرة كاملة.'),
         UI.field('العدد', UI.slider(1, 8, 1, count, function (v) { return v + ' مقاطع'; }, function (v) { count = v; })),

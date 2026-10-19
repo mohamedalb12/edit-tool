@@ -207,6 +207,7 @@ function createPremiere() {
     }
   };
   const transformFx = { name: 'Transform' };
+  const VFX = ['Gaussian Blur', 'Lumetri Color', 'Black & White', 'Sharpen', 'Crop'], AFX = ['DeNoise', 'Parametric Equalizer', 'Hard Limiter'], VTR = ['Cross Dissolve', 'Dip to Black', 'Film Dissolve'];
   const qe = {
     project: {
       getActiveSequence() {
@@ -217,7 +218,8 @@ function createPremiere() {
           getItemAt(i) {
             const c = tr.clips[i]; if (!c) return null;
             return { type: 'Clip', name: c.name, start: { secs: c._start },
-              addVideoEffect(fx) { if (fx === transformFx) c.comps.push(transformComponent()); qeLog.push(['fx', fx.name, c.name]); },
+              addVideoEffect(fx) { if (fx === transformFx) c.comps.push(transformComponent()); else c.comps.push(new Component(fx.name, 'AE.ADBE ' + fx.name, [])); qeLog.push(['fx', fx.name, c.name]); },
+              addAudioEffect(fx) { qeLog.push(['afx', fx.name, c.name, tr.index]); },
               addTransition(t, toStart, dur) { qeLog.push(['transition', t.name, tr.index, c._start, dur]); } };
           }
         });
@@ -226,7 +228,12 @@ function createPremiere() {
           addTracks(nv, vi, na) { for (let i = 0; i < nv; i++) seq.v.push(new Track(seq, 'video', seq.v.length)); for (let i = 0; i < (na || 0); i++) seq.a.push(new Track(seq, 'audio', seq.a.length)); }
         };
       },
-      getVideoEffectByName(n) { return n === 'Transform' ? transformFx : null; },
+      getVideoEffectByName(n) { return n === 'Transform' ? transformFx : VFX.includes(n) ? { name: n } : null; },
+      getVideoEffectList() { return ['Transform', ...VFX]; },
+      getAudioEffectList() { return AFX.slice(); },
+      getAudioEffectByName(n) { return AFX.includes(n) ? { name: n } : null; },
+      getVideoTransitionList() { return VTR.slice(); },
+      getVideoTransitionByName(n) { return VTR.includes(n) ? { name: n } : null; },
       getAudioTransitionByName(n) { return { name: n }; }
     }
   };

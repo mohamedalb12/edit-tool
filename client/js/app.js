@@ -61,6 +61,7 @@
       log: function (m) { console.log('[EditFast]', m); }
     }); } catch (err2) { return bootFailed(err2); }
     var nav = document.getElementById('nav');
+    var pb = document.getElementById('pal-btn'); if (pb) pb.addEventListener('click', function () { if (EF.palette) EF.palette.open(); });
     Array.prototype.forEach.call(document.querySelectorAll('[data-icon]'), function (el) { el.appendChild(UI.icon(el.getAttribute('data-icon'))); });
     var sw = document.querySelector('#splash .word'); if (sw) { var txt = sw.textContent; sw.textContent = ''; txt.split('').forEach(function (c, i) { sw.appendChild(h('span', { class: 'ch', style: { animationDelay: (i * 55) + 'ms' } }, c)); }); }
     setTimeout(function () { var sp = document.getElementById('splash'); if (sp) { sp.classList.add('hide'); setTimeout(function () { sp.remove(); }, 700); } }, 650);
