@@ -1,7 +1,7 @@
 /* المالتي كام. */
 (function () {
   var EF = window.EF, UI = EF.ui, h = UI.h;
-  var COLORS = ['linear-gradient(135deg,#7c3aed,#c026d3)', 'linear-gradient(135deg,#f472b6,#fb923c)', 'linear-gradient(135deg,#22d3ee,#3b82f6)', 'linear-gradient(135deg,#fbbf24,#f59e0b)', 'linear-gradient(135deg,#34d399,#059669)', 'linear-gradient(135deg,#94a3b8,#475569)'];
+  var COLORS = ['linear-gradient(135deg,#c2410c,#ea580c)', 'linear-gradient(135deg,#fbbf24,#fb923c)', 'linear-gradient(135deg,#fcd34d,#3b82f6)', 'linear-gradient(135deg,#fbbf24,#f59e0b)', 'linear-gradient(135deg,#34d399,#059669)', 'linear-gradient(135deg,#94a3b8,#475569)'];
   EF.tabs.push({
     id: 'multicam', icon: '🎥', label: 'مالتي كام', title: 'المالتي كام',
     render: function (view) {
