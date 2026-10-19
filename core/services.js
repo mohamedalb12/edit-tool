@@ -1520,8 +1520,25 @@ ${JSON.stringify(lite)}
     const h = await C.head(url, { fetchImpl: this.fetch });
     let m = null;
     if ((h.type === 'video' || h.type === 'audio') && this.tools.ffprobe) m = await C.probeRemote(this.tools.ffprobe, h.finalUrl).catch(() => null);
-    return { id: h.name, title: h.name, duration: m && m.duration, thumbnail: null, uploader: h.size ? Math.round(h.size / 1e6) + ' ميجا' : '', heights: m && m.height ? [m.height] : [],
+    // a picture of the video for the info card (a frame a little way in: the first one is often black)
+    let thumbnail = null;
+    if (m && m.hasVideo) thumbnail = await this.cloudFrame(url, Math.min(10, (m.duration || 0) * 0.1), h).catch(() => null);
+    return { id: h.name, title: h.name, duration: m && m.duration, thumbnail, uploader: h.size ? Math.round(h.size / 1e6) + ' ميجا' : '', heights: m && m.height ? [m.height] : [],
       platform: Y.platformOf(url), cloud: true, type: h.type, folder: h.folder, size: h.size, name: h.name };
+  }
+  /** preview frame of a Dropbox / Drive video at t seconds → data: URL (cached per link + second) */
+  async cloudFrame(url, t, known) {
+    const C = require('./cloud');
+    const h = known || (this._cloudHead && this._cloudHead.src === url ? this._cloudHead.h : null) || await C.head(url, { fetchImpl: this.fetch });
+    this._cloudHead = { src: url, h };
+    this._frames = this._frames || new Map();
+    const key = url + '@' + Math.round(t);
+    if (!this._frames.has(key)) {
+      const jpg = await C.frameAt(this.ffmpeg(), h.finalUrl, Math.round(t));
+      if (this._frames.size > 60) this._frames.delete(this._frames.keys().next().value);
+      this._frames.set(key, 'data:image/jpeg;base64,' + jpg.toString('base64'));
+    }
+    return this._frames.get(key);
   }
   /**
    * Download from Dropbox / Drive. A part of a video (start/end) is cut straight off the link by ffmpeg — only that

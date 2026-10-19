@@ -485,6 +485,10 @@ test('Dropbox links: info off the link, only the chosen part comes down, folders
     assert.equal(info.title, 'مقابلة.mp4'); assert.equal(info.cloud, true); assert.equal(info.type, 'video');
     assert.ok(Math.abs(info.duration - 10) < 0.2, 'length read off the link: ' + info.duration);
     assert.deepEqual(info.heights, [360]);
+    assert.match(info.thumbnail, /^data:image\/jpeg;base64,\/9j\//, 'a real JPEG frame for the card');
+    const fr = await S.cloudFrame(url, 7);
+    assert.ok(fr.length > 500 && fr !== info.thumbnail);
+    assert.equal(await S.cloudFrame(url, 7), fr, 'cached');
     hits.length = 0;
     const r = await S.downloadMedia({ url, start: '0:02', end: '0:05', place: false });
     assert.match(path.basename(r.file), /^مقابلة-2-5\.mp4$/);

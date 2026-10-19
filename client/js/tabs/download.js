@@ -68,6 +68,19 @@
         var hi = h('input', { type: 'range', min: 0, max: D, step: 1, value: b, class: 'rs-in hi' });
         var ta = h('input', { class: 'ltr rs-time', value: mmss(a) }), tb = h('input', { class: 'ltr rs-time', value: mmss(b) });
         var len = h('span', { class: 'hint' });
+        // Dropbox / Drive: a frame at the start and the end of the part (ffmpeg reads them off the link)
+        var pv = o.info.cloud && o.info.thumbnail, pvA = h('img', { alt: '' }), pvB = h('img', { alt: '' }), pvT = null, pvSeq = 0;
+        function frames(x, y) {
+          if (!pv) return;
+          clearTimeout(pvT);
+          pvT = setTimeout(function () {
+            var n = ++pvSeq, u = links()[0];
+            [[pvA, x], [pvB, Math.max(0, y - 0.5)]].forEach(function (p) {
+              p[0].classList.add('loading');
+              Promise.resolve().then(function () { return S.cloudFrame(u, p[1]); }).then(function (src) { if (n === pvSeq) { p[0].src = src; p[0].classList.remove('loading'); } }, function () { p[0].classList.remove('loading'); });
+            });
+          }, 450);
+        }
         function sync(from) {
           var x = +lo.value, y = +hi.value;
           if (x > y - 1) { if (from === 'lo') x = Math.max(0, y - 1); else y = Math.min(D, x + 1); lo.value = x; hi.value = y; }
@@ -75,6 +88,7 @@
           ta.value = mmss(x); tb.value = mmss(y);
           o.start = x > 0 ? mmss(x) : ''; o.end = y < D ? mmss(y) : '';
           len.textContent = 'المدة: ' + mmss(y - x) + (x === 0 && y === D ? ' (الفيديو كله)' : '');
+          frames(x, y);
         }
         lo.addEventListener('input', function () { sync('lo'); }); hi.addEventListener('input', function () { sync('hi'); });
         ta.addEventListener('change', function () { var v = Y.parseTime(ta.value); if (v !== null) { lo.value = Math.min(v, D); sync('lo'); } });
@@ -83,6 +97,7 @@
         var ticks = h('div', { class: 'rs-ticks ltr' }), stepM = [0.5, 1, 2, 5, 10, 15, 30, 60].find(function (m) { return D / 60 / m <= 5; }) || 120;
         for (var m = 0; m * 60 <= D; m += stepM) ticks.appendChild(h('span', { style: { left: (m * 60 / D * 100) + '%' } }, mmss(m * 60)));
         function nudge(which, d) { return UI.btn((d > 0 ? '+' : '−') + Math.abs(d) + 's', function () { var el = which === 'lo' ? lo : hi; el.value = Math.max(0, Math.min(D, +el.value + d)); sync(which); }, 'small'); }
+        if (pv) rangeBox.appendChild(h('div', { class: 'dl-pv' }, h('figure', null, pvA, h('figcaption', null, 'أول الجزء')), h('figure', null, pvB, h('figcaption', null, 'آخر الجزء'))));
         rangeBox.appendChild(h('div', { class: 'rs ltr' }, track, fill, lo, hi));
         rangeBox.appendChild(ticks);
         rangeBox.appendChild(h('div', { class: 'row rs-row' }, h('label', null, 'من'), ta, nudge('lo', -1), nudge('lo', 1), h('span', { class: 'spacer' }), h('label', null, 'لحد'), tb, nudge('hi', -1), nudge('hi', 1)));

@@ -136,6 +136,15 @@ function rangeArgs(url, { start = 0, end = null, audioOnly = false, out }) {
   return args;
 }
 
+/** one frame of the remote video at t seconds → JPEG bytes (ffmpeg fetches only the bytes around t) */
+function frameAt(ffmpeg, url, t, { width = 320, timeout = 45000 } = {}) {
+  const args = ['-hide_banner', '-loglevel', 'error', ...NET_IN, '-ss', String(Math.max(0, +t || 0)), '-i', url, '-frames:v', '1', '-vf', `scale=${width}:-2`, '-q:v', '5', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'];
+  return new Promise((resolve, reject) => execFile(ffmpeg, args, { encoding: 'buffer', timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, so) => {
+    if (err || !so || !so.length) return reject(new Error('مش قادر أجيب صورة من الفيديو'));
+    resolve(so);
+  }));
+}
+
 /** cut a part out of the remote file → { file } (progress 0..1 from ffmpeg's out_time) */
 function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total }, onProgress) {
   const args = rangeArgs(url, { start, end, audioOnly, out });
@@ -195,4 +204,4 @@ function listMedia(dir) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-module.exports = { kindOf, direct, dropboxIsFolder, gdriveId, nameFromDisposition, nameFromUrl, typeOf, safeName, head, probeRemote, rangeArgs, downloadRange, outName, extract, listMedia };
+module.exports = { kindOf, direct, dropboxIsFolder, gdriveId, nameFromDisposition, nameFromUrl, typeOf, safeName, head, probeRemote, rangeArgs, downloadRange, frameAt, outName, extract, listMedia };

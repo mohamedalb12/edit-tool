@@ -696,6 +696,10 @@ test('تحميل: analyse a link, qualities from the video, start/end, download 
   assert.match(await page.textContent('#view'), /هينزل الجزء ده بس/);
   await page.locator('.rs-time').nth(0).fill('12:00'); await page.locator('.rs-time').nth(0).dispatchEvent('change');
   await page.locator('.rs-time').nth(1).fill('14:30'); await page.locator('.rs-time').nth(1).dispatchEvent('change');
+  // preview: a frame at the start and the end of the part, fetched once the handles stop moving
+  assert.equal(await page.locator('.dl-pv img').count(), 2);
+  await page.waitForFunction(() => window.__calls.some(x => x.name === 'cloudFrame' && x.args.t === 720));
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'cloudFrame' && x.args.t === 869.5)));
   await clickText('نزّل');
   const dbx = await page.evaluate(() => window.__calls.find(x => x.name === 'downloadMedia').args);
   assert.deepEqual(dbx, { url: 'https://www.dropbox.com/scl/fi/abc/x.mp4?rlkey=k&dl=0', quality: 'best', start: '12:00', end: '14:30', place: true });

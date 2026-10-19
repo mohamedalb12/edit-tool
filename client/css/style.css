@@ -468,6 +468,11 @@ input::placeholder, textarea::placeholder { color: rgba(255,255,255,.38); }
 .rs-ticks { position: relative; height: 16px; margin: 0 8px 4px; font-size: 9.5px; color: var(--muted); }
 .rs-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .rs-time { width: 70px; text-align: center; }
+.dl-pv { display: flex; gap: 8px; margin: 6px 0 10px; }
+.dl-pv figure { flex: 1; margin: 0; min-width: 0; }
+.dl-pv img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--line); transition: opacity .2s; }
+.dl-pv img.loading { opacity: .45; }
+.dl-pv figcaption { font-size: 11px; opacity: .7; text-align: center; margin-top: 3px; }
 .rs-row { flex-wrap: wrap; gap: 4px; }
 
 /* ═══════════ تعديلات العميل ═══════════ */
