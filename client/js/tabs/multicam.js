@@ -5,7 +5,7 @@
   EF.tabs.push({
     id: 'multicam', icon: '🎥', label: 'مالتي كام', title: 'المالتي كام',
     render: function (view) {
-      var S = EF.services, plan = null, tracks = [], minShot = 2;
+      var S = EF.services, plan = null, tracks = [], minShot = 2, maxShot = 15, cutLen = 2.5;
       var setup = h('div'), out = h('div');
       var rows = [];
       S.seq().then(function (s) {
@@ -30,7 +30,7 @@
         var list = h('div', { class: 'list' });
         plan.plan.forEach(function (p) {
           var sel = UI.select(plan.tracks.map(function (v) { return { value: v, label: 'V' + (v + 1) }; }), p.trackIndex, function (v) { p.trackIndex = +v; draw(); });
-          list.appendChild(h('div', { class: 'item' }, h('span', { class: 't click', onclick: function () { S.setPlayhead(p.start); } }, UI.fmtTime(p.start)), h('span', { class: 'grow' }, (p.end - p.start).toFixed(1) + 's'), sel));
+          list.appendChild(h('div', { class: 'item' }, h('span', { class: 't click', onclick: function () { S.setPlayhead(p.start); } }, UI.fmtTime(p.start)), h('span', { class: 'grow' }, (p.end - p.start).toFixed(1) + 's' + (p.cutaway ? ' · قطعة' : '')), sel));
         });
         var applyBtn = UI.btn('طبّق الخطة', function () {
           UI.safe('بيطبّق', function () { return S.multicamApply({ plan: plan.plan, tracks: plan.tracks, clone: true }).then(function (r) { UI.toast(r.switches + ' تبديلة ✓ — ' + r.sequence); }); }, applyBtn);
@@ -40,12 +40,16 @@
       var analyze = UI.btn('حلّل مين بيتكلم', function () {
         var chosen = rows.filter(function (r) { return r.on.checked; });
         UI.safe('بيحلل الصوت', function () {
-          return S.multicamAnalyze({ audioTracks: chosen.map(function (r) { return r.a; }), videoTracks: chosen.map(function (r) { return +r.v.value; }), minShot: minShot, wideTrack: setup.wide ? +setup.wide.value : -1 })
+          return S.multicamAnalyze({ audioTracks: chosen.map(function (r) { return r.a; }), videoTracks: chosen.map(function (r) { return +r.v.value; }), minShot: minShot, maxShot: maxShot, cutLen: cutLen, wideTrack: setup.wide ? +setup.wide.value : -1 })
             .then(function (r) { plan = r; draw(); });
         }, analyze);
       }, 'primary');
       view.appendChild(UI.card('الكاميرات', UI.hint('كل كاميرا على تراك فيديو، وصوت مايك كل واحد على تراك صوت، ومتزامنين.'), setup,
-        UI.field('أقل مدة لقطة', UI.slider(0.8, 6, 0.1, minShot, function (v) { return v.toFixed(1) + 's'; }, function (v) { minShot = v; })), UI.row(analyze)));
+        UI.field('أقل مدة لقطة', UI.slider(0.8, 6, 0.1, minShot, function (v) { return v.toFixed(1) + 's'; }, function (v) { minShot = v; })),
+        UI.field('أطول مدة لقطة', UI.slider(0, 40, 1, maxShot, function (v) { return v ? v + 's' : 'مقفول'; }, function (v) { maxShot = v; })),
+        UI.field('مدة القطعة', UI.slider(1, 6, 0.5, cutLen, function (v) { return v.toFixed(1) + 's'; }, function (v) { cutLen = v; })),
+        UI.hint('لو حد اتكلم أطول من "أطول مدة لقطة"، بيقطع للقطة الواسعة (أو لوش التاني وهو بيسمع) لمدة "مدة القطعة" ويرجع — عشان الفيديو مايبقاش ممل. ولو الاتنين بيتكلموا مع بعض بيروح للواسعة. اللقطة الواسعة ممكن تبقى تراك فيديو لوحده من غير مايك.'),
+        UI.row(analyze)));
       view.appendChild(out);
     }
   });

@@ -129,7 +129,7 @@ class Track {
     const len = (item.outPoint ?? item.srcLen) - (item.inPoint ?? 0);
     const a = EF_sec(t), b = a + len;
     this.items = this.items.filter(c => !(c._start >= a - EPS && c._end <= b + EPS));
-    const c = this.add({ projectItem: item, start: a, end: b, inPoint: 0 });
+    const c = this.add({ projectItem: item, start: a, end: b, inPoint: item.inPoint ?? 0 });
     this.seq.log.push(['overwrite', this.kind, this.index, a, item.name]);
     return c;
   }

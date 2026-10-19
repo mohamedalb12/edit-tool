@@ -182,6 +182,7 @@
     copyAttrs: function () { S._clipCopy = { clip: 'talk.mp4', comps: [{ name: 'Transform', props: 6, animated: 1 }, { name: 'Gaussian Blur', props: 1, animated: 0 }] }; return rec('copyAttrs', null, S._clipCopy); },
     clipboardInfo: function () { return S._clipCopy ? { clip: S._clipCopy.clip, comps: S._clipCopy.comps.map(function (c) { return c.name; }) } : null; },
     pasteAttrs: function (o) { return rec('pasteAttrs', o, { clips: 3, props: 9, missing: [] }); },
+    beatMontage: function (o) { return rec('beatMontage', o, { laid: 8, left: 0, bpm: 120, every: o.every, sequence: 'Main - على البيت 120 BPM', clips: 8 }); },
     effectList: function () { calls.push({ name: 'effectList' }); return Promise.resolve({ video: ['Gaussian Blur', 'Lumetri Color', 'Transform'], audio: ['DeNoise'], transitions: ['Cross Dissolve', 'Dip to Black'] }); },
     applyEffect: function (o) { return rec('applyEffect', o, { applied: 2, name: o.name, kind: o.kind }); },
     autoZoom: function (o) { return rec('autoZoom', o, { zooms: 7, phrases: 30, mode: o && o.mode || 'apply' }); },

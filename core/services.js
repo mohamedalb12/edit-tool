@@ -192,12 +192,12 @@ class Services {
   }
 
   async recordedHost(name, args) {
-    const SEQ_OPS = { removeRanges: 1, multicamApply: 1, makeHook: 1 };
+    const SEQ_OPS = { removeRanges: 1, multicamApply: 1, makeHook: 1, relayClips: 1 };
     const willClone = SEQ_OPS[name] && args && args.clone !== false && (name !== 'removeRanges' || args.clone);
     let before = null;
     if (willClone) { try { before = await this.hostRaw('activeSequenceId', {}); } catch (_) {} }
     const r = await this.hostRaw(name, args);
-    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك', applyEffect: 'إفكت', pasteClipAttrs: 'لصق إفكتات' };
+    const LABELS = { placeFiles: 'حط ملفات', buildLayeredScene: 'مشهد لايرز', placeFile: 'حط ملف', importMGT: 'تايتل', addMarkers: 'ماركرز', removeRanges: 'قص', multicamApply: 'مالتي كام', makeHook: 'هوك', applyKeyframes: 'حركة', writeKeyframes: 'منحنى', createCaptions: 'كابشن', organize: 'تنظيم', setVolumeKeys: 'صوت', muteTrack: 'كتم تراك', applyEffect: 'إفكت', pasteClipAttrs: 'لصق إفكتات', relayClips: 'مونتاج على البيت' };
     if (!LABELS[name]) return r;
     const e = { id: this.history.length + 1, at: Date.now(), op: name, group: this._opLabel || LABELS[name], undo: null };
     if (name === 'placeFile' || name === 'importMGT') e.undo = { kind: 'removeClip', args: { kind: args.kind || 'video', track: r.track, start: r.start, path: args.path } };
@@ -1438,8 +1438,33 @@ ${JSON.stringify(lite)}
     return { bpm, markers: markers.length };
   }
 
+  /**
+   * Cut the montage to the music: the clips on a video track are laid again (on a copy) so each cut lands on a
+   * beat, `every` beats per clip. Music = the given audio track, or the lowest audio track with music on it.
+   */
+  async beatMontage({ track = 0, musicTrack, every = 2, stretch = false } = {}) {
+    const s = await this.seq();
+    const g = musicTrack === undefined ? await this.audioTracksGuess() : null;
+    const mi = musicTrack !== undefined ? musicTrack : (g.music >= 0 ? g.music : s.audio.slice().reverse().find(t => t.clips.length).index);
+    const tr = s.audio[mi];
+    if (!tr || !tr.clips.length) throw new Error('حط الموسيقى على تراك صوت الأول');
+    const vt = s.video[track];
+    const clips = vt ? vt.clips.filter(c => c.mediaPath && !c.disabled) : [];
+    if (clips.length < 2) throw new Error(`محتاج كليبين على الأقل على V${track + 1}`);
+    const all = []; let bpm = 0;
+    for (const c of tr.clips) {
+      const r = await beats.detect(this.ffmpeg(), c.mediaPath, { start: c.inPoint, duration: c.end - c.start });
+      bpm = r.bpm; r.beats.forEach(b => all.push(c.start + b));
+    }
+    const plan = beats.montagePlan(clips, all, { every, from: Math.min(...clips.map(c => c.start)), stretch });
+    if (!plan.length) throw new Error('مفيش بيتات كفاية تحت الكليبات');
+    const r = await this.op('مونتاج على البيت', () => this.host('relayClips', { track, plan, clone: true, cloneName: `${s.name} - على البيت ${Math.round(bpm)} BPM` }));
+    this.transcript = null;
+    return { ...r, bpm, laid: plan.length, left: clips.length - plan.length, every };
+  }
+
   /* ---------- المالتي كام ---------- */
-  async multicamAnalyze({ audioTracks, videoTracks, minShot = 2, wideTrack = -1 } = {}) {
+  async multicamAnalyze({ audioTracks, videoTracks, minShot = 2, wideTrack = -1, maxShot = 0, cutLen = 2.5 } = {}) {
     const s = await this.seq();
     const aIdx = audioTracks && audioTracks.length ? audioTracks : s.audio.filter(t => t.clips.length).map(t => t.index);
     if (aIdx.length < 2) throw new Error('محتاج على الأقل تراكين صوت (صوت كل كاميرا على تراك).');
@@ -1448,9 +1473,12 @@ ${JSON.stringify(lite)}
       const c = s.audio[ai].clips[0];
       return { ...c, trackIndex: vIdx[i] };
     });
-    const wideIndex = wideTrack >= 0 ? vIdx.indexOf(wideTrack) : -1;
-    const plan = await multicam.analyze(this.ffmpeg(), cams, { minShot, wideIndex });
-    return { plan, tracks: vIdx, summary: multicam.summarize(plan, vIdx.map(v => `V${v + 1}`)) };
+    // the wide shot may be one of the mic'd cameras, or its own video track with no mic of its own
+    let wideIndex = wideTrack >= 0 ? vIdx.indexOf(wideTrack) : -1;
+    if (wideTrack >= 0 && wideIndex < 0) wideIndex = cams.length;
+    const plan = await multicam.analyze(this.ffmpeg(), cams, { minShot, wideIndex, wideTrack, maxShot, cutLen });
+    const tracks = wideTrack >= 0 && !vIdx.includes(wideTrack) ? vIdx.concat([wideTrack]) : vIdx;
+    return { plan, tracks, summary: multicam.summarize(plan, tracks.map(v => `V${v + 1}`)) };
   }
 
   async multicamApply({ plan, tracks, clone = true }) {

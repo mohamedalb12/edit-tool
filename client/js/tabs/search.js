@@ -67,6 +67,21 @@
         bl, UI.field('الطريقة', UI.seg([{ value: 'beep', label: 'بيب' }, { value: 'mute', label: 'كتم' }, { value: 'markers', label: 'ماركرز' }], bMode, function (v) { bMode = v; })), UI.row(bBtn)));
       view.appendChild(UI.card('ماركرز على الإيقاع (أوفلاين)', UI.hint('بيحلل آخر تراك صوت فيه موسيقى ويحط ماركر على كل بيت.'),
         UI.field('كل', UI.seg([{ value: 1, label: 'بيت' }, { value: 2, label: '2' }, { value: 4, label: '4 (بار)' }], 1, function (v) { every = v; })), UI.row(beatBtn)));
+      // ——— مونتاج على البيت: الكليبات تتقص على الإيقاع ———
+      var mt = { every: 2, track: 0, stretch: false };
+      var mtBtn = UI.btn('قص المونتاج على البيت', function () {
+        UI.safe('بيقص على البيت', function () {
+          return S.beatMontage({ every: mt.every, track: mt.track, stretch: mt.stretch }).then(function (r) {
+            UI.toast(r.laid + ' كليب على البيت (' + Math.round(r.bpm) + ' BPM) ✓ — ' + r.sequence + (r.left ? ' · ' + r.left + ' كليب مالحقش الموسيقى' : ''));
+          });
+        }, mtBtn);
+      }, 'primary');
+      view.appendChild(UI.card('مونتاج على البيت',
+        UI.hint('حط الكليبات بالترتيب على تراك فيديو والموسيقى على تراك صوت: بيعمل نسخة من السيكوينس وكل قطعة بتقع على بيت بالظبط. كل كليب بيبدأ من نفس الـ In بتاعه.'),
+        UI.field('كل كليب', UI.seg([{ value: 1, label: 'بيت' }, { value: 2, label: '2 بيت' }, { value: 4, label: 'بار (4)' }, { value: 8, label: '8' }], mt.every, function (v) { mt.every = v; })),
+        UI.field('تراك الفيديو', UI.slider(1, 6, 1, 1, function (v) { return 'V' + v; }, function (v) { mt.track = v - 1; })),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: false, onchange: function (e) { mt.stretch = e.target.checked; } }), ' الكليب القصير ياخد العدد كامل (من الميديا اللي بعده)')),
+        UI.row(mtBtn)));
     }
   });
 })();

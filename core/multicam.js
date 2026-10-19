@@ -13,7 +13,9 @@ function planFromEnvelopes(envelopes, { windowSec = 0.1, minShot = 2.0, marginDb
   // normalise every mic by its own noise floor so a hot mic doesn't win always
   const db = envelopes.map((env, c) => {
     const arr = Array.from(env.subarray ? env.subarray(0, n) : env.slice(0, n)).map(toDb);
-    const floor = percentile(arr, 0.2);
+    // the quietest 5%: someone who talks almost without pauses still has breaths below that (20% made a
+    // non-stop talker look like silence)
+    const floor = percentile(arr, 0.05);
     return arr.map(v => v - floor + (cameraOffsetsDb[c] || 0));
   });
   // smooth 0.5s moving average
@@ -68,8 +70,34 @@ async function analyze(ffmpeg, cameras, opts = {}) {
     for (let i = 0; i < env.length && off + i < total; i++) grid[off + i] = env[i];
     envs.push(grid);
   }
-  const plan = planFromEnvelopes(envs, { ...opts, windowSec });
-  return plan.map(s => ({ start: +(s.start + t0).toFixed(3), end: +(s.end + t0).toFixed(3), camera: s.camera, trackIndex: s.camera >= 0 && cameras[s.camera] ? cameras[s.camera].trackIndex : s.camera }));
+  const plan = breakLongShots(planFromEnvelopes(envs, { ...opts, windowSec }), { ...opts, cameras: cameras.length });
+  // a wide camera without its own mic (opts.wideTrack) is the virtual camera number cameras.length
+  return plan.map(s => ({ start: +(s.start + t0).toFixed(3), end: +(s.end + t0).toFixed(3), camera: s.camera, cutaway: !!s.cutaway, trackIndex: s.camera >= 0 && cameras[s.camera] ? cameras[s.camera].trackIndex : (s.camera === cameras.length && opts.wideTrack >= 0 ? opts.wideTrack : s.camera) }));
+}
+
+/**
+ * Nobody watches one face for a minute: a shot longer than maxShot is broken with a cut-away of `cutLen` seconds —
+ * the wide shot if there is one, else the other camera (the listener's reaction) — repeating as long as needed.
+ * The last piece of a shot is never shorter than minShot.
+ */
+function breakLongShots(shots, { maxShot = 0, cutLen = 2.5, minShot = 2, wideIndex = -1, cameras = 2 } = {}) {
+  if (!(maxShot > 0)) return shots;
+  const out = [];
+  for (const s of shots) {
+    const isWide = wideIndex >= 0 && s.camera === wideIndex;
+    if (isWide || s.end - s.start <= maxShot) { out.push(s); continue; }
+    const away = wideIndex >= 0 ? wideIndex : (s.camera + 1) % Math.max(2, cameras);
+    let t = s.start;
+    while (s.end - t > maxShot) {
+      const cutAt = t + maxShot, back = cutAt + cutLen;
+      if (s.end - back < minShot) break; // not enough left to come back: let this shot run to its end
+      out.push({ start: +t.toFixed(3), end: +cutAt.toFixed(3), camera: s.camera });
+      out.push({ start: +cutAt.toFixed(3), end: +back.toFixed(3), camera: away, cutaway: true });
+      t = back;
+    }
+    out.push({ start: +t.toFixed(3), end: s.end, camera: s.camera });
+  }
+  return out;
 }
 
 function summarize(plan, labels = []) {
@@ -78,4 +106,4 @@ function summarize(plan, labels = []) {
   return { cuts: Math.max(0, plan.length - 1), seconds: stats };
 }
 
-module.exports = { planFromEnvelopes, analyze, summarize };
+module.exports = { planFromEnvelopes, breakLongShots, analyze, summarize };

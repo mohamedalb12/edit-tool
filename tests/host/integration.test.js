@@ -260,7 +260,7 @@ test('test every AI model: reply + tool calling for the editor models, catalog c
   const { S } = world({ fetchImpl, settings: { defaultModel: 'good/text', models: { agent_strong: 'good/tools', agent_max: 'good/tools', chapters: 'broken/model' } } });
   const live = [];
   const res = await S.testModels({ onResult: r => live.push(r.feature) });
-  assert.equal(res.length, 13); assert.equal(live.length, 13);
+  assert.equal(res.length, 14); assert.equal(live.length, 14);
   const by = Object.fromEntries(res.map(r => [r.feature, r]));
   assert.equal(by.agent_strong.ok, true); assert.equal(by.agent_strong.tools, true); assert.match(by.agent_strong.reply, /set_playhead/);
   assert.equal(by.sfx_translate.ok, true); assert.equal(by.sfx_translate.tools, null); assert.equal(by.sfx_translate.listed, true);
@@ -715,4 +715,48 @@ test('retakes: AI groups lines said again (even reworded) and keeps the best tak
   const sents = require('../../core/transcribe').sentences(words);
   const c1 = R.groupCuts({ takes: [2, 3], keep: 2 }, sents);
   assert.equal(c1.length, 1); assert.equal(c1[0].start, sents[3].start); assert.equal(c1[0].end, sents[4].start, 'the dropped take + its pause');
+});
+
+test('مالتي كام أذكى: a long monologue gets cut-aways to the wide shot (its own video track, no mic) and back; without a wide, to the listener', async () => {
+  const M = require('../../core/multicam');
+  const one = [{ start: 0, end: 40, camera: 0 }];
+  assert.deepEqual(M.breakLongShots(one, { maxShot: 12, cutLen: 3, minShot: 2, wideIndex: 2 }).map(x => [x.start, x.end, x.camera]),
+    [[0, 12, 0], [12, 15, 2], [15, 27, 0], [27, 30, 2], [30, 40, 0]]);
+  assert.deepEqual(M.breakLongShots(one, { maxShot: 12, cutLen: 3, minShot: 2, cameras: 2 }).map(x => x.camera), [0, 1, 0, 1, 0], 'no wide: the other camera (reaction)');
+  assert.deepEqual(M.breakLongShots([{ start: 0, end: 13, camera: 0 }], { maxShot: 12, cutLen: 3 }).length, 1, 'no room to come back: untouched');
+  // end to end: A talks 30 s; V3 is a wide shot without a mic
+  const a = makeAudio('mlA.wav', Array.from({ length: 6 }, () => [{ tone: 220, dur: 4.6, amp: 0.6 }, { silence: 0.4 }]).flat()); // talks with breaths
+  const b = makeAudio('mlB.wav', [{ tone: 330, dur: 30, amp: 0.01 }]);
+  const { S, h, seq } = world();
+  const A = h.pr.project.importOne(a, h.pr.project.root), B = h.pr.project.importOne(b, h.pr.project.root), W = h.pr.project.importOne('/media/wide.mp4', h.pr.project.root);
+  seq.v[0].add({ projectItem: A, start: 0, end: 30 }); seq.v[1].add({ projectItem: B, start: 0, end: 30 }); seq.v[2].add({ projectItem: W, start: 0, end: 30 });
+  seq.a[0].add({ projectItem: A, start: 0, end: 30 }); seq.a[1].add({ projectItem: B, start: 0, end: 30 });
+  const plan = await S.multicamAnalyze({ minShot: 1.5, maxShot: 10, cutLen: 2.5, wideTrack: 2 });
+  assert.deepEqual(plan.tracks, [0, 1, 2]);
+  assert.deepEqual(plan.plan.map(p => p.trackIndex), [0, 2, 0, 2, 0]);
+  assert.ok(plan.plan[1].cutaway);
+  const r = await S.multicamApply(plan);
+  assert.equal(r.switches, 4);
+});
+
+test('مونتاج على البيت: clips laid again on a copy so each cut lands on a beat (2 beats each), each keeps its In point', async () => {
+  const B = require('../../core/beats');
+  const beats = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+  assert.deepEqual(B.montagePlan([{ start: 0, end: 3 }, { start: 3, end: 3.6 }, { start: 3.6, end: 9 }], beats, { every: 2 }).map(p => [p.newStart, p.dur, p.beats]),
+    [[0, 1, 2], [1, 0.5, 1], [1.5, 1, 2]], 'a 0.6 s clip gets one beat');
+  const music = makeClicks('montage-music.wav', 120, 12);
+  const { S, h, seq } = world();
+  const v = h.pr.project.importOne('/media/shots.mp4', h.pr.project.root);
+  [[0, 3, 5], [3, 5, 20], [5, 9, 40], [9, 12, 60]].forEach(([a, b, inP]) => seq.v[0].add({ projectItem: v, start: a, end: b, inPoint: inP }));
+  seq.a[1].add({ projectItem: h.pr.project.importOne(music, h.pr.project.root), start: 0, end: 12, inPoint: 0 });
+  const r = await S.beatMontage({ every: 2, musicTrack: 1 });
+  assert.ok(Math.abs(r.bpm - 120) < 3, String(r.bpm)); assert.equal(r.laid, 4);
+  const cut = h.pr.project.activeSeq;
+  assert.notEqual(cut, seq, 'on a copy');
+  const items = cut.v[0].items.slice().sort((a, b) => a._start - b._start);
+  assert.equal(items.length, 4);
+  items.forEach((c, i) => assert.ok(Math.abs((c._end - c._start) - 1) < 0.06, `clip ${i}: ${c._end - c._start}`));
+  assert.ok(Math.abs(items[1]._start - (items[0]._start + 1)) < 0.06, 'back to back on the beat grid');
+  assert.deepEqual(items.map(c => Math.round(c._in)), [5, 20, 40, 60], 'each keeps its own In point');
+  assert.equal(seq.v[0].items.length, 4, 'original untouched');
 });

@@ -113,3 +113,15 @@ test('snapToOnsets: phrases move to the voice, never overlap, stay put with noth
   const r2 = C.snapToOnsets([{ text: 'x', start: 1, end: 1.9 }, { text: 'y', start: 2.2, end: 3 }], [1.3]);
   assert.ok(r2.words[0].end <= 2.2 + 1e-9);
 });
+
+test('caption presets: every preset uses a real style / animation / curve / exit and draws', () => {
+  const CS = require('../../core/captionStyles');
+  const ids = k => new Set(CS[k].map(x => x.id));
+  const S = ids('STYLES'), A = ids('ANIMS'), E = ids('EASES'), X = ids('EXITS');
+  assert.ok(CS.PRESETS.length >= 10);
+  for (const p of CS.PRESETS) {
+    assert.ok(S.has(p.o.style), p.id + ' style'); if (p.o.anim) assert.ok(A.has(p.o.anim), p.id + ' anim');
+    if (p.o.ease) assert.ok(E.has(p.o.ease), p.id + ' ease'); if (p.o.exit) assert.ok(X.has(p.o.exit), p.id + ' exit');
+  }
+  assert.equal(new Set(CS.PRESETS.map(p => p.id)).size, CS.PRESETS.length);
+});

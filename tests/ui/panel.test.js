@@ -579,7 +579,7 @@ test('ثامبنيل: best frames, AI titles, live preview, save PNG', async () 
 
 test('كابشن متحرك from the transcription tab: style pick, position, render + translate', async () => {
   await open('transcribe'); await clearCalls();
-  assert.equal(await page.locator('.cap-grid:not(.anim-grid) .tile').count(), 13);
+  assert.equal(await page.locator('.cap-grid:not(.anim-grid):not(.preset-grid) .tile').count(), 13);
   await page.locator('.cap-grid .tile[data-style="karaoke"]').click();
   await page.locator('.seg button', { hasText: /^فوق$/ }).click();
   await clickText('نزّل كابشن متحرك');
@@ -1163,6 +1163,20 @@ test('تنظيم المشروع is back under الملفات; copy / paste effec
   await clickText('الصق على المختار');
   const a = await page.evaluate(() => window.__calls.find(x => x.name === 'pasteAttrs').args);
   assert.deepEqual(a, { stretch: false, only: ['Transform'] });
+});
+
+test('قوالب الكابشن الجاهزة: one click sets style + animation + colours, the controls redraw with them; مونتاج على البيت button', async () => {
+  await open('transcribe'); await clearCalls();
+  assert.ok(await page.locator('.preset-grid .tile').count() >= 10);
+  await page.locator('.preset-grid .tile', { hasText: 'بيست ملوّن' }).click();
+  await page.waitForTimeout(300);
+  const st = await page.evaluate(() => EF.services.settings.captionStyle);
+  assert.equal(st.style, 'beast'); assert.equal(st.anim, 'bounce'); assert.equal(st.preset, 'beast-bounce');
+  assert.equal(await page.locator('.preset-grid .tile.on').count(), 1);
+  assert.match(await page.locator('.preset-grid .tile.on').textContent(), /بيست/);
+  await open('search'); await clearCalls();
+  await clickText('قص المونتاج على البيت');
+  assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'beatMontage')));
 });
 
 test('no page errors in the new tabs either', () => { assert.deepEqual(errors, []); });

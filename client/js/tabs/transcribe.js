@@ -111,11 +111,29 @@
       var CS = window.EFCaptions, st = Object.assign({ style: 'bold', position: 'bottom', size: 0.068 }, S.settings.captionStyle || {});
       function saveSt() { S.saveSettings({ captionStyle: st }); }
       var sample = { start: 0, end: 2.6, words: [{ text: 'المونتاج', start: 0, end: 0.6 }, { text: 'بقى', start: 0.6, end: 1.0 }, { text: 'أسرع', start: 1.0, end: 1.6 }, { text: 'بكتير', start: 1.6, end: 2.4 }] };
+      // ——— قوالب جاهزة: ستايل + حركة + ألوان + مكان بضغطة ———
+      var presetGrid = h('div', { class: 'grid cap-grid preset-grid' });
+      (CS.PRESETS || []).forEach(function (pr) {
+        var cv = h('canvas'); cv.width = 384; cv.height = 216;
+        var tile = h('div', { class: 'tile' + (st.preset === pr.id ? ' on' : ''), 'data-preset': pr.id, onclick: function () {
+          Object.keys(pr.o).forEach(function (k) { st[k] = pr.o[k]; }); st.preset = pr.id; saveSt();
+          UI.toast('اتطبّق "' + pr.name + '" ✓ — تقدر تعدّل أي حاجة تحت');
+          EF.show('transcribe'); // redraw every control with the preset's values
+        } }, h('div', { class: 'thumb', style: { background: 'linear-gradient(135deg,#1f1b2e,#3b2a5c)' } }, cv), h('div', { class: 'name' }, pr.name));
+        presetGrid.appendChild(tile);
+        var ctx = cv.getContext('2d'), t0 = performance.now(), seen = false;
+        requestAnimationFrame(function loop(now) {
+          if (cv.isConnected) seen = true; else if (seen) return;
+          var t = ((now - t0) / 1000) % 3;
+          CS.draw(ctx, sample, Math.min(t, 2.55), Object.assign({}, CS.DEFAULTS, pr.o, { position: 'center', size: Math.min(0.14, (pr.o.size || 0.07) * 1.7) }), 384, 216);
+          requestAnimationFrame(loop);
+        });
+      });
       var styleGrid = h('div', { class: 'grid cap-grid' }), timers = [];
       CS.STYLES.forEach(function (sty) {
         var cv = h('canvas'); cv.width = 384; cv.height = 216;
         var tile = h('div', { class: 'tile' + (st.style === sty.id ? ' on' : ''), 'data-style': sty.id, onclick: function () {
-          st.style = sty.id; saveSt(); Array.prototype.forEach.call(styleGrid.children, function (x) { x.classList.toggle('on', x === tile); });
+          st.style = sty.id; st.preset = ''; saveSt(); Array.prototype.forEach.call(styleGrid.children, function (x) { x.classList.toggle('on', x === tile); });
         } }, h('div', { class: 'thumb', style: { background: 'linear-gradient(135deg,#2b2540,#5b3b86)' } }, cv), h('div', { class: 'name' }, sty.name));
         styleGrid.appendChild(tile);
         var ctx = cv.getContext('2d'), t0 = performance.now(), seen = false;
@@ -189,7 +207,8 @@
       });
       view.appendChild(UI.card('كابشن متحرك',
         UI.hint('متزامن مع كل كلمة وبينزل كليبات شفافة فوق الفيديو. الألوان بتاخد من ذوقك.'),
-        styleGrid,
+        h('div', { class: 'hint' }, 'قوالب جاهزة (زي المشهورين في السوق) — دوس واحد وعدّل اللي انت عايزه بعدها:'), presetGrid,
+        h('div', { class: 'hint' }, 'أو اختار الستايل بس:'), styleGrid,
         UI.row(h('label', null, 'المكان'), UI.seg([{ value: 'bottom', label: 'تحت' }, { value: 'center', label: 'النص' }, { value: 'top', label: 'فوق' }], st.position, function (v) { st.position = v; saveSt(); })),
         UI.field('الحجم', UI.slider(0.04, 0.12, 0.002, st.size, function (v) { return Math.round(v * 1000) / 10 + '%'; }, function (v) { st.size = v; saveSt(); })),
         UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: st.accent || '#FFD84D', oninput: function (e) { st.accent = e.target.value; saveSt(); } }), 'الكلمة', h('input', { type: 'color', value: st.box || '#7C3AED', oninput: function (e) { st.box = e.target.value; saveSt(); } }), 'البوكس'),

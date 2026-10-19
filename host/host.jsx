@@ -912,6 +912,35 @@ EFAPI.applyEffect = function (a) {
   return { applied: n, name: a.name, kind: kind };
 };
 
+/* ---------------- montage on the beat ---------------- */
+/**
+ * Lay the clips of one video track again so every cut lands on a beat (on a copy of the sequence).
+ * a: { track, plan:[{ oldStart, newStart, dur }], clone, cloneName }
+ * Each clip keeps its own In point; its linked audio goes with it.
+ */
+EFAPI.relayClips = function (a) {
+  var cloneInfo = a.clone === false ? null : EFAPI.cloneSequence({ name: a.cloneName });
+  var seq = EF.seq(), fps = EF.fps(seq), tr = seq.videoTracks[a.track || 0], i, j, c, p, jobs = [], linked, L;
+  for (i = 0; i < a.plan.length; i++) {
+    p = a.plan[i]; c = null;
+    for (j = 0; j < tr.clips.numItems; j++) if (Math.abs(EF.sec(tr.clips[j].start) - p.oldStart) < 0.02) { c = tr.clips[j]; break; }
+    if (!c || !c.projectItem) continue;
+    jobs.push({ item: c.projectItem, inP: EF.sec(c.inPoint), t: EF.snap(p.newStart, fps), dur: EF.snap(p.dur, fps), clip: c });
+  }
+  if (!jobs.length) throw new Error('no clips to lay on the beat');
+  // take them (and the audio linked to them) off the track first, then lay them back on the beat
+  for (i = 0; i < jobs.length; i++) {
+    try { linked = jobs[i].clip.getLinkedItems ? jobs[i].clip.getLinkedItems() : null; if (linked) for (L = linked.numItems - 1; L >= 0; L--) if (linked[L] && linked[L].mediaType === 'Audio') linked[L].remove(false, false); } catch (e) {}
+    jobs[i].clip.remove(false, false);
+  }
+  for (i = 0; i < jobs.length; i++) {
+    try { jobs[i].item.setInPoint(jobs[i].inP, 4); jobs[i].item.setOutPoint(jobs[i].inP + jobs[i].dur, 4); } catch (e2) {}
+    tr.overwriteClip(jobs[i].item, jobs[i].t);
+    try { jobs[i].item.clearInPoint(); jobs[i].item.clearOutPoint(); } catch (e3) {}
+  }
+  return { clips: jobs.length, sequence: cloneInfo ? cloneInfo.name : seq.name };
+};
+
 /* ---------------- multicam ---------------- */
 /** a: { plan:[{start,end,trackIndex}], tracks:[video track indexes], clone } */
 EFAPI.multicamApply = function (a) {

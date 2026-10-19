@@ -49,6 +49,21 @@
   ];
   var EXITS = [{ id: 'none', name: 'من غير' }, { id: 'fade', name: 'يختفي' }, { id: 'drop', name: 'ينزل لتحت' }, { id: 'rise', name: 'يطلع لفوق' }, { id: 'slide', name: 'يخرج من الجنب' }, { id: 'zoomOut', name: 'يصغر' }, { id: 'blur', name: 'يتغبّش' }];
 
+  // ready looks, like the named caption templates of FireCut / Submagic / AutoCut: one click sets the style,
+  // the word animation, the speed curve, the colours and the place
+  var PRESETS = [
+    { id: 'hormozi-pop', name: 'هرموزي بوب', o: { style: 'hormozi', anim: 'pop', ease: 'back', strength: 3, animDur: 0.22, timing: 'sync', exit: 'none', position: 'center', size: 0.085, accent: '#FFE600', text: '#FFFFFF', stroke: '#000000', uppercase: true } },
+    { id: 'box-pop', name: 'بوكس بوب', o: { style: 'box', anim: 'pop', ease: 'back', strength: 3, animDur: 0.2, timing: 'sync', exit: 'fade', position: 'bottom', size: 0.072, box: '#7C3AED', text: '#FFFFFF', accent: '#FFFFFF' } },
+    { id: 'beast-bounce', name: 'بيست ملوّن', o: { style: 'beast', anim: 'bounce', ease: 'bounce', strength: 3, animDur: 0.4, timing: 'sync', exit: 'none', position: 'center', size: 0.09, accent: '#22C55E', text: '#FFFFFF', stroke: '#000000' } },
+    { id: 'clean-highlight', name: 'هايلايت نضيف', o: { style: 'highlighter', anim: 'rise', ease: 'out', strength: 4, animDur: 0.3, timing: 'sync', exit: 'fade', position: 'bottom', size: 0.066, accent: '#FDE047', text: '#FFFFFF' } },
+    { id: 'karaoke-tiktok', name: 'كاريوكي تيك توك', o: { style: 'karaoke', anim: 'none', timing: 'sync', exit: 'none', position: 'center', size: 0.08, accent: '#00E5FF', text: '#FFFFFF', stroke: '#000000' } },
+    { id: 'podcast-minimal', name: 'بودكاست هادي', o: { style: 'minimal', anim: 'fade', ease: 'inOut', strength: 2, animDur: 0.3, timing: 'line', exit: 'fade', position: 'bottom', size: 0.054, text: '#FFFFFF' } },
+    { id: 'neon-zoom', name: 'نيون زووم', o: { style: 'neon', anim: 'zoomIn', ease: 'out', strength: 5, animDur: 0.3, timing: 'sync', exit: 'blur', position: 'center', size: 0.08, accent: '#F472B6' } },
+    { id: 'doc-typewriter', name: 'وثائقي كتابة', o: { style: 'typewriter', anim: 'letters', ease: 'linear', timing: 'cascade', wordGap: 0.1, exit: 'fade', position: 'bottom', size: 0.058, text: '#FFFFFF' } },
+    { id: 'lyric-blur', name: 'ليريك ضبابي', o: { style: 'lyric', anim: 'blur', ease: 'inOut', strength: 3, animDur: 0.45, timing: 'line', exit: 'blur', position: 'center', size: 0.07 } },
+    { id: 'bold-drop', name: 'بولد نازل', o: { style: 'bold', anim: 'drop', ease: 'back', strength: 3, animDur: 0.3, timing: 'sync', exit: 'drop', position: 'bottom', size: 0.075, accent: '#FFD84D' } }
+  ];
+
   var DEFAULTS = { style: 'bold', position: 'bottom', size: 0.068, text: '#FFFFFF', accent: '#FFD84D', box: '#7C3AED', stroke: '#000000', font: 'EF Cairo, Cairo, Segoe UI, Arial, sans-serif', maxWidth: 0.84, uppercase: false,
     anim: 'none', ease: 'out', strength: 3, animDur: 0.35, distance: 1.2, timing: 'sync', wordGap: 0.12, exit: 'none', exitDur: 0.25 };
   var AR = /[\u0600-\u06FF]/;
@@ -260,5 +275,5 @@
     return key + (cardOut === 0 ? 'x' : '');
   }
 
-  return { frameKey: frameKey, STYLES: STYLES, ANIMS: ANIMS, EASES: EASES, EXITS: EXITS, DEFAULTS: DEFAULTS, opts: opts, layout: layout, draw: draw, ease: ease, wordStart: wordStart };
+  return { frameKey: frameKey, PRESETS: PRESETS, STYLES: STYLES, ANIMS: ANIMS, EASES: EASES, EXITS: EXITS, DEFAULTS: DEFAULTS, opts: opts, layout: layout, draw: draw, ease: ease, wordStart: wordStart };
 });

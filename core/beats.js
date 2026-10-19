@@ -66,4 +66,26 @@ async function detect(ffmpeg, file, { start = 0, duration = 0, every = 1 } = {})
   return { ...r, beats: r.beats.map(b => b + 0) };
 }
 
-module.exports = { onsetEnvelope, estimateTempo, placeBeats, detectFromSamples, detect };
+/**
+ * Where each clip goes so every cut lands on a beat: clips in order, each one `every` beats long (fewer if the clip
+ * is shorter than that, at least one beat), starting on the first beat at/after `from`. Pure.
+ * clips: [{ start, end }] (timeline) · beats: timeline seconds → [{ oldStart, newStart, dur, beats }]
+ */
+function montagePlan(clips, beats, { every = 2, from = 0, stretch = false } = {}) {
+  const b = beats.slice().sort((x, y) => x - y);
+  let k = b.findIndex(t => t >= from - 0.02);
+  const out = [];
+  if (k < 0) return out;
+  for (const c of clips.slice().sort((x, y) => x.start - y.start)) {
+    if (k >= b.length - 1) break; // out of music
+    const have = c.end - c.start;
+    let n = Math.min(every, b.length - 1 - k);
+    // shorter clip: as many whole beats as it has (at least one); "stretch" lets a short clip run to the full count
+    while (!stretch && n > 1 && b[k + n] - b[k] > have + 0.02) n--;
+    out.push({ oldStart: c.start, newStart: +b[k].toFixed(3), dur: +(b[k + n] - b[k]).toFixed(3), beats: n });
+    k += n;
+  }
+  return out;
+}
+
+module.exports = { onsetEnvelope, estimateTempo, placeBeats, detectFromSamples, detect, montagePlan };
