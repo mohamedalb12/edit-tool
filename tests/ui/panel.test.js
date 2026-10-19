@@ -13,15 +13,21 @@ function loadPlaywright() {
 }
 const ROOT = path.join(__dirname, '..', '..');
 const SHOTS = path.join(ROOT, 'docs', 'screenshots');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.webm': 'video/webm' };
 
 let server, base, browser, page, errors = [];
 
 test.before(async () => {
+  // a short clip the test browser can play (VP8 + Vorbis: Playwright's Chromium has no H.264)
+  const pv = path.join(ROOT, 'tests', '.tmp', 'pv.webm');
+  if (!fs.existsSync(pv)) { fs.mkdirSync(path.dirname(pv), { recursive: true }); require('child_process').execFileSync(require('../../core/ffmpeg').findBinary('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=20', '-f', 'lavfi', '-i', 'sine=f=440:d=20', '-c:v', 'libvpx', '-b:v', '300k', '-c:a', 'libvorbis', '-shortest', pv]); }
   server = http.createServer((req, res) => {
     const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
     if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(p)] || 'application/octet-stream' }); fs.createReadStream(p).pipe(res);
+    const type = TYPES[path.extname(p)] || 'application/octet-stream', size = fs.statSync(p).size, m = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
+    // byte ranges: the preview player seeks inside the video
+    if (m) { const a = +m[1], b = m[2] ? +m[2] : size - 1; res.writeHead(206, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${a}-${b}/${size}`, 'Content-Length': b - a + 1 }); return fs.createReadStream(p, { start: a, end: b }).pipe(res); }
+    res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': size }); fs.createReadStream(p).pipe(res);
   });
   await new Promise(r => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -700,9 +706,29 @@ test('تحميل: analyse a link, qualities from the video, start/end, download 
   assert.equal(await page.locator('.dl-pv img').count(), 2);
   await page.waitForFunction(() => window.__calls.some(x => x.name === 'cloudFrame' && x.args.t === 720));
   assert.ok(await page.evaluate(() => window.__calls.some(x => x.name === 'cloudFrame' && x.args.t === 869.5)));
+  // preview with picture + sound: play the part, or watch and mark the start / end where you are
+  await clickText('▶ بريفيو بالصوت والصورة');
+  await page.waitForFunction(() => { const v = document.querySelector('.dl-video'); return v && v.readyState >= 1; });
+  await page.evaluate(() => { const v = document.querySelector('.dl-video'); v.pause(); v.currentTime = 4; });
+  await page.waitForFunction(() => Math.abs(document.querySelector('.dl-video').currentTime - 4) < 0.3);
+  await clickText('خلّي ده البداية');
+  assert.equal(await page.locator('.rs-time').nth(0).inputValue(), '0:04');
+  await page.evaluate(() => { const v = document.querySelector('.dl-video'); v.currentTime = 9; });
+  await page.waitForFunction(() => Math.abs(document.querySelector('.dl-video').currentTime - 9) < 0.3);
+  await clickText('خلّي ده النهاية');
+  assert.equal(await page.locator('.rs-time').nth(1).inputValue(), '0:09');
+  await clickText('▶ شغّل الجزء');
+  await page.waitForFunction(() => { const v = document.querySelector('.dl-video'); return Math.abs(v.currentTime - 4) < 1; });
   await clickText('نزّل');
   const dbx = await page.evaluate(() => window.__calls.find(x => x.name === 'downloadMedia').args);
-  assert.deepEqual(dbx, { url: 'https://www.dropbox.com/scl/fi/abc/x.mp4?rlkey=k&dl=0', quality: 'best', start: '12:00', end: '14:30', place: true });
+  assert.deepEqual(dbx, { url: 'https://www.dropbox.com/scl/fi/abc/x.mp4?rlkey=k&dl=0', quality: 'best', start: '0:04', end: '0:09', place: true });
+  // the original can't play here (HEVC/ProRes…): a 360p piece from ffmpeg takes over
+  await clearCalls();
+  await page.fill('textarea.dl-urls', 'https://www.dropbox.com/scl/fi/broken/x.mov?rlkey=k');
+  await clickText('حلّل اللينك'); await page.waitForSelector('.dl-info');
+  await clickText('▶ بريفيو بالصوت والصورة');
+  await page.waitForFunction(() => window.__calls.some(x => x.name === 'previewClip'));
+  assert.equal(await page.evaluate(() => window.__calls.find(x => x.name === 'previewClip').args.t), 0);
 });
 
 test('بحث النت: sources, organised results (source + shape filters), place or import, Pinterest link', async () => {

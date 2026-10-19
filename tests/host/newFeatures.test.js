@@ -489,6 +489,14 @@ test('Dropbox links: info off the link, only the chosen part comes down, folders
     const fr = await S.cloudFrame(url, 7);
     assert.ok(fr.length > 500 && fr !== info.thumbnail);
     assert.equal(await S.cloudFrame(url, 7), fr, 'cached');
+    // preview player: the file's own link, or a playable 360p piece with sound
+    const ps = await S.previewSource(url);
+    assert.match(ps.url, /\/content\/clip$/); assert.equal(ps.chunks, true);
+    const pc = await S.previewClip(url, 3.7, 4);
+    assert.equal(pc.start, 3);
+    const pr = await require('../../core/ffmpeg').probe(require('../../core/ffmpeg').findBinary('ffprobe'), pc.path);
+    assert.equal(pr.height, 360); assert.ok(Math.abs(pr.duration - 4) < 0.3, 'piece length ' + pr.duration);
+    assert.deepEqual(await S.previewClip(url, 3.2, 4), pc, 'same piece reused');
     hits.length = 0;
     const r = await S.downloadMedia({ url, start: '0:02', end: '0:05', place: false });
     assert.match(path.basename(r.file), /^مقابلة-2-5\.mp4$/);

@@ -145,6 +145,19 @@ function frameAt(ffmpeg, url, t, { width = 320, timeout = 45000 } = {}) {
   }));
 }
 
+/** a small 360p H.264/AAC piece of the remote file from t (for playing in the panel when the original codec can't) */
+function previewArgs(url, t, len, out) {
+  return ['-hide_banner', '-loglevel', 'error', '-y', ...NET_IN, '-ss', String(Math.max(0, +t || 0)), '-i', url, '-t', String(len),
+    '-map', '0:v:0?', '-map', '0:a:0?', '-vf', 'scale=-2:360', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out];
+}
+function previewClip(ffmpeg, url, t, len, out) {
+  return new Promise((resolve, reject) => execFile(ffmpeg, previewArgs(url, t, len, out), { timeout: 120000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, err => {
+    if (err || !fs.existsSync(out)) return reject(new Error('مش قادر أجهّز البريفيو'));
+    resolve(out);
+  }));
+}
+
 /** cut a part out of the remote file → { file } (progress 0..1 from ffmpeg's out_time) */
 function downloadRange(ffmpeg, url, { start, end, audioOnly, out, total }, onProgress) {
   const args = rangeArgs(url, { start, end, audioOnly, out });
@@ -204,4 +217,4 @@ function listMedia(dir) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-module.exports = { kindOf, direct, dropboxIsFolder, gdriveId, nameFromDisposition, nameFromUrl, typeOf, safeName, head, probeRemote, rangeArgs, downloadRange, frameAt, outName, extract, listMedia };
+module.exports = { kindOf, direct, dropboxIsFolder, gdriveId, nameFromDisposition, nameFromUrl, typeOf, safeName, head, probeRemote, rangeArgs, downloadRange, frameAt, previewArgs, previewClip, outName, extract, listMedia };

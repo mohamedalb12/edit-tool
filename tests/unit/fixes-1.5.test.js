@@ -91,3 +91,13 @@ test('caption timing: sped-up clips map words sooner; the silence snap never wre
   assert.equal(r[1].start, 2.5, 'moved 0.2 s to where the voice starts');
   assert.equal(r[2].start, 4.2, 'a 0.7 s jump is not trusted');
 });
+
+test('preview stream for YouTube & co: yt-dlp -g with a ready-made (picture + sound) format; failures say so', async () => {
+  const Y = require('../../core/ytdlp'), os = require('os'), fs2 = require('fs'), p2 = require('path');
+  const fake = p2.join(os.tmpdir(), 'ef-yt-g-' + process.pid);
+  fs2.writeFileSync(fake, `#!${process.execPath}\nconst a = process.argv.slice(2);\nif (!a.includes('-g') || !a.includes('b[ext=mp4][height<=720]/b[height<=720]/b[ext=mp4]/b')) process.exit(2);\nif (a.some(x => /bad/.test(x))) { console.error('ERROR: [youtube] bad: Video unavailable'); process.exit(1); }\nconsole.log('https://rr1.googlevideo.com/videoplayback?x=1');\n`);
+  fs2.chmodSync(fake, 0o755);
+  assert.equal(await Y.streamUrl(fake, 'https://youtu.be/ok'), 'https://rr1.googlevideo.com/videoplayback?x=1');
+  await assert.rejects(Y.streamUrl(fake, 'https://youtu.be/bad'), /البريفيو مش متاح/);
+  fs2.unlinkSync(fake);
+});

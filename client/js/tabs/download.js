@@ -103,6 +103,60 @@
         rangeBox.appendChild(h('div', { class: 'row rs-row' }, h('label', null, 'من'), ta, nudge('lo', -1), nudge('lo', 1), h('span', { class: 'spacer' }), h('label', null, 'لحد'), tb, nudge('hi', -1), nudge('hi', 1)));
         rangeBox.appendChild(h('div', { class: 'row' }, len, h('span', { class: 'spacer' }), UI.btn('الفيديو كله', function () { lo.value = 0; hi.value = D; sync('lo'); }, 'small')));
         sync('lo');
+        rangeBox.appendChild(playerBox(lo, hi, sync, D));
+      }
+      // preview with picture + sound: watch, then "this is the start / this is the end"
+      function playerBox(lo, hi, sync, D) {
+        var box = h('div', { class: 'dl-player' }), stat = h('span', { class: 'hint' }), now = h('span', { class: 'chip ltr' }, '0:00');
+        var v = null, mode = 'direct', cs = 0, clen = 0, stopAt = null, src = null, want = 0;
+        function abs() { return v ? cs + (v.currentTime || 0) : 0; }
+        function chunkAt(t, play) {
+          stat.textContent = 'بيجهّز بريفيو من ' + mmss(t) + '…';
+          return Promise.resolve().then(function () { return S.previewClip(links()[0], t, 30); }).then(function (c) {
+            mode = 'chunk'; cs = c.start; clen = c.len;
+            v.onloadedmetadata = function () { v.onloadedmetadata = null; v.currentTime = Math.max(0, t - cs); stat.textContent = 'بريفيو مخفف (360p) — الأصلي هينزل بجودته'; if (play) v.play(); };
+            v.src = EF.fileUrl(c.path);
+          }, function (e) { stat.textContent = e.message; });
+        }
+        function fallback() { if (src && src.chunks && mode === 'direct') { mode = 'chunk'; chunkAt(want, true); } else stat.textContent = 'الفيديو ده مش بيشتغل هنا — بس التحميل شغال عادي'; }
+        function playAt(t, until) {
+          want = t; stopAt = until === undefined ? null : until;
+          if (!v) return;
+          if (mode === 'chunk') { if (clen && t >= cs && t < cs + clen - 1) { v.currentTime = t - cs; v.play(); } else chunkAt(t, true); }
+          else if (v.readyState >= 1) { v.currentTime = t; v.play(); }
+        }
+        var start = UI.btn('▶ بريفيو بالصوت والصورة', function () {
+          stat.textContent = 'بيفتح البريفيو…';
+          UI.safe('بيفتح البريفيو', function () {
+            return S.previewSource(links()[0]).then(function (r) {
+              src = r; want = +lo.value;
+              v = h('video', { controls: true, preload: 'metadata', playsinline: true, class: 'dl-video' });
+              v.addEventListener('loadedmetadata', function () {
+                if (mode !== 'direct') return;
+                // HEVC / ProRes: the sound plays but no picture → a 360p piece made by ffmpeg instead
+                if (src.type === 'video' && !v.videoWidth) return fallback();
+                stat.textContent = ''; v.currentTime = want; v.play();
+              });
+              v.addEventListener('error', function () { if (mode === 'direct') fallback(); else stat.textContent = 'البريفيو مااشتغلش'; });
+              v.addEventListener('timeupdate', function () {
+                var t = abs(); now.textContent = mmss(t);
+                if (stopAt !== null && t >= stopAt) { v.pause(); stopAt = null; }
+              });
+              v.addEventListener('ended', function () { if (mode === 'chunk' && cs + clen < D && (stopAt === null || stopAt > cs + clen)) chunkAt(cs + clen, true); });
+              v.src = r.url;
+              UI.empty(box);
+              box.appendChild(v);
+              box.appendChild(h('div', { class: 'row rs-row' }, now,
+                UI.btn('▶ شغّل الجزء', function () { playAt(+lo.value, +hi.value); }, 'small'),
+                h('span', { class: 'spacer' }),
+                UI.btn('خلّي ده البداية', function () { lo.value = Math.min(D, Math.round(abs())); sync('lo'); }, 'small'),
+                UI.btn('خلّي ده النهاية', function () { hi.value = Math.min(D, Math.round(abs())); sync('hi'); }, 'small')));
+              box.appendChild(stat);
+            });
+          }, start);
+        }, 'small');
+        box.appendChild(h('div', { class: 'row' }, start, stat));
+        return box;
       }
       var go = UI.btn('نزّل', function () {
         var list = links();

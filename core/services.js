@@ -1541,6 +1541,32 @@ ${JSON.stringify(lite)}
     return this._frames.get(key);
   }
   /**
+   * Where the panel's player reads the video (picture + sound) for the preview: the file's own link for Dropbox /
+   * Drive, a ready-made stream from yt-dlp for YouTube & co. `chunks` = the panel may ask previewClip for pieces
+   * when the original can't play there (ProRes, HEVC…).
+   */
+  async previewSource(url) {
+    const C = require('./cloud'), Y = require('./ytdlp');
+    if (C.kindOf(url)) {
+      const h = (this._cloudHead && this._cloudHead.src === url && this._cloudHead.h) || await C.head(url, { fetchImpl: this.fetch });
+      this._cloudHead = { src: url, h };
+      return { url: h.finalUrl, chunks: !!this.tools.ffmpeg, type: h.type };
+    }
+    const o = await this.ytdlpOpts();
+    return { url: await this.withLogin(x => Y.streamUrl(o.bin, url, x), o), chunks: false, type: 'video' };
+  }
+  /** a 360p piece [t, t+len] of a Dropbox / Drive file the panel can always play → { path, start, len } (cached) */
+  async previewClip(url, t, len = 30) {
+    const C = require('./cloud');
+    const h = (this._cloudHead && this._cloudHead.src === url && this._cloudHead.h) || await C.head(url, { fetchImpl: this.fetch });
+    this._cloudHead = { src: url, h };
+    const start = Math.max(0, Math.floor(t));
+    const dir = config.cacheDir('preview'); fs.mkdirSync(dir, { recursive: true });
+    const out = path.join(dir, require('crypto').createHash('md5').update(url).digest('hex').slice(0, 12) + '-' + start + '-' + len + '.mp4');
+    if (!fs.existsSync(out)) await C.previewClip(this.ffmpeg(), h.finalUrl, start, len, out);
+    return { path: out, start, len };
+  }
+  /**
    * Download from Dropbox / Drive. A part of a video (start/end) is cut straight off the link by ffmpeg — only that
    * part comes down; a shared folder comes as a zip that's unpacked, added to مكتبتي and imported into its own bin.
    */

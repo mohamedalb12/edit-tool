@@ -160,6 +160,21 @@ async function info(bin, url, { jsRuntime, cookiesFrom } = {}) {
   return { id: j.id, title: j.title || j.id, duration: j.duration || null, thumbnail: j.thumbnail || null, uploader: j.uploader || j.channel || '', heights, platform: platformOf(url), extractor: j.extractor_key || j.extractor };
 }
 
+/** a direct link to a ready-made (picture + sound in one) stream, small enough to play in the panel */
+function streamUrl(bin, url, { jsRuntime, cookiesFrom } = {}) {
+  if (!bin) return Promise.reject(new Error('yt-dlp مش متثبّت'));
+  const args = ['-g', '--no-playlist', '--no-warnings', '-f', 'b[ext=mp4][height<=720]/b[height<=720]/b[ext=mp4]/b',
+    ...(jsRuntime ? ['--js-runtimes', jsRuntime] : []), ...(cookiesFrom ? ['--cookies-from-browser', cookiesFrom] : []), String(url).trim()];
+  return new Promise((resolve, reject) => execFile(bin, args, { timeout: 90000, windowsHide: true }, (err, so, se) => {
+    const first = String(so || '').trim().split('\n')[0];
+    if (err || !/^https?:/.test(first)) {
+      const raw = String(se || (err && err.message) || '').trim().split('\n').filter(x => /ERROR/.test(x)).pop() || 'no stream';
+      const e = new Error('البريفيو مش متاح للينك ده: ' + friendlyError(raw.replace(/^ERROR:\s*/, ''), siteOf(args))); e.raw = raw; e.login = needsLogin(raw); return reject(e);
+    }
+    resolve(first);
+  }));
+}
+
 /** Cut [start, end] out of a downloaded file exactly (frame-accurate re-encode). */
 function trim(ffmpeg, file, { start, end, audioOnly, out }) {
   const a = parseTime(start) || 0, b = parseTime(end);
@@ -197,4 +212,4 @@ function download(bin, opts, onProgress) {
   });
 }
 
-module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim, assetName, managedPath, installManaged, version, needsJsRuntime, friendlyError, RELEASE_URL, ageDays, youtubeRetryArgs, needsLogin, installedBrowsers };
+module.exports = { PLATFORMS, QUALITIES, platformOf, parseTime, buildArgs, info, download, trim, streamUrl, assetName, managedPath, installManaged, version, needsJsRuntime, friendlyError, RELEASE_URL, ageDays, youtubeRetryArgs, needsLogin, installedBrowsers };
