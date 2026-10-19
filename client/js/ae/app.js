@@ -3,6 +3,7 @@
   var EF = window.EF, UI = EF.ui, h = UI.h;
   EF.GROUPS = [
     { id: 'templates', label: 'قوالبي', title: 'قوالبي (لبريمير)', icon: 'templates', members: ['templates'] },
+    { id: 'director', label: 'المونتير', title: 'المونتير الذكي', icon: 'auto', members: ['director'] },
     { id: 'motion', label: 'الحركة', title: 'الحركة', icon: 'motion', members: ['motion'] },
     { id: 'text', label: 'الكلام', title: 'الكلام والأشكال', icon: 'titles', members: ['text'] },
     { id: 'expr', label: 'إكسبريشن', title: 'إكسبريشنز بضغطة', icon: 'code', members: ['expr'] },
@@ -39,6 +40,7 @@
     A('anchor', '✛', 'الأنكر في النص', 'anchor center أنكر', function () { return S.anchor({ where: 'c' }).then(function () { UI.toast('✓'); }); });
     A('stagger', '⋰', 'ستاجر 3 فريم', 'stagger offset ستاجر', function () { return S.stagger({ frames: 3 }).then(function () { UI.toast('✓'); }); });
     A('render', '⏺', 'ريندر الكومب لبريمير', 'render ريندر', function () { return S.render({}).then(function () { UI.toast('✓'); }); });
+    A('director', '🎬', 'المونتير الذكي: وصّف مشهد', 'ai director scene مشهد مونتير', function () { show('director'); });
     A('save', '💾', 'احفظ الكومب كقالب', 'template mogrt قالب', function () { show('templates'); });
     return out;
   };

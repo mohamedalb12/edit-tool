@@ -10,6 +10,12 @@ const motion = require('./motionPresets');
 const curves = require('./curves');
 const { OpenRouter, modelFor } = require('./openrouter');
 const { nodeFetch } = require('./http');
+const aeScene = require('./aeScene');
+const ff = require('./ffmpeg');
+const vision = require('./vision');
+const beats = require('./beats');
+const { extractJson } = require('./util');
+const STILL = /\.(png|jpe?g|webp|bmp|tiff?|gif|psd)$/i;
 
 /** AI steps the motion assistant may run (name → what it does, for the prompt) */
 const AI_ACTIONS = {
@@ -34,6 +40,7 @@ class AEServices {
     this.host = host;
     this.fetch = fetchImpl || nodeFetch;
     this.log = log || (() => {});
+    this.history = [];
     this.reload();
   }
   reload() {
@@ -196,6 +203,148 @@ class AEServices {
       } catch (e) { failed.push({ action: s.action, error: e.message }); }
     }
     return { done, failed };
+  }
+
+  /* ---------- المونتير الذكي ---------- */
+  tools() { return ff.resolveTools(this.settings); }
+  ffmpeg() { const t = this.tools(); if (!t.ffmpeg) throw new Error('ffmpeg مش متسطب — نزّله أو حط مكانه من إعدادات بريمير'); return t.ffmpeg; }
+  sceneLibrary() { return aeScene.SCENES.map(s => ({ id: s.id, name: s.name, fields: s.fields })); }
+  editStyles() { return Object.keys(aeScene.STYLES).map(id => ({ id, name: aeScene.STYLES[id].name })); }
+  async compSize() { const i = await this.compInfo().catch(() => ({})); return (i && i.comp) || {}; }
+  /** a raw scene (from the AI, the library or the auto edit) → checked → real layers in AE */
+  async sceneBuild(raw, { where } = {}) {
+    const comp = await this.compSize();
+    const r = Object.assign({}, raw, { comp: Object.assign({}, raw && raw.comp) });
+    if (where === 'new') r.comp.create = true;
+    if (where === 'here' && comp.width) r.comp.create = false;
+    const { spec, warnings } = aeScene.normalize(r, comp);
+    if (!spec.layers.length) throw new Error('المشهد طلع فاضي' + (warnings.length ? ': ' + warnings.slice(0, 3).join('، ') : ''));
+    const res = await this.host('buildScene', { spec });
+    return Object.assign({}, res, { warnings });
+  }
+  async libraryScene(id, params = {}, where) {
+    const comp = await this.compSize();
+    return this.sceneBuild(aeScene.buildLibrary(id, params, comp), { where });
+  }
+  /** the AI's edit ops → checked (same rules as a scene) → editScene in AE */
+  async sceneEdit(ops, state) {
+    const st = state || await this.host('sceneState', {});
+    const comp = st.comp || {}, out = [], warnings = [];
+    for (const op of (ops || []).slice(0, 40)) {
+      if (!op || !op.op) continue;
+      if (op.op === 'delete' && op.layer) out.push({ op: 'delete', layer: String(op.layer) });
+      else if (op.op === 'retime') { const f = +op.factor; if (f > 0) out.push({ op: 'retime', factor: Math.min(5, Math.max(0.2, f)) }); }
+      else if (op.op === 'add') {
+        const n = aeScene.normalize({ comp: { create: false }, layers: [op.layer || op.spec] }, comp);
+        warnings.push(...n.warnings);
+        if (n.spec.layers[0]) out.push({ op: 'add', spec: n.spec.layers[0] });
+      } else if (op.op === 'set' && op.layer) {
+        const look = op.look || {}, known = (st.layers || []).find(l => l.name === op.layer);
+        const n = aeScene.normalize({ comp: { create: false }, layers: [{ type: 'null', name: op.layer, threeD: known && known.threeD, transform: look.transform, keys: look.keys, effects: look.effects, expressions: look.expressions }] }, comp);
+        warnings.push(...n.warnings);
+        const L = n.spec.layers[0], o = { transform: L.transform, keys: L.keys, effects: L.effects, expressions: L.expressions };
+        if (look.text !== undefined) o.text = String(look.text).slice(0, 400);
+        if (look.color) o.color = aeScene.hex(look.color);
+        if (+look.size > 0) o.size = Math.min(1000, Math.max(4, +look.size));
+        out.push({ op: 'set', layer: String(op.layer), look: o });
+      }
+    }
+    if (!out.length) throw new Error('مفيش تعديل يتعمل' + (warnings.length ? ': ' + warnings.slice(0, 3).join('، ') : ''));
+    const r = await this.host('editScene', { ops: out });
+    return Object.assign({}, r, { warnings });
+  }
+  /** frames of reference images / videos for the vision model (a video → 4 moments) */
+  async refFrames(files, { width = 512, perVideo = 4, max = 10 } = {}) {
+    const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe, frames = [];
+    for (const f of (files || []).slice(0, 6)) {
+      if (frames.length >= max) break;
+      const name = path.basename(f);
+      if (STILL.test(f)) { frames.push({ label: name, time: 0, b64: await vision.frameJpeg(ffmpeg, f, 0, { width }) }); continue; }
+      let dur = 0; try { dur = probe ? (await ff.probe(probe, f)).duration : 0; } catch (_) {}
+      const n = dur > 0 ? perVideo : 1;
+      for (let i = 0; i < n && frames.length < max; i++) {
+        const t = dur > 0 ? dur * (i + 0.5) / n : 0;
+        try { frames.push({ label: name + ' @' + t.toFixed(1) + 's', time: t, b64: await vision.frameJpeg(ffmpeg, f, t, { width }) }); } catch (_) {}
+      }
+    }
+    if (files && files.length && !frames.length) throw new Error('مقدرتش أطلع صور من الريفرانس');
+    return frames;
+  }
+  async askJson(system, content, maxTokens = 8000) {
+    const messages = [{ role: 'system', content: system + '\nرد بـ JSON صالح فقط من غير أي كلام زيادة.' }, ...this.history.slice(-8), { role: 'user', content }];
+    let m;
+    try { m = await this.llm.chat({ model: this.model('motion_ai'), messages, maxTokens, jsonMode: true }); }
+    catch (e) { if (e.status === 400) m = await this.llm.chat({ model: this.model('motion_ai'), messages, maxTokens }); else throw e; }
+    return extractJson(m.content) || {};
+  }
+  /**
+   * The director: "اعمل إنترو بلوجو برتقالي بيلف" / "خلّي العنوان أكبر وأبطأ" / a reference image or video →
+   * builds a new scene, edits the open one by layer names, or customises a library scene. Remembers the chat.
+   * where: auto | new | here
+   */
+  async director({ message, refs = [], where = 'auto' }) {
+    if (!this.settings.keys.openrouter) throw new Error('حط مفتاح OpenRouter من الإعدادات الأول');
+    if (!String(message || '').trim() && !refs.length) throw new Error('اكتب المشهد اللي عايزه');
+    const state = await this.host('sceneState', {}).catch(() => ({ comp: null, layers: [] }));
+    const frames = refs.length ? await this.refFrames(refs) : [];
+    const sys = [
+      'أنت مونتير ومصمم موشن جرافيك محترف جوه أفتر إفكتس. بتحوّل وصف المستخدم (بالمصري) لمشهد حقيقي بليرز وكي فريمز هو يقدر يعدّل عليها.',
+      'ردّك JSON بواحد من الأشكال دي:',
+      '1) مشهد جديد: {"action":"build","say":"جملة بالمصري","scene":{…}}',
+      '2) تعديل على الليرز الموجودة بأساميها بالظبط: {"action":"edit","say":"…","ops":[{"op":"set","layer":"اسم اللير","look":{"transform":{…},"keys":{…},"effects":[…],"expressions":{…},"text":"…","color":"#hex","size":90}},{"op":"add","layer":{…لير كامل بنفس شكل المشهد…}},{"op":"delete","layer":"اسم"},{"op":"retime","factor":1.5 (أكبر من 1 = أبطأ)}]}',
+      '3) مشهد جاهز من المكتبة لو مناسب: {"action":"library","say":"…","use":"id","params":{"title":"…","subtitle":"…","color":"#hex"}} — المكتبة: ' + aeScene.SCENES.map(s => s.id + ' (' + s.name + ')').join('، '),
+      aeScene.promptDoc(),
+      where === 'new' ? 'المستخدم عايز مشهد جديد في كومب جديد (build).' : where === 'here' ? 'المستخدم عايز المشهد جوه الكومب المفتوح: build مع comp.create=false، أو edit.' : 'لو بيطلب تغيير في اللي موجود استخدم edit، ولو حاجة جديدة build.',
+      frames.length ? 'المستخدم بعت ريفرانس (الصور تحت). حلّل: الألوان بالظبط (#hex)، الخط ووزنه، التكوين والمسافات، الإيقاع وشكل الحركة المتوقع، الإفكتات (جلو، بلور، جرين…). واعمل مشهد قريب منه جداً بنفس الإحساس، واكتب التحليل في "reference" بالمصري في سطرين.' : ''
+    ].filter(Boolean).join('\n');
+    const ctx = state.comp ? 'الكومب المفتوح: ' + JSON.stringify(state).slice(0, 6000) : 'مفيش كومب مفتوح.';
+    const text = ctx + '\nالطلب: ' + (message || 'اعمل مشهد زي الريفرانس');
+    const res = await this.askJson(sys, frames.length ? vision.imageMessage(frames, text).content : text);
+    this.history.push({ role: 'user', content: String(message || '').slice(0, 1500) + (frames.length ? ' [+ريفرانس]' : '') }, { role: 'assistant', content: JSON.stringify(res).slice(0, 4000) });
+    this.history = this.history.slice(-12);
+    const out = { action: res.action, say: String(res.say || '').slice(0, 400), reference: res.reference ? String(res.reference).slice(0, 600) : '' };
+    if (res.action === 'edit') out.result = await this.sceneEdit(res.ops, state);
+    else if (res.action === 'library') out.result = await this.libraryScene(res.use, res.params || {}, where);
+    else if (res.scene) { out.action = 'build'; out.result = await this.sceneBuild(res.scene, { where }); }
+    else throw new Error('الموديل مارجّعش مشهد — جرّب توصف تاني' + (out.say ? ': ' + out.say : ''));
+    return out;
+  }
+  directorReset() { this.history = []; return true; }
+  /**
+   * Edit the footage alone: clips (+ music) → a cut in a style, on the beat, with titles — as editable layers.
+   * With a key the vision model picks the order, the best moment of each clip and the titles from the brief.
+   */
+  async autoEdit({ files = [], music = null, style = 'energetic', ratio = '16:9', duration = 0, brief = '', onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
+    if (!files.length) throw new Error('اختار فيديوهات أو صور الأول');
+    const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe;
+    step('بقرا الفيديوهات…');
+    const clips = [];
+    for (const f of files.slice(0, 40)) {
+      const still = STILL.test(f);
+      let dur = 0; if (!still && probe) { try { dur = (await ff.probe(probe, f)).duration; } catch (_) {} }
+      clips.push({ file: f, still, dur });
+    }
+    let plan = {};
+    if (this.settings.keys.openrouter && (brief || clips.length > 1)) {
+      step('بشوف اللقطات…');
+      const frames = [];
+      for (const [i, c] of clips.slice(0, 16).entries()) { try { frames.push({ label: '#' + i + ' ' + path.basename(c.file) + (c.dur ? ' (' + c.dur.toFixed(1) + 's)' : ''), time: 0, b64: await vision.frameJpeg(ffmpeg, c.file, c.dur * 0.4, { width: 384 }) }); } catch (_) {} }
+      if (frames.length) {
+        try {
+          plan = await this.askJson('أنت مونتير محترف. بص على اللقطات (كل صورة من لقطة برقمها) ورتّبها لمونتاج حلو ستايله ' + ((aeScene.STYLES[style] || {}).name || style) + '. رجّع JSON: {"order":[أرقام اللقطات بالترتيب، ممكن تكرر أو تشيل],"best":{"رقم":ثانية أحلى لحظة},"titles":[{"text":"كلام قصير بالمصري أو زي البريف","at":ثانية,"dur":2.5}],"note":"سطر بالمصري"}',
+            vision.imageMessage(frames, 'البريف: ' + (brief || 'مونتاج حلو من اللقطات دي') + (duration ? '، المدة ' + duration + ' ثانية' : '')).content, 1500);
+        } catch (e) { this.log('autoEdit plan: ' + e.message); }
+      }
+    }
+    if (plan.best) for (const k of Object.keys(plan.best)) if (clips[+k] && isFinite(+plan.best[k])) clips[+k].best = Math.max(0, Math.min(clips[+k].dur - 0.5, +plan.best[k]));
+    let bt = [], bpm = 0;
+    if (music) { step('بسمع المزيكا…'); const r = await beats.detect(ffmpeg, music); bt = r.beats; bpm = r.bpm; }
+    const order = Array.isArray(plan.order) ? plan.order.map(Number).filter(i => clips[i]) : null;
+    const { scene, cuts } = aeScene.montageScene({ clips, beats: bt, style, ratio, duration, music, titles: Array.isArray(plan.titles) ? plan.titles : [], order, name: 'EditFast Edit ' + ((aeScene.STYLES[style] || {}).name || '') });
+    step('ببني المونتاج في الأفتر…');
+    const r = await this.sceneBuild(scene, { where: 'new' });
+    return Object.assign({}, r, { cuts: cuts.length, bpm, note: plan.note ? String(plan.note).slice(0, 200) : '' });
   }
 
   async selfTest() { return this.host('selfTest', {}); }

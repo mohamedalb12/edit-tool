@@ -238,6 +238,94 @@
     }
   });
 
+  /* ——— المونتير الذكي: وصف / ريفرانس → مشهد بليرز وكي فريمز، ومونتاج لوحده ——— */
+  var chat = [], refs = [], where = 'auto', lib = { id: null, p: {} }, ed = { files: [], music: null, style: 'energetic', ratio: '16:9', duration: 0, brief: '' };
+  function base(f) { return String(f).split(/[\\/]/).pop(); }
+  function summary(r) {
+    var x = r && r.result || r || {};
+    var t = x.layers !== undefined ? x.layers + ' لير' + (x.keys ? ' · ' + x.keys + ' كي فريم' : '') + (x.comp ? ' في "' + x.comp + '"' : '') : x.done !== undefined ? x.done + ' تعديل' + (x.missing && x.missing.length ? ' (مش لاقي: ' + x.missing.join('، ') + ')' : '') : '';
+    return t + (x.warnings && x.warnings.length ? ' — ⚠ ' + x.warnings.slice(0, 2).join('، ') : '');
+  }
+  EF.tabs.push({
+    id: 'director', label: 'المونتير', title: 'المونتير الذكي',
+    render: function (view) {
+      var log = h('div', { class: 'chat' }), q = h('textarea', { rows: 3, placeholder: 'مثلًا: إنترو 5 ثواني، لوجو بيلف ويظهر بجلو برتقالي، تحته اسم القناة حرف حرف، وخلفية غامقة فيها دواير بتتحرك ببطء' });
+      var refBox = h('div', { class: 'chips' });
+      function drawLog() {
+        UI.empty(log);
+        if (!chat.length) log.appendChild(UI.hint('وصّف المشهد بالمصري — بيبني ليرز وكي فريمز حقيقية في كومب جديد، وبعدها قولّه "كبّر العنوان" أو "خلّيها أبطأ" أو "غيّر اللون لأزرق" ويعدّل على نفس الليرز.'));
+        chat.forEach(function (m) {
+          log.appendChild(h('div', { class: 'msg ' + m.who }, h('div', null, m.text), m.ref ? h('div', { class: 'hint' }, '🔍 ' + m.ref) : null, m.info ? h('div', { class: 'hint' }, m.info) : null));
+        });
+        log.scrollTop = log.scrollHeight;
+      }
+      function drawRefs() {
+        UI.empty(refBox);
+        refs.forEach(function (f, i) { refBox.appendChild(h('span', { class: 'chip' }, h('bdi', null, base(f)), h('button', { type: 'button', class: 'x', onclick: function () { refs.splice(i, 1); drawRefs(); } }, '×'))); });
+      }
+      var send = action('ابعت', 'المونتير بيشتغل', function () {
+        var text = q.value.trim();
+        if (!text && !refs.length) throw new Error('اكتب المشهد اللي عايزه');
+        chat.push({ who: 'user', text: text || 'اعمل زي الريفرانس', info: refs.length ? '📎 ' + refs.map(base).join('، ') : '' });
+        drawLog();
+        var r0 = refs.slice();
+        return S().director({ message: text, refs: r0, where: where }).then(function (r) {
+          chat.push({ who: 'ai', text: r.say || (r.action === 'edit' ? 'عدّلت ✓' : 'المشهد جاهز ✓'), ref: r.reference, info: summary(r) });
+          q.value = ''; refs = []; drawRefs(); drawLog();
+          ok(r.action === 'edit' ? 'اتعدّل ✓' : 'المشهد اتبنى ✓');
+        }, function (e) { chat.push({ who: 'ai', text: '✗ ' + e.message }); drawLog(); throw e; });
+      }, 'primary');
+      q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send.click(); });
+      view.appendChild(UI.card('قولّه المشهد',
+        log, q, refBox,
+        UI.row(UI.seg([{ value: 'auto', label: 'هو يقرر' }, { value: 'new', label: 'كومب جديد' }, { value: 'here', label: 'في الكومب المفتوح' }], where, function (v) { where = v; }),
+          UI.btn('📎 ريفرانس', function () { var f = EF.pickFiles('صور أو فيديو ريفرانس', ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mkv']); if (f && f.length) { refs = refs.concat(f).slice(0, 6); drawRefs(); } }, 'small')),
+        UI.modelPicker('motion_ai'),
+        UI.row(send, UI.btn('محادثة جديدة', function () { chat = []; S().directorReset(); drawLog(); }, 'small ghost')),
+        UI.hint('الريفرانس: صورة أو فيديو (بياخد منه 4 لقطات) — بيحلّل الألوان والخط والتكوين والحركة ويعمل مشهد قريب منه. كل مشهد أو تعديل Undo واحد (Ctrl+Z). الـ AI بيكتب وصف المشهد بس — الإضافة هي اللي بتبني الليرز، ومفيش كود بيتشغّل.')));
+      drawLog(); drawRefs();
+
+      // pro scenes, ready to customise
+      var grid = h('div', { class: 'chips' }), fields = h('div');
+      function drawFields() {
+        UI.empty(fields);
+        var sc = S().sceneLibrary().filter(function (x) { return x.id === lib.id; })[0];
+        if (!sc) return;
+        var lab = { title: 'الكلام', subtitle: 'السطر التاني', color: 'اللون', file: 'لوجو' };
+        sc.fields.forEach(function (f) {
+          if (f === 'color') fields.appendChild(UI.field(lab[f], h('input', { type: 'color', value: lib.p.color || '#f97316', oninput: function (e) { lib.p.color = e.target.value; } })));
+          else if (f === 'file') fields.appendChild(UI.row(UI.btn(lib.p.file ? base(lib.p.file) : 'اختار لوجو (اختياري)', function () { var x = EF.pickFile('اللوجو', ['png', 'svg', 'ai', 'psd', 'jpg']); if (x) { lib.p.file = x; drawFields(); } }, 'small')));
+          else fields.appendChild(UI.field(lab[f], h('input', { class: 'grow', 'data-f': f, value: lib.p[f] || '', oninput: function (e) { lib.p[f] = e.target.value; } })));
+        });
+        fields.appendChild(UI.row(action('اعمل المشهد', 'بيبني المشهد', function () { return S().libraryScene(lib.id, lib.p).then(function (r) { ok(sc.name + ' — ' + summary(r) + ' ✓'); }); }, 'primary')));
+      }
+      S().sceneLibrary().forEach(function (sc) {
+        grid.appendChild(h('button', { type: 'button', class: 'chip', 'data-scene': sc.id, onclick: function () { lib = { id: sc.id, p: {} }; Array.prototype.forEach.call(grid.children, function (b) { b.classList.toggle('on', b.dataset.scene === sc.id); }); drawFields(); } }, sc.name));
+      });
+      view.appendChild(UI.card('مشاهد احترافية جاهزة', UI.hint('اختار مشهد، اكتب كلامك ولونك — بيتبني ليرز عادية بحركة متظبطة تعدّل عليها.'), grid, fields));
+
+      // the whole edit, alone
+      var info = h('p', { class: 'hint' }), stepTxt = h('p', { class: 'hint' });
+      function drawInfo() { info.textContent = (ed.files.length ? ed.files.length + ' ملف' : 'مفيش فيديوهات') + ' · ' + (ed.music ? '🎵 ' + base(ed.music) : 'من غير مزيكا'); }
+      var brief = h('input', { class: 'grow', placeholder: 'البريف (اختياري): إعلان لمطعم، كلام حماسي، اسم البراند…', value: ed.brief, oninput: function (e) { ed.brief = e.target.value; } });
+      view.appendChild(UI.card('منتج الفيديو لوحده',
+        UI.hint('اختار اللقطات والمزيكا والستايل: بيشوف اللقطات ويرتبها ويختار أحلى لحظة في كل واحدة، يقطع على البيت، ويحط ترانزيشن وزووم وعناوين — كله ليرز في كومب جديد تعدّل عليها.'),
+        UI.row(UI.btn('اختار الفيديوهات/الصور', function () { var f = EF.pickFiles('اللقطات', ['mp4', 'mov', 'mkv', 'webm', 'm4v', 'png', 'jpg', 'jpeg']); if (f && f.length) { ed.files = f; drawInfo(); } }, 'small'),
+          UI.btn('🎵 مزيكا', function () { var f = EF.pickFile('المزيكا', ['mp3', 'wav', 'm4a', 'aac']); if (f) { ed.music = f; drawInfo(); } }, 'small')), info,
+        UI.row(h('label', null, 'الستايل'), UI.seg(S().editStyles().map(function (x) { return { value: x.id, label: x.name }; }), ed.style, function (v) { ed.style = v; })),
+        UI.row(h('label', null, 'المقاس'), UI.seg([{ value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }, { value: '1:1', label: '1:1' }, { value: '4:5', label: '4:5' }], ed.ratio, function (v) { ed.ratio = v; })),
+        UI.field('المدة', UI.slider(0, 120, 5, ed.duration, function (v) { return v ? v + 's' : 'زي المزيكا'; }, function (v) { ed.duration = v; })),
+        UI.row(brief),
+        UI.row(action('منتج', 'بيمنتج', function () {
+          return S().autoEdit({ files: ed.files, music: ed.music, style: ed.style, ratio: ed.ratio, duration: ed.duration, brief: ed.brief, onStep: function (m) { stepTxt.textContent = m; } }).then(function (r) {
+            stepTxt.textContent = r.cuts + ' قطع' + (r.bpm ? ' على ' + Math.round(r.bpm) + ' BPM' : '') + (r.note ? ' — ' + r.note : '');
+            ok('المونتاج جاهز في "' + r.comp + '" ✓');
+          });
+        }, 'primary')), stepTxt));
+      drawInfo();
+    }
+  });
+
   /* ——— مكتبتي (نفس مكتبة بريمير) ——— */
   EF.tabs.push({
     id: 'library', label: 'مكتبتي', title: 'مكتبتي',

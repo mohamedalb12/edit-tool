@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -111,6 +111,33 @@ test('text, expressions, 3D, routine, assistant, library: each button reaches AE
   await open('library'); await clear();
   await page.locator('#view .item', { hasText: 'whoosh' }).locator('button').click(); await page.waitForTimeout(200);
   assert.deepEqual(await call('libraryPlace'), { id: 'l1' });
+});
+
+test('director: describe → chat answer; reference attached; library scene with fields; auto edit with clips, music, style, ratio', async () => {
+  await open('director'); await clear();
+  await page.evaluate(() => { window.EF.test = window.EF.test || {}; window.EF.test.pickFiles = () => ['/refs/look.jpg']; });
+  await click('📎 ريفرانس');
+  assert.equal(await page.locator('#view .chips .chip', { hasText: 'look.jpg' }).count(), 1);
+  await page.locator('.seg button', { hasText: 'كومب جديد' }).click();
+  await page.fill('#view textarea', 'إنترو بلوجو بيلف');
+  await click('ابعت');
+  await page.waitForSelector('#view .msg.ai');
+  assert.deepEqual(await call('director'), { message: 'إنترو بلوجو بيلف', refs: ['/refs/look.jpg'], where: 'new' });
+  assert.match(await page.locator('#view .msg.ai').first().textContent(), /برتقالي وخط عريض/);
+  assert.equal(await page.locator('#view .chips .chip', { hasText: 'look.jpg' }).count(), 0, 'refs cleared after sending');
+  await page.locator('[data-scene="kinetic-title"]').click();
+  await page.fill('#view input[data-f="title"]', 'أهلا');
+  await click('اعمل المشهد');
+  assert.deepEqual(await call('libraryScene'), { id: 'kinetic-title', p: { title: 'أهلا' } });
+  await page.evaluate(() => { window.EF.test.pickFiles = () => ['/v/a.mp4', '/v/b.mp4']; window.EF.test.pickFile = () => '/m/song.mp3'; });
+  await click('اختار الفيديوهات/الصور'); await click('🎵 مزيكا');
+  await page.locator('.seg button', { hasText: 'سينمائي' }).click();
+  await page.locator('.seg button', { hasText: '9:16' }).click();
+  await click('منتج');
+  assert.deepEqual(await call('autoEdit'), { files: ['/v/a.mp4', '/v/b.mp4'], music: '/m/song.mp3', style: 'cinematic', ratio: '9:16', brief: '' });
+  await page.waitForTimeout(200);
+  assert.match(await page.locator('#view').textContent(), /16 قطع على 120 BPM/);
+  await shot('ae-04-director');
 });
 
 test('⌘K in After Effects lists AE tools (motion, curves, expressions, cameras)', async () => {

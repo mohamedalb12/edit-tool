@@ -28,6 +28,7 @@ class Prop {
   get value() { return this._v; }
   set value(v) { this._v = clone(v); }
   addKey(t) { let i = this.keys.findIndex(k => Math.abs(k.t - t) < 1e-6); if (i < 0) { this.keys.push({ t, v: clone(this.value), inI: KIT.LINEAR, outI: KIT.LINEAR, inE: null, outE: null }); this.keys.sort((a, b) => a.t - b.t); i = this.keys.findIndex(k => Math.abs(k.t - t) < 1e-6); } return i + 1; }
+  removeKey(i) { this.keys.splice(i - 1, 1); }
   setValueAtKey(i, v) { this.keys[i - 1].v = clone(v); }
   setValueAtTime(t, v) { this.setValueAtKey(this.addKey(t), v); }
   keyTime(i) { return this.keys[i - 1].t; }
@@ -77,6 +78,11 @@ function effect(matchName) {
   else if (matchName === 'ADBE Point Control') g.add(new Prop('ADBE Point Control-0001', 'Point', [0, 0], PVT.TwoD_SPATIAL));
   else if (matchName === 'ADBE Fill') { g.add(new Prop('ADBE Fill-0001', 'Fill Mask', 0, PVT.OneD)); g.add(new Prop('ADBE Fill-0002', 'Color', [1, 0, 0, 1], PVT.COLOR)); }
   else if (matchName === 'ADBE Gaussian Blur 2') g.add(new Prop('ADBE Gaussian Blur 2-0001', 'Blurriness', 0, PVT.OneD));
+  else if (/^ADBE (Glo2|Drop Shadow|Ramp|Tint|Motion Blur|Noise|Turbulent Displace)$/.test(matchName)) {
+    const n = { 'ADBE Glo2': 4, 'ADBE Drop Shadow': 5, 'ADBE Ramp': 4, 'ADBE Tint': 3, 'ADBE Motion Blur': 2, 'ADBE Noise': 1, 'ADBE Turbulent Displace': 3 }[matchName];
+    const colors = { 'ADBE Drop Shadow-0001': 1, 'ADBE Ramp-0002': 1, 'ADBE Ramp-0004': 1, 'ADBE Tint-0001': 1, 'ADBE Tint-0002': 1 };
+    for (let i = 1; i <= n; i++) { const m = matchName + '-000' + i; g.add(colors[m] ? new Prop(m, m, [0, 0, 0, 1], PVT.COLOR) : new Prop(m, m, 0, PVT.OneD)); }
+  }
   else return null;
   return g;
 }
@@ -86,6 +92,7 @@ function vectorItem(m) {
   if (m === 'ADBE Vector Group') { const g = new Group(m, 'Group 1', PropertyType.INDEXED_GROUP); g.add(new Group('ADBE Vectors Group', 'Contents', PropertyType.INDEXED_GROUP, vectorItem)); g.add(new Group('ADBE Vector Transform Group', 'Transform')); return g; }
   if (m === 'ADBE Vector Shape - Rect') { const g = new Group(m, 'Rectangle Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Rect Size', 'Size', [100, 100], PVT.TwoD)); g.add(new Prop('ADBE Vector Rect Roundness', 'Roundness', 0, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Ellipse') { const g = new Group(m, 'Ellipse Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Ellipse Size', 'Size', [100, 100], PVT.TwoD)); return g; }
+  if (m === 'ADBE Vector Shape - Star') { const g = new Group(m, 'Polystar Path 1', PropertyType.INDEXED_GROUP); ['ADBE Vector Star Type', 'ADBE Vector Star Points', 'ADBE Vector Star Outer Radius', 'ADBE Vector Star Inner Radius'].forEach(x => g.add(new Prop(x, x, 1, PVT.OneD))); return g; }
   if (m === 'ADBE Vector Graphic - Fill') { const g = new Group(m, 'Fill 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Fill Color', 'Color', [1, 0, 0, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Fill Opacity', 'Opacity', 100, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Graphic - Stroke') { const g = new Group(m, 'Stroke 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Stroke Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Stroke Width', 'Stroke Width', 2, PVT.OneD)); return g; }
   return null;
@@ -136,6 +143,7 @@ class Layer {
   moveBefore(other) { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.splice(L.indexOf(other), 0, this); }
   sourceRectAtTime() { return this._rect || { left: -100, top: -50, width: 200, height: 100 }; }
   duplicate() { return this; }
+  remove() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); }
 }
 // 2D layers report 2D position / scale values
 function twoD(L) { const t = L.transform; ['ADBE Anchor Point', 'ADBE Position'].forEach(m => { const p = t.property(m); p.value = p.value.slice(0, 2); p.propertyValueType = PVT.TwoD_SPATIAL; }); const s = t.property('ADBE Scale'); s.value = s.value.slice(0, 2); s.propertyValueType = PVT.TwoD; }
@@ -161,9 +169,9 @@ function loadAE({ dir } = {}) {
     file: null, renderQueue: null, rootFolder: null,
     get numItems() { return items.length; }, item(i) { return items[i - 1]; },
     get activeItem() { return project._active || null; },
-    items: { addFolder(name) { const f = Object.assign(new K.FolderItem(), { name, id: IDS++, parentFolder: project.rootFolder }); items.push(f); return f; } },
+    items: { addComp(name, w, hh, par, d, fps) { return newComp(name, { width: w, height: hh, fps, duration: d }); }, addFolder(name) { const f = Object.assign(new K.FolderItem(), { name, id: IDS++, parentFolder: project.rootFolder }); items.push(f); return f; } },
     save() { project.saved = (project.saved || 0) + 1; },
-    importFile(opts) { const f = Object.assign(new K.FootageItem(), { name: path.basename(opts.file.fsName), id: IDS++, file: opts.file, hasVideo: /\.(mp4|mov|png|jpg)$/i.test(opts.file.fsName), hasAudio: /\.(wav|mp3|mp4|mov)$/i.test(opts.file.fsName), mainSource: Object.assign(new K.FileSource(), { isStill: /\.(png|jpg)$/i.test(opts.file.fsName) }), parentFolder: project.rootFolder, usedIn: [] }); items.push(f); return f; },
+    importFile(opts) { const f = Object.assign(new K.FootageItem(), { name: path.basename(opts.file.fsName), id: IDS++, file: opts.file, hasVideo: /\.(mp4|mov|png|jpg)$/i.test(opts.file.fsName), hasAudio: /\.(wav|mp3|mp4|mov)$/i.test(opts.file.fsName), mainSource: Object.assign(new K.FileSource(), { isStill: /\.(png|jpg)$/i.test(opts.file.fsName) }), width: /\.(mp3|wav)$/i.test(opts.file.fsName) ? 0 : 1280, height: /\.(mp3|wav)$/i.test(opts.file.fsName) ? 0 : 720, duration: 10, parentFolder: project.rootFolder, usedIn: [] }); items.push(f); return f; },
     removeUnusedFootage() { const before = items.length; for (let i = items.length - 1; i >= 0; i--) if (items[i] instanceof K.FootageItem && !items[i].usedIn.length) items.splice(i, 1); return before - items.length; }
   };
   project.rootFolder = Object.assign(new K.FolderItem(), { name: 'root', id: 0 });
@@ -198,6 +206,7 @@ function loadAE({ dir } = {}) {
       },
       addCamera(name) { const L = push(new K.CameraLayer(c, name, 'camera'), false); L.root.add(new Group('ADBE Camera Options Group', 'Camera Options')).add(new Prop('ADBE Camera Zoom', 'Zoom', 2666.7, PVT.OneD)); return L; },
       addLight(name) { const L = push(new K.LightLayer(c, name, 'light'), false); L.lightType = 0; const o = L.root.add(new Group('ADBE Light Options Group', 'Light Options')); ['ADBE Light Intensity', 'ADBE Light Casts Shadows', 'ADBE Light Shadow Diffusion'].forEach(m => o.add(new Prop(m, m, 0, PVT.OneD))); o.add(new Prop('ADBE Light Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); return L; },
+      addSolid(color, name, w, hh) { const L = push(new K.AVLayer(c, name, 'solid')); L.source = { name, width: w, height: hh, mainSource: Object.assign(new K.SolidSource(), { color }) }; return L; },
       add(item) { const L = push(new K.AVLayer(c, item.name, 'footage')); L.source = item; if (item.usedIn) item.usedIn.push(c); return L; }
     };
     c.duplicate = () => {
@@ -250,7 +259,7 @@ function loadAE({ dir } = {}) {
   };
   const ctx = vm.createContext({
     app, File, ImportOptions, KeyframeEase, PropertyType, PropertyValueType: PVT, KeyframeInterpolationType: KIT,
-    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, ParagraphJustification: { LEFT_JUSTIFY: 7413 },
+    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, ParagraphJustification: { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7415, RIGHT_JUSTIFY: 7414 }, BlendingMode: { NORMAL: 5212, ADD: 5220, SCREEN: 5219, MULTIPLY: 5216, OVERLAY: 5224, SOFT_LIGHT: 5225, COLOR_DODGE: 5221 },
     ...K, Math, String, Number, Array, Object, Error, isFinite, parseInt, parseFloat
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'ae.jsx'), 'utf8'), ctx);

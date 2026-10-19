@@ -49,6 +49,12 @@
     libraryPlace: function (o) { return rec('libraryPlace', o, { name: 'x' }); },
     aiPlan: function (q) { return rec('aiPlan', q, { steps: [{ action: 'lowerThird', args: { name: 'أحمد' }, why: 'اسم' }, { action: 'cameraRig', args: { kind: 'push' }, why: 'كاميرا' }], note: '' }); },
     aiRun: function (steps) { return rec('aiRun', steps, { done: steps.map(function (s) { return s.action; }), failed: [] }); },
+    sceneLibrary: function () { return [{ id: 'kinetic-title', name: 'عنوان كاينتك', fields: ['title', 'subtitle', 'color'] }, { id: 'logo-reveal', name: 'ظهور لوجو', fields: ['title', 'color', 'file'] }]; },
+    editStyles: function () { return [{ id: 'energetic', name: 'سريع وحماسي' }, { id: 'cinematic', name: 'سينمائي' }]; },
+    director: function (o) { return rec('director', o, { action: o.refs.length ? 'build' : 'edit', say: 'تمام', reference: o.refs.length ? 'برتقالي وخط عريض' : '', result: { layers: 4, keys: 12, comp: 'Intro', warnings: [] } }); },
+    directorReset: function () { calls.push({ name: 'directorReset' }); return true; },
+    libraryScene: function (id, p) { return rec('libraryScene', { id: id, p: p }, { layers: 4, keys: 9, comp: 'Kinetic Title', warnings: [] }); },
+    autoEdit: function (o) { o.onStep && o.onStep('بيبني'); return rec('autoEdit', { files: o.files, music: o.music, style: o.style, ratio: o.ratio, brief: o.brief }, { comp: 'EditFast Edit', cuts: 16, bpm: 120, note: '' }); },
     selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); }
   };
   window.EF_TEST = { node: load, services: S, host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'After Effects (test)' } : {}); } };

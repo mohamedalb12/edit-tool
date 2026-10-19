@@ -648,3 +648,4 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .mo-grid { margin: 2px 0 8px; }
 .mgt-fields .field { margin: 6px 0; }
 .mgt-fields input[type=color] { width: 44px; height: 26px; padding: 0; border: 0; background: none; }
+.chip button.x { border: 0; background: none; padding: 0 2px; font-size: 11px; }
