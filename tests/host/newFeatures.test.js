@@ -517,3 +517,34 @@ test('Dropbox links: info off the link, only the chosen part comes down, folders
     await assert.rejects(S.downloadInfo('https://www.dropbox.com/scl/fi/locked/x.mp4?rlkey=k'), /Anyone with the link/);
   } finally { srv.close(); }
 });
+
+test('مكتبتي: files saved as "folders" by an old version become one chip, remove them or clear all; a MOGRT shows its own preview and takes your text', async () => {
+  const lib = path.join(TMP, 'lib-files-' + Date.now()); fs.mkdirSync(path.join(lib, 'Leaks'), { recursive: true });
+  const leak = path.join(lib, 'Leaks', 'Leak 3.mp4'); fs.copyFileSync(video('lib-leak.mp4', 3), leak);
+  const click = path.join(lib, 'Click Digital 02.wav'); fs.copyFileSync(makeAudio('lib-click.wav', [{ tone: 900, dur: 0.3 }]), click);
+  const thumb = require('../../core/util').makePng(32, 18, [255, 0, 0, 255]);
+  const mogrt = path.join(lib, 'Text 14.mogrt');
+  fs.writeFileSync(mogrt, require('../../core/zip').create([{ name: 'definition.json', data: Buffer.from('{}') }, { name: 'project.aegraphic', data: Buffer.alloc(4096, 7) }, { name: 'thumb.png', data: thumb }]));
+  const { S, seq } = world({ clip: video('lib-main.mp4', 8), settings: { libraryDirs: [path.join(lib, 'Leaks'), leak, click], libraryFiles: [] } });
+  require('../../core/library').saveIndex(require('../../core/config').dataDir(), []);
+  const st = S.libraryStats();
+  assert.deepEqual(st.dirs, [path.join(lib, 'Leaks')], 'only real folders stay chips');
+  assert.deepEqual(st.files.sort(), [click, leak].sort());
+  await S.libraryAdd([mogrt]);
+  assert.ok(S.libraryStats().files.includes(mogrt), 'a dropped file joins the files list, not the folders');
+  const r = await S.libraryRescan();
+  assert.equal(r.total, 3, 'rescan keeps folders + single files (leak counted once)');
+  const m = S.libraryItems().find(x => x.ext === 'mogrt');
+  const tf = await S.libraryThumb(m.id);
+  assert.ok(tf && fs.readFileSync(tf).equals(thumb), 'the MOGRT\'s own thumb.png');
+  const p = await S.libraryPlace({ id: m.id, time: 1, text: 'أهلا بيكم' });
+  assert.equal(p.textSet, true);
+  const clip = seq.v.flatMap(t => t.items).find(c => /Text 14/.test(c.projectItem.mediaPath));
+  assert.match(clip.mgtComp.properties[0].getValue(), /أهلا بيكم/);
+  const rf = S.libraryRemoveFiles();
+  assert.equal(rf.removed, 3); assert.deepEqual(S.libraryStats().files, []);
+  assert.ok(fs.existsSync(click) && fs.existsSync(mogrt), 'nothing deleted from disk');
+  assert.equal(S.libraryItems().length, 1, 'the folder\'s item stays');
+  S.libraryClear();
+  assert.equal(S.libraryItems().length, 0); assert.deepEqual(S.libraryStats().dirs, []);
+});

@@ -43,6 +43,15 @@
       }
       function drawDirs() {
         UI.empty(dirBox);
+        var files = stats.files || [];
+        if (files.length) dirBox.appendChild(h('span', { class: 'chip dir', title: files.join('\n') }, '📄 ' + files.length + ' ملف لوحده',
+          h('button', { type: 'button', class: 'x', title: 'شيل الملفات اللي اتضافت لوحدها من المكتبة (مش هتتمسح من الجهاز)', onclick: function () {
+            var r = S.libraryRemoveFiles(); UI.toast('اتشال ' + r.removed + ' ملف — فاضل ' + r.total + ' عنصر'); refreshStats(); draw();
+          } }, '✕')));
+        if ((stats.dirs || []).length + files.length > 1) dirBox.appendChild(h('button', { type: 'button', class: 'chip lib-clear', title: 'فضّي المكتبة كلها (الملفات مش هتتمسح من الجهاز)', onclick: function () {
+          if (!window.confirm('تشيل كل الفولدرات والملفات من مكتبتي؟ (مش هيتمسح حاجة من الجهاز)')) return;
+          S.libraryClear(); thumbs = {}; UI.toast('المكتبة فضيت'); refreshStats(); draw();
+        } }, '🗑 شيل الكل'));
         (stats.dirs || []).forEach(function (d) {
           dirBox.appendChild(h('span', { class: 'chip dir ltr', title: d }, '📁 ' + d.split(/[\\/]/).filter(Boolean).pop(),
             h('button', { type: 'button', class: 'x', title: 'شيل الفولدر ده من المكتبة (الملفات مش هتتمسح)', onclick: function () {
@@ -60,9 +69,10 @@
         Promise.resolve(S.libraryThumb(id)).then(function (f) { thumbs[id] = f || false; put(f); }).catch(function () { thumbs[id] = false; });
       }
 
+      var mogrtText = {}; // id → the text typed for that MOGRT
       function place(it, at) {
         return UI.safe(at === 'markers' ? 'بيحط على الماركرز' : 'بيحط', function () {
-          return S.libraryPlace({ id: it.id, at: at || 'playhead' }).then(function (r) { UI.toast(it.name + (r && r.placed > 1 ? ' على ' + r.placed + ' ماركر ✓' : ' اتحط ✓')); refreshStats(); });
+          return S.libraryPlace({ id: it.id, at: at || 'playhead', text: it.ext === 'mogrt' ? (mogrtText[it.id] || undefined) : undefined }).then(function (r) { UI.toast(it.name + (r && r.placed > 1 ? ' على ' + r.placed + ' ماركر ✓' : ' اتحط ✓')); refreshStats(); });
         });
       }
 
@@ -123,7 +133,9 @@
         var audio = it.category === 'sfx' || it.category === 'music';
         details.appendChild(UI.card(null,
           h('div', { class: 'row' }, h('b', { class: 'grow' }, h('bdi', null, it.name)), h('span', { class: 'hint ltr' }, it.ext.toUpperCase() + (it.width ? ' · ' + it.width + '×' + it.height : '') + (it.duration ? ' · ' + it.duration.toFixed(2) + 's' : '') + (it.alpha ? ' · شفاف' : ''))),
-          h('div', { class: 'hint ltr lib-path' }, it.path),
+          it.ext === 'mogrt'
+            ? UI.row(h('input', { class: 'grow', placeholder: 'اكتب الكلام اللي هيظهر في القالب (اختياري)', value: mogrtText[it.id] || '', oninput: function (e) { mogrtText[it.id] = e.target.value; } }))
+            : h('div', { class: 'hint ltr lib-path' }, it.path),
           UI.row(tags),
           UI.row(UI.btn('حط عند رأس التشغيل', function () { place(it); }, 'primary small'),
             UI.btn(audio ? 'على كل الماركرز' : 'على كل الماركرز', function () { place(it, 'markers'); }, 'small'),

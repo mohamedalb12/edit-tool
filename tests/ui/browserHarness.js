@@ -20,7 +20,7 @@
   var settings = {
     keys: { openrouter: 'sk-or-test', elevenlabs: 'sk_el', pexels: 'px', pixabay: '' }, paths: { ffmpeg: '', whisper: '', whisperModel: '', baseMogrt: '' },
     models: {}, defaultModel: '', agentLevel: 'strong', dialect: 'egyptian', style: null,
-    quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true }, captions: { maxWords: 4, maxDuration: 2.5, singleWord: false }, libraryDirs: ['/lib']
+    quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true }, captions: { maxWords: 4, maxDuration: 2.5, singleWord: false }, libraryDirs: ['/lib'], libraryFiles: ['/x/Leak 3.mp4', '/x/Click 02.wav']
   };
   var seq = { name: 'Main', id: 's1', fps: 25, width: 1920, height: 1080, duration: 30, playhead: 2, markers: [{ time: 4, name: 'm' }],
     video: [{ index: 0, name: 'V1', clips: [{ name: 'talk', start: 0, end: 30, inPoint: 0, mediaPath: '/m/talk.mp4' }] }, { index: 1, name: 'V2', clips: [{ name: 'camB', start: 0, end: 30 }] }],
@@ -64,7 +64,9 @@
       { id: 'l4', name: 'lower third red', category: 'graphics', sub: 'mogrt', ext: 'mogrt', path: '/lib/Titles/lower third red.mogrt', duration: 0, added: 4, uses: 0, tags: [] }
     ],
     librarySearch: function (q) { calls.push({ name: 'librarySearch', args: q }); return load('library').search(S._lib, q); },
-    libraryStats: function () { var L = load('library'); return Object.assign(L.stats(S._lib), { dirs: settings.libraryDirs, categories: L.CATEGORIES }); },
+    libraryStats: function () { var L = load('library'); return Object.assign(L.stats(S._lib), { dirs: settings.libraryDirs, files: settings.libraryFiles || [], categories: L.CATEGORIES }); },
+    libraryRemoveFiles: function () { var n = (settings.libraryFiles || []).length; settings.libraryFiles = []; calls.push({ name: 'libraryRemoveFiles' }); return { removed: n, total: S._lib.length }; },
+    libraryClear: function () { settings.libraryDirs = []; settings.libraryFiles = []; S._lib = []; calls.push({ name: 'libraryClear' }); return { total: 0 }; },
     libraryAdd: function (d) { settings.libraryDirs = settings.libraryDirs.concat(d); return rec('libraryAdd', d, { added: 1, scanned: 4, total: S._lib.length }); },
     libraryRescan: function (p) { if (p) p(1); return rec('libraryRescan', null, { added: 0, scanned: 4, total: S._lib.length }); },
     libraryRemoveDir: function (d) { settings.libraryDirs = settings.libraryDirs.filter(function (x) { return x !== d; }); calls.push({ name: 'libraryRemoveDir', args: d }); return { total: S._lib.length, dirs: settings.libraryDirs }; },

@@ -101,3 +101,15 @@ test('preview stream for YouTube & co: yt-dlp -g with a ready-made (picture + so
   await assert.rejects(Y.streamUrl(fake, 'https://youtu.be/bad'), /البريفيو مش متاح/);
   fs2.unlinkSync(fake);
 });
+
+test('snapToOnsets: phrases move to the voice, never overlap, stay put with nothing nearby', () => {
+  const C = require('../../core/captions');
+  const w = [{ text: 'a', start: 1.5, end: 2 }, { text: 'b', start: 2.05, end: 2.6 }, { text: 'c', start: 3.0, end: 3.5 }, { text: 'd', start: 9, end: 9.5 }];
+  const r = C.snapToOnsets(w, [1.0, 2.8, 20]);
+  assert.deepEqual(r.words.map(x => +x.start.toFixed(2)), [1.0, 1.55, 2.8, 9], 'a+b one phrase (−0.5), c → 2.8, d has nothing near');
+  assert.ok(r.words[1].end <= r.words[2].start, 'no overlap');
+  assert.deepEqual(C.snapToOnsets(w, []).words, w);
+  // an onset later than the phrase may only push it up to the next phrase
+  const r2 = C.snapToOnsets([{ text: 'x', start: 1, end: 1.9 }, { text: 'y', start: 2.2, end: 3 }], [1.3]);
+  assert.ok(r2.words[0].end <= 2.2 + 1e-9);
+});

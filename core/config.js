@@ -13,8 +13,9 @@ const DEFAULTS = {
   dialect: 'egyptian',
   style: null, // ذوقك — بيتملى مرة واحدة
   quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true },
-  captions: { maxWords: 4, maxDuration: 2.5, singleWord: false },
+  captions: { maxWords: 4, maxDuration: 2.5, singleWord: false, snap: true },
   libraryDirs: [],
+  libraryFiles: [],
   favorites: {},
   layeredScenes: false, // Pro scenes land as one clip; on = a nested sequence with one track per layer (slower)
   autoUpdate: true,

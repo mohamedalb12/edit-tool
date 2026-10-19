@@ -250,6 +250,12 @@ test('مكتبتي: its own tool — categories with counts, favourites, recent,
   assert.ok(await page.locator('.lib-dirs .chip', { hasText: 'folder' }).count() >= 1);
   await page.locator('.lib-dirs .chip', { hasText: 'folder' }).locator('.x').click();
   assert.equal(await page.evaluate(() => window.__calls.find(c => c.name === 'libraryRemoveDir').args), '/picked/folder');
+  // single files are one chip (not one per file), removable in one go
+  assert.equal(await page.locator('.lib-dirs .chip', { hasText: '2 ملف لوحده' }).count(), 1);
+  assert.equal(await page.locator('.lib-dirs .chip', { hasText: 'Leak 3' }).count(), 0);
+  await page.locator('.lib-dirs .chip', { hasText: 'ملف لوحده' }).locator('.x').click();
+  assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'libraryRemoveFiles')));
+  assert.equal(await page.locator('.lib-dirs .chip', { hasText: 'ملف لوحده' }).count(), 0);
   // thumbnails load lazily
   await page.waitForFunction(() => document.querySelectorAll('.lib-tile .thumb img').length >= 2);
   await shot('43-library');

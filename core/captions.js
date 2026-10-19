@@ -42,4 +42,36 @@ function parseSRT(text) {
   return out;
 }
 
-module.exports = { buildCues, toSRT, parseSRT };
+/**
+ * Whisper's word times run a little late (and drift). Each spoken phrase (words with < gap between them) is moved so
+ * it starts where the voice really starts: the nearest speech onset heard in the audio, up to maxEarly sooner or
+ * maxLate later. Phrases with no onset nearby stay put; phrases never overlap. Pure: onsets are timeline seconds.
+ */
+function snapToOnsets(words, onsets, { gap = 0.3, maxEarly = 1.2, maxLate = 0.35 } = {}) {
+  if (!words.length || !onsets || !onsets.length) return { words, moved: 0 };
+  const on = onsets.slice().sort((a, b) => a - b);
+  const out = words.map(w => ({ ...w }));
+  const phrases = [];
+  for (let i = 0; i < out.length; i++) {
+    if (!i || out[i].start - out[i - 1].end >= gap) phrases.push([i, i]); else phrases[phrases.length - 1][1] = i;
+  }
+  let prevEnd = -Infinity, moved = 0;
+  for (let p = 0; p < phrases.length; p++) {
+    const [a, b] = phrases[p], st = out[a].start;
+    let best = null;
+    for (const o of on) {
+      if (o < st - maxEarly) continue;
+      if (o > st + maxLate) break;
+      if (o < prevEnd + 0.02) continue;
+      if (best === null || Math.abs(o - st) < Math.abs(best - st)) best = o;
+    }
+    let d = best === null ? 0 : best - st;
+    const nextStart = p + 1 < phrases.length ? out[phrases[p + 1][0]].start : Infinity;
+    if (d > 0 && out[b].end + d > nextStart) d = Math.max(0, nextStart - out[b].end); // never run into the next phrase
+    if (Math.abs(d) >= 0.02) { moved++; for (let i = a; i <= b; i++) { out[i].start = Math.max(0, out[i].start + d); out[i].end = Math.max(out[i].start + 0.02, out[i].end + d); } }
+    prevEnd = out[b].end;
+  }
+  return { words: out, moved, phrases: phrases.length };
+}
+
+module.exports = { buildCues, toSRT, parseSRT, snapToOnsets };

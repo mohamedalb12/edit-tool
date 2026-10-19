@@ -30,7 +30,7 @@ function create(entries) {
 }
 
 /** zip Buffer → [{ name, data, mode }] (stored + deflate; CRC checked; unsafe paths refused) */
-function read(buf) {
+function read(buf, only) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('ملف التحديث مش zip سليم');
@@ -42,7 +42,7 @@ function read(buf) {
     const attr = buf.readUInt32LE(p + 38), lho = buf.readUInt32LE(p + 42);
     const name = buf.slice(p + 46, p + 46 + nlen).toString('utf8');
     p += 46 + nlen + xlen + clen;
-    if (name.endsWith('/')) continue;
+    if (name.endsWith('/') || (only && !only(name))) continue;
     if (/(^|[\\/])\.\.([\\/]|$)/.test(name) || /^([a-zA-Z]:|[\\/])/.test(name)) throw new Error('مسار مش آمن جوه التحديث: ' + name);
     const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
     const raw = buf.slice(start, start + csize);

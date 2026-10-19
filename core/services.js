@@ -51,6 +51,10 @@ class Services {
     this.fetch = fetchImpl || nodeFetch; // Node HTTP: no CORS problems inside Premiere
     this.log = log || (() => {});
     this.reload();
+    // 1.5.8: phrases snap to the voice now; an old automatic offset would push them late again
+    if (this.settings.captions && !this.settings.captions.snapV1) {
+      try { this.saveSettings({ captions: { ...this.settings.captions, offset: 0, snap: this.settings.captions.snap !== false, snapV1: true } }); } catch (_) {}
+    }
     this.transcript = null; // { seqId, words (timeline time), dialect }
     this.brollCache = new Map();
   }
@@ -629,19 +633,8 @@ class Services {
    */
   async captionSync({ apply = false } = {}) {
     const t = await this.ensureTranscript();
-    const { clips } = await this.audioClips();
-    const onsets = [];
-    for (const c of clips.slice(0, 40)) {
-      const { a, b } = transcribeMod.sourceSpan(c);
-      let thr = -40;
-      try {
-        const { stderr } = await ff.run(this.ffmpeg(), ['-hide_banner', '-nostdin', '-ss', String(a), '-t', String(b - a), '-i', c.mediaPath, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
-        const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(stderr)); if (m) thr = Math.min(-30, Math.max(-70, +m[1] - 16));
-      } catch (_) {}
-      const sil = await silence.detectSilence(this.ffmpeg(), c.mediaPath, { thresholdDb: thr, minSilence: 0.25, start: a, duration: b - a }).catch(() => []);
-      const sp = Math.abs(c.speed || 1) || 1;
-      sil.forEach(x => { const tt = c.start + x.end / sp; if (tt > c.start + 0.05 && tt < c.end - 0.05) onsets.push(tt); });
-    }
+    const { clips } = await this.audioClips(t.trackIndex);
+    const onsets = await this.speechOnsets(clips);
     const W = t.words, starts = [];
     for (let i = 0; i < W.length; i++) if (i === 0 || W[i].start - W[i - 1].end >= 0.35) starts.push(W[i].start);
     const deltas = [];
@@ -659,10 +652,58 @@ class Services {
     return r;
   }
 
+  /**
+   * Timeline times where the voice starts after a pause (ffmpeg silencedetect, threshold relative to the
+   * recording's own level). One pass per source file span, however many pieces it was cut into; cached per layout.
+   */
+  async speechOnsets(clips) {
+    const sig = clipSig(clips);
+    if (this._onsets && this._onsets.sig === sig) return this._onsets.list;
+    const spans = new Map();
+    for (const c of clips) {
+      const { a, b } = transcribeMod.sourceSpan(c), sp = spans.get(c.mediaPath);
+      if (!sp) spans.set(c.mediaPath, { a, b }); else { sp.a = Math.min(sp.a, a); sp.b = Math.max(sp.b, b); }
+    }
+    const heard = new Map(); // file → source-time onsets
+    for (const [file, sp] of spans) {
+      let thr = -40;
+      try {
+        const { stderr } = await ff.run(this.ffmpeg(), ['-hide_banner', '-nostdin', '-ss', String(sp.a), '-t', String(sp.b - sp.a), '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(stderr)); if (m) thr = Math.min(-30, Math.max(-70, +m[1] - 16));
+      } catch (_) {}
+      const sil = await silence.detectSilence(this.ffmpeg(), file, { thresholdDb: thr, minSilence: 0.2, start: sp.a, duration: sp.b - sp.a }).catch(() => []);
+      // silencedetect times are relative to the -ss start: back to source time
+      heard.set(file, sil.map(x => sp.a + x.end));
+    }
+    const list = [];
+    for (const c of clips) {
+      const sp = Math.abs(c.speed || 1) || 1;
+      for (const s of heard.get(c.mediaPath) || []) {
+        const tt = c.start + (s - c.inPoint) / sp;
+        if (tt > c.start + 0.02 && tt < c.end - 0.05) list.push(tt);
+      }
+    }
+    list.sort((x, y) => x - y);
+    this._onsets = { sig, list };
+    return list;
+  }
+
+  /** the words for any caption: each phrase snapped to where the voice starts (setting "snap"), then the manual offset */
+  async syncedCaptionWords(t) {
+    let words = t.words;
+    if ((this.settings.captions || {}).snap !== false && this.tools.ffmpeg) {
+      try {
+        const { clips } = await this.audioClips(t.trackIndex);
+        words = captions.snapToOnsets(words, await this.speechOnsets(clips)).words;
+      } catch (_) { /* no audio to listen to: whisper's times as they are */ }
+    }
+    return this.captionWords(words);
+  }
+
   async addCaptions(opts = {}) {
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) };
     const t = await this.ensureTranscript();
-    const cues = captions.buildCues(this.captionWords(t.words), c);
+    const cues = captions.buildCues(await this.syncedCaptionWords(t), c);
     const file = path.join(config.cacheDir('captions'), `captions-${hash(JSON.stringify(cues))}.srt`);
     fs.writeFileSync(file, '\ufeff' + captions.toSRT(cues), 'utf8');
     await this.host('createCaptions', { srtPath: file, start: 0 });
@@ -678,7 +719,7 @@ class Services {
     if (this.settings.style) { st.accent = st.accent || this.settings.style.accent; st.box = st.box || this.settings.style.primary; }
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)), keepWords: true };
     if (st.style === 'bold' && !opts.maxWords) c.maxWords = Math.min(c.maxWords || 4, 3);
-    const cues = captions.buildCues(this.captionWords(t.words), c);
+    const cues = captions.buildCues(await this.syncedCaptionWords(t), c);
     if (!cues.length) throw new Error('مفيش كلام اتفرّغ');
     const key = hash(JSON.stringify({ cues, st, w: s.width, h: s.height, fps: s.fps }));
     // still captions are PNGs drawn in the panel: no ffmpeg needed
@@ -700,7 +741,7 @@ class Services {
   /** Translate the captions (timing kept) and add them as another caption track. */
   async translateCaptions({ lang = 'English', place = true } = {}) {
     const t = await this.ensureTranscript();
-    const cues = captions.buildCues(this.captionWords(t.words), this.settings.captions);
+    const cues = captions.buildCues(await this.syncedCaptionWords(t), this.settings.captions);
     const out = [];
     for (let i = 0; i < cues.length; i += 60) {
       const part = cues.slice(i, i + 60);
@@ -717,7 +758,7 @@ class Services {
   async exportSrt(dir, opts = {}) {
     const t = await this.ensureTranscript();
     const file = path.join(dir, 'captions.srt');
-    fs.writeFileSync(file, '\ufeff' + captions.toSRT(captions.buildCues(this.captionWords(t.words), { ...this.settings.captions, ...opts })), 'utf8');
+    fs.writeFileSync(file, '\ufeff' + captions.toSRT(captions.buildCues(await this.syncedCaptionWords(t), { ...this.settings.captions, ...opts })), 'utf8');
     return file;
   }
 
@@ -1246,14 +1287,44 @@ ${JSON.stringify(lite)}
     const items = await library.scan(dirs, { probe, onProgress, known });
     const merged = library.mergeIndex(known, items);
     library.saveIndex(config.dataDir(), merged);
-    const dirsKnown = new Set(this.settings.libraryDirs || []);
-    dirs.forEach(d => { try { if (fs.statSync(d).isDirectory()) dirsKnown.add(d); } catch (_) {} });
-    this.saveSettings({ libraryDirs: Array.from(dirsKnown) });
+    // folders are remembered as folders; single files dropped in are kept in their own list (one chip, not one each)
+    const L = this.libraryLists(), dirsKnown = new Set(L.dirs), filesKnown = new Set(L.files);
+    dirs.forEach(d => { try { if (fs.statSync(d).isDirectory()) dirsKnown.add(d); else if (library.classifyFile(d)) filesKnown.add(d); } catch (_) {} });
+    this.saveSettings({ libraryDirs: Array.from(dirsKnown), libraryFiles: Array.from(filesKnown) });
     const before = new Set(known.map(x => x.id));
     return { added: items.filter(x => !before.has(x.id)).length, scanned: items.length, total: merged.length };
   }
   /** rescan every library folder (fast: unchanged files are skipped), drop what was deleted from disk */
-  async libraryRescan(onProgress) { return this.libraryAdd(this.settings.libraryDirs || [], onProgress); }
+  async libraryRescan(onProgress) { const L = this.libraryLists(); return this.libraryAdd([...L.dirs, ...L.files.filter(f => fs.existsSync(f))], onProgress); }
+  /**
+   * The library's folders and single files. Older versions could save a dropped FILE as a "folder" (a chip for
+   * every file): those are moved to the files list here, once.
+   */
+  libraryLists() {
+    const dirs = [], files = new Set(this.settings.libraryFiles || []);
+    let moved = false;
+    for (const d of this.settings.libraryDirs || []) {
+      let st = null; try { st = fs.statSync(d); } catch (_) {}
+      if (st && st.isFile()) { files.add(d); moved = true; } else dirs.push(d); // missing → maybe an unplugged drive: keep
+    }
+    if (moved) this.saveSettings({ libraryDirs: dirs, libraryFiles: Array.from(files) });
+    return { dirs, files: Array.from(files) };
+  }
+  /** take the single files (not folders) out of the library — nothing is deleted from disk */
+  libraryRemoveFiles() {
+    const L = this.libraryLists(), files = new Set(L.files);
+    const inDir = f => L.dirs.some(d => f.startsWith(String(d).replace(/[\\/]+$/, '') + path.sep));
+    const items = this.libraryItems().filter(x => !files.has(x.path) || inDir(x.path)); // still in one of the folders: stays
+    library.saveIndex(config.dataDir(), items);
+    this.saveSettings({ libraryFiles: [] });
+    return { total: items.length, removed: files.size };
+  }
+  /** empty the library (folders, files, favourites, tags) — nothing is deleted from disk */
+  libraryClear() {
+    library.saveIndex(config.dataDir(), []);
+    this.saveSettings({ libraryDirs: [], libraryFiles: [] });
+    return { total: 0 };
+  }
   libraryRemoveDir(dir) {
     const norm = d => String(d).replace(/[\\/]+$/, '');
     const keep = (this.settings.libraryDirs || []).filter(d => norm(d) !== norm(dir));
@@ -1262,7 +1333,7 @@ ${JSON.stringify(lite)}
     this.saveSettings({ libraryDirs: keep });
     return { total: items.length, dirs: keep };
   }
-  libraryStats() { return { ...library.stats(this.libraryItems()), dirs: this.settings.libraryDirs || [], categories: library.CATEGORIES }; }
+  libraryStats() { const L = this.libraryLists(); return { ...library.stats(this.libraryItems()), dirs: L.dirs, files: L.files, categories: library.CATEGORIES }; }
   /** favourite / tags on one item (kept across rescans) */
   libraryUpdate({ id, fav, tags }) {
     const items = this.libraryItems(), it = items.find(x => x.id === id);
@@ -1282,7 +1353,16 @@ ${JSON.stringify(lite)}
     const dir = config.cacheDir('libthumbs'), audio = library.AUDIO.includes(it.ext);
     const out = path.join(dir, `${it.id}-${Math.round(it.mtime || 0)}.${audio ? 'png' : 'jpg'}`);
     if (fs.existsSync(out)) return out;
-    if (it.ext === 'mogrt' || it.ext === 'prfpset') return null;
+    if (it.ext === 'mogrt') {
+      // a .mogrt is a zip with its own preview picture (thumb.png)
+      try {
+        const e = require('./zip').read(fs.readFileSync(it.path), n => /(^|\/)thumb\.(png|jpe?g)$/i.test(n))[0];
+        if (!e) return null;
+        const f = out.replace(/\.jpg$/, path.extname(e.name).toLowerCase());
+        fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, e.data); return f;
+      } catch (_) { return null; }
+    }
+    if (it.ext === 'prfpset') return null;
     const args = ['-hide_banner', '-loglevel', 'error', '-y'];
     if (audio) args.push('-i', it.path, '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=320x90:colors=#A78BFA', '-frames:v', '1', out);
     else if (library.VIDEO.includes(it.ext)) args.push('-ss', String(Math.min(1, (it.duration || 2) / 3)), '-i', it.path, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', out);
@@ -1294,7 +1374,7 @@ ${JSON.stringify(lite)}
    * Put an item on the timeline: at the playhead (default), at every marker, or at the In point.
    * .mogrt → an Essential Graphics clip; presets can't be applied by script (drag them onto the clip).
    */
-  async libraryPlace({ id, time, at = 'playhead' }) {
+  async libraryPlace({ id, time, at = 'playhead', text } = {}) {
     const items = this.libraryItems(), it = items.find(x => x.id === id);
     if (!it) throw new Error('العنصر مش في المكتبة');
     if (!fs.existsSync(it.path)) throw new Error('الملف اتمسح أو اتنقل من مكانه — دوس "حدّث المكتبة"');
@@ -1306,7 +1386,7 @@ ${JSON.stringify(lite)}
     if (at === 'in' && s.inOut && s.inOut[0] !== null) times = [s.inOut[0]];
     let r;
     if (it.ext === 'mogrt') {
-      for (const t of times) r = await this.host('importMGT', { path: it.path, time: t, duration: 5 });
+      for (const t of times) r = await this.host('importMGT', { path: it.path, time: t, duration: 5, text: text || undefined });
     } else if (times.length > 1) {
       r = await this.host('placeFiles', { items: times.map(t => ({ path: it.path, time: t })), kind, bin: 'EditFast/Library/' + it.category, minTrack: kind === 'audio' ? 0 : 1 });
     } else {
