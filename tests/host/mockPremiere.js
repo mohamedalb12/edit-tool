@@ -36,6 +36,7 @@ class Property {
   constructor(name, value) { this.displayName = name; this.value = value; this.varying = false; this.keys = []; this.log = []; }
   getValue() { return this.value; }
   setValue(v) { this.value = v; this.log.push(['setValue', v]); }
+  setColorValue(a, r, g, b) { this.value = [a, r, g, b]; this.log.push(['setColorValue', a, r, g, b]); }
   isTimeVarying() { return this.varying; }
   setTimeVarying(v) { this.varying = v; if (!v) this.keys = []; }
   addKey(t) { if (!this.varying) throw new Error('not time varying'); if (!this.keys.find(k => Math.abs(k.t - t) < EPS)) this.keys.push({ t, v: this.value, interp: 0 }); this.keys.sort((a, b) => a.t - b.t); }
@@ -173,7 +174,7 @@ class Sequence {
     const item = this.project.importOne(p, this.project.root);
     const s = parseFloat(ticks) / TICKS;
     const clip = this.v[vTrack].add({ projectItem: item, start: s, end: s + 10, inPoint: 0 });
-    clip.mgtComp = new Component('Graphic Parameters', 'AE.ADBE Capsule', [new Property('Main Title', JSON.stringify({ textEditValue: 'Title', fontEditValue: ['Arial'], fontSizeEditValue: [80] })), new Property('Color', '#fff')]);
+    clip.mgtComp = new Component('Graphic Parameters', 'AE.ADBE Capsule', [new Property('Main Title', JSON.stringify({ textEditValue: 'Title', fontEditValue: ['Arial'], fontSizeEditValue: [80] })), new Property('Color', '#fff'), new Property('لون 1', [255, 249, 115, 22]), new Property('سرعة الحركة %', 100), new Property('الكلام', JSON.stringify({ textEditValue: 'Text' }))]);
     return clip;
   }
   createCaptionTrack(item, start, fmt) { this.captionTracks.push({ item: item.name, start, fmt }); return true; }

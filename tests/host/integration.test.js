@@ -260,7 +260,7 @@ test('test every AI model: reply + tool calling for the editor models, catalog c
   const { S } = world({ fetchImpl, settings: { defaultModel: 'good/text', models: { agent_strong: 'good/tools', agent_max: 'good/tools', chapters: 'broken/model' } } });
   const live = [];
   const res = await S.testModels({ onResult: r => live.push(r.feature) });
-  assert.equal(res.length, 14); assert.equal(live.length, 14);
+  assert.equal(res.length, 15); assert.equal(live.length, 15);
   const by = Object.fromEntries(res.map(r => [r.feature, r]));
   assert.equal(by.agent_strong.ok, true); assert.equal(by.agent_strong.tools, true); assert.match(by.agent_strong.reply, /set_playhead/);
   assert.equal(by.sfx_translate.ok, true); assert.equal(by.sfx_translate.tools, null); assert.equal(by.sfx_translate.listed, true);

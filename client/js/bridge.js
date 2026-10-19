@@ -11,6 +11,10 @@
   }
   // client/index.html → extension root
   EF.extRoot = decodePath(location.pathname).replace(/\/client\/[^/]*$/, '');
+  // the same panel code runs in Premiere (host/host.jsx) and After Effects (host/ae.jsx)
+  EF.app = window.EF_APP || 'premiere';
+  EF.hostScript = EF.app === 'ae' ? 'host/ae.jsx' : 'host/host.jsx';
+  EF.appName = EF.app === 'ae' ? 'أفتر إفكتس' : 'بريمير';
 
   EF.node = function (mod) {
     if (EF.test && EF.test.node) return EF.test.node(mod);
@@ -55,7 +59,7 @@
   /** load host.jsx and report a readable reason when it fails (syntax error, wrong path, ExtendScript off) */
   EF.loadHostScript = function () {
     if (!EF.isCEP) return Promise.resolve();
-    var p = (EF.extRoot + '/host/host.jsx').replace(/\\/g, '/');
+    var p = (EF.extRoot + '/' + EF.hostScript).replace(/\\/g, '/');
     return EF.evalScript('(function(){try{$.evalFile("' + p + '");return typeof ef_call==="function"?"ok":"ef_call missing";}catch(e){return "ERR "+e.message+" (line "+e.line+")";}})()').then(function (r) {
       EF.hostLoaded = r === 'ok' ? true : String(r || 'no answer');
       if (EF.hostLoaded !== true) throw new Error('سكريبت الإضافة جوه بريمير ماتحمّلش: ' + EF.hostLoaded);

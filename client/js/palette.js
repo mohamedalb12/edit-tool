@@ -16,6 +16,7 @@
 
   /** everything the palette can do: screens, EditFast actions, motion presets, and Premiere's own effects */
   function items() {
+    if (EF.paletteItems) return EF.paletteItems(); // After Effects: its own tools
     var S = EF.services, out = [];
     (EF.GROUPS || []).forEach(function (g) {
       g.members.forEach(function (m) {
@@ -101,7 +102,7 @@
     document.body.appendChild(box);
     draw(); input.focus();
     // Premiere's effect names: asked once, then the list redraws with them
-    if (!fx && S.effectList) Promise.resolve().then(function () { return S.effectList(); }).then(function (r) { fx = r; all = items(); if (box) draw(); }).catch(function () { fx = { video: [], audio: [], transitions: [] }; });
+    if (!fx && S.effectList && !EF.paletteItems) Promise.resolve().then(function () { return S.effectList(); }).then(function (r) { fx = r; all = items(); if (box) draw(); }).catch(function () { fx = { video: [], audio: [], transitions: [] }; });
   }
   EF.palette = { open: open, close: close, rank: rank, items: items };
   document.addEventListener('keydown', function (e) {

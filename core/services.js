@@ -1377,6 +1377,36 @@ ${JSON.stringify(lite)}
     return { zooms: done, phrases: all.length, style, mode };
   }
 
+  /* ---------- قوالبي: القوالب اللي اتعملت في أفتر (والـ MOGRT اللي في فولدر بريمير) ---------- */
+  /** EditFast templates from After Effects + any other .mogrt in Premiere's EditFast templates folder */
+  myTemplates() {
+    const M = require('./mogrt');
+    const dir = M.premiereTemplatesDir({ override: this.settings.paths && this.settings.paths.mogrtDir });
+    const index = M.load(config.dataDir()), seen = new Set(index.map(t => t.path));
+    const thumbs = config.cacheDir('template-thumbs');
+    const out = index.filter(t => fs.existsSync(t.path)).map(t => ({ ...t, thumb: t.thumb && fs.existsSync(t.thumb) ? t.thumb : M.extractThumb(t.path, thumbs) }));
+    let files = []; try { files = fs.readdirSync(dir).filter(f => /\.mogrt$/i.test(f)).map(f => path.join(dir, f)); } catch (_) {}
+    for (const f of files) if (!seen.has(f)) out.push({ id: 'f-' + hash(f), name: path.basename(f, '.mogrt'), path: f, thumb: M.extractThumb(f, thumbs), fields: null, external: true });
+    return out;
+  }
+  /** the fields to fill before placing (from the template itself, so it's always current) */
+  templateFields(file) { return require('./mogrt').readDefinition(file).controls.filter(c => ['text', 'color', 'slider', 'checkbox', 'angle'].includes(c.type)); }
+  /** place a template at the playhead with the values filled in (text, colours, sliders) */
+  async placeTemplate({ path: file, values = [], time, duration = 5 } = {}) {
+    if (!file || !fs.existsSync(file)) throw new Error('ملف القالب مش موجود');
+    const s = await this.seq();
+    const params = values.filter(v => v && v.name && v.value !== undefined && v.value !== '');
+    return this.op('قالب', () => this.host('importMGT', { path: file, time: time ?? s.playhead, duration, params }));
+  }
+  /** renders sent from After Effects ("من أفتر") */
+  handoffList() {
+    try { return JSON.parse(fs.readFileSync(path.join(config.dataDir(), 'handoff.json'), 'utf8')).filter(x => fs.existsSync(x.file)); } catch (_) { return []; }
+  }
+  async placeHandoff(file, { time } = {}) {
+    const s = await this.seq();
+    return this.host('placeFile', { path: file, time: time ?? s.playhead, kind: 'video', track: -1, bin: 'EditFast/From After Effects' });
+  }
+
   /* ---------- نسخ ولصق الإفكتات والكي فريمز ---------- */
   /** copy every effect value and keyframe of the selected clip (kept until the next copy) */
   async copyAttrs() {

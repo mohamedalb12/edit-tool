@@ -833,6 +833,38 @@ EF.setMgtText = function (clip, text, opts) {
   return set;
 };
 
+/**
+ * Fill a placed MOGRT's Essential Graphics fields by their names: text, colours (#hex), sliders, checkboxes.
+ * a.params: [{ name, type: text|color|slider|checkbox|angle, value }] -> how many were set
+ */
+EF.setMgtParams = function (clip, params) {
+  var comp = null, i, j, p, v, set = 0, want, rgb;
+  try { comp = clip.getMGTComponent(); } catch (e) {}
+  if (!comp || !params) return 0;
+  for (j = 0; j < params.length; j++) {
+    want = params[j];
+    for (i = 0; i < comp.properties.numItems; i++) {
+      p = comp.properties[i];
+      if (p.displayName !== want.name) continue;
+      try {
+        if (want.type === 'text') {
+          v = p.getValue();
+          if (typeof v === 'string' && v.indexOf('textEditValue') >= 0) { var o = EF.json.parse(v); o.textEditValue = String(want.value); p.setValue(EF.json.stringify(o), true); }
+          else p.setValue(String(want.value), true);
+        } else if (want.type === 'color') {
+          var hx = String(want.value).replace('#', '');
+          rgb = [parseInt(hx.substr(0, 2), 16), parseInt(hx.substr(2, 2), 16), parseInt(hx.substr(4, 2), 16)];
+          if (p.setColorValue) p.setColorValue(255, rgb[0], rgb[1], rgb[2], true); else p.setValue(want.value, true);
+        } else if (want.type === 'checkbox') p.setValue(!!want.value, true);
+        else p.setValue(Number(want.value), true);
+        set++;
+      } catch (e2) {}
+      break;
+    }
+  }
+  return set;
+};
+
 EFAPI.importMGT = function (a) {
   var seq = EF.seq(), t = (a.time === undefined || a.time === null) ? EF.sec(seq.getPlayerPosition()) : a.time;
   var dur = a.duration || 3;
@@ -841,7 +873,8 @@ EFAPI.importMGT = function (a) {
   if (!clip) throw new Error('importMGT failed');
   try { clip.end = EF.timeObj(t + dur); } catch (e) {}
   var set = a.text ? EF.setMgtText(clip, a.text, a) : 0;
-  return { track: ti, start: t, end: t + dur, textSet: set > 0, name: clip.name };
+  var params = a.params ? EF.setMgtParams(clip, a.params) : 0;
+  return { track: ti, start: t, end: t + dur, textSet: set > 0, params: params, name: clip.name };
 };
 
 /* ---------------- effects by name (command palette) ---------------- */

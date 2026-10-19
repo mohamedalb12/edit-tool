@@ -14,7 +14,7 @@
     { id: 'audio', label: 'الصوت', title: 'الصوت', members: ['audio'] },
     { id: 'reels', label: 'ريلز', title: 'ريلز وشورتس', members: ['reels', 'safezones'], names: { reels: 'ريلز وشورتس', safezones: 'المنطقة الآمنة' } },
     { id: 'motion', label: 'الحركة', title: 'الحركة', members: ['motion', 'curves'], names: { motion: 'قوالب الحركة', curves: 'المنحنيات' } },
-    { id: 'templates', label: 'جرافيك', title: 'الجرافيك', members: ['templates', 'titles', 'icons', 'carousel', 'glass', 'thumb', 'pro'], names: { templates: 'القوالب', titles: 'تايتلات', icons: 'أيقونات', carousel: 'كاروسيل 3D', glass: 'ليكويد جلاس', thumb: 'ثامبنيل', pro: 'مشاهد AI (متقدّم)' } },
+    { id: 'templates', label: 'جرافيك', title: 'الجرافيك', members: ['templates', 'mytemplates', 'titles', 'icons', 'carousel', 'glass', 'thumb', 'pro'], names: { templates: 'القوالب', mytemplates: 'قوالبي من أفتر', titles: 'تايتلات', icons: 'أيقونات', carousel: 'كاروسيل 3D', glass: 'ليكويد جلاس', thumb: 'ثامبنيل', pro: 'مشاهد AI (متقدّم)' } },
     { id: 'library', label: 'مكتبتي', title: 'مكتبتي', members: ['library'] },
     { id: 'download', label: 'ميديا', title: 'الميديا', members: ['download', 'broll', 'websearch', 'sfx'], names: { download: 'تحميل', broll: 'B-Roll', websearch: 'بحث النت', sfx: 'مؤثرات صوتية' } },
     { id: 'revisions', label: 'التعديلات', title: 'تعديلات العميل', members: ['revisions'] },

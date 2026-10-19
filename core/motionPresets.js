@@ -96,7 +96,9 @@
         if (editable && SMOOTH.test(ease) && !WILD.test(ease)) {
           // 2 keys with Bezier (5) / linear (0) interpolation instead of one key per frame
           const it = /^linear/i.test(ease) ? 0 : 5;
-          seg = [{ t: keys[i].t, v: keys[i].v, interp: it }, { t: keys[i + 1].t, v: keys[i + 1].v, interp: it }];
+          // bz: the segment's cubic-bezier, for hosts that ease with influence/speed (After Effects)
+          const bz = curves.PRESETS[ease] && curves.PRESETS[ease].fn.bezier;
+          seg = [{ t: keys[i].t, v: keys[i].v, interp: it, bz }, { t: keys[i + 1].t, v: keys[i + 1].v, interp: it }];
         } else {
           // overshoot/bounce shapes can't be one Bezier: a few keys per segment (not one per frame)
           seg = curves.bake([keys[i], keys[i + 1]], ease, { fps: editable ? Math.min(fps, 12) : fps }).map(k => ({ ...k, interp: 0 }));
@@ -106,7 +108,7 @@
       }
       // the first key of a segment that doesn't start at 0 needs a "rest" key at 0
       if (keys[0].t > 0) baked.unshift({ t: 0, v: keys[0].v, interp: 0 });
-      out[prop] = baked.map(k => ({ t: +k.t.toFixed(4), v: Array.isArray(k.v) ? k.v.map(x => +x.toFixed(5)) : +k.v.toFixed(4), interp: k.interp }));
+      out[prop] = baked.map(k => ({ t: +k.t.toFixed(4), v: Array.isArray(k.v) ? k.v.map(x => +x.toFixed(5)) : +k.v.toFixed(4), interp: k.interp, ...(k.bz ? { bz: k.bz } : {}) }));
     }
     return { id, duration: dur, kind: p.kind, hold: !!p.hold, interpolation: 'linear', props: out };
   }

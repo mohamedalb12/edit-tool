@@ -31,7 +31,8 @@ const FEATURES = [
   { id: 'thumbnail', label: 'عناوين الثامبنيل', def: 'anthropic/claude-sonnet-5.5', vision: true },
   { id: 'translate', label: 'ترجمة الكابشن', def: 'anthropic/claude-haiku-4.5' },
   { id: 'revisions', label: 'تعديلات العميل', def: 'anthropic/claude-sonnet-5.5' },
-  { id: 'retakes', label: 'الإعادات (أحسن تيك)', def: 'anthropic/claude-sonnet-5.5' }
+  { id: 'retakes', label: 'الإعادات (أحسن تيك)', def: 'anthropic/claude-sonnet-5.5' },
+  { id: 'motion_ai', label: 'مساعد الموشن (أفتر)', def: 'anthropic/claude-sonnet-5.5' }
 ];
 
 /**
