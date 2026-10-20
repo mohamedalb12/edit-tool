@@ -15,6 +15,10 @@ const ff = require('./ffmpeg');
 const vision = require('./vision');
 const beats = require('./beats');
 const { extractJson } = require('./util');
+const logoFx = require('./logoFx');
+const photo3d = require('./photo3d');
+const track = require('./track');
+const character = require('./character');
 const STILL = /\.(png|jpe?g|webp|bmp|tiff?|gif|psd)$/i;
 
 /** AI steps the motion assistant may run (name → what it does, for the prompt) */
@@ -407,6 +411,248 @@ class AEServices {
     step('ببني المونتاج في الأفتر…');
     const r = await this.sceneBuild(scene, { where: 'new' });
     return Object.assign({}, r, { cuts: cuts.length, bpm, note: plan.note ? String(plan.note).slice(0, 200) : '' });
+  }
+
+  /* ---------- لوجوهات، فيكتور، مورف ---------- */
+  logoStyles() { return Object.keys(logoFx.STYLES).map(id => ({ id, name: logoFx.STYLES[id] })); }
+  async art(file, o = {}) { const t = this.tools(); return logoFx.loadArt(file, { ffmpeg: t.ffmpeg, ffprobe: t.ffprobe, colors: o.colors || 0, detail: o.detail || 3 }); }
+  /** a logo / icon / image → traced (or read from SVG) → animated: draw | outline | neon | build | 3d | static */
+  async logoAnimate({ file, style = 'draw', colors = 0, detail = 3, duration = 5, bg, color, fit = 0.6, where = 'new' } = {}) {
+    if (!file) throw new Error('اختار اللوجو (SVG أو PNG / JPG)');
+    const art = await this.art(file, { colors, detail });
+    const cur = await this.compSize(), comp = { width: cur.width || 1920, height: cur.height || 1080 };
+    const parts = logoFx.toParts(art, comp, { fit });
+    const raw = logoFx.logoScene(parts, { style, duration, comp, bg: bg === undefined ? (style === 'neon' ? '#050302' : art.bg || '#0b0806') : bg, name: path.basename(file).replace(/\.\w+$/, '').slice(0, 30), color });
+    if (where === 'here') { raw.comp.create = false; raw.layers = raw.layers.filter(l => l.type !== 'camera' && l.type !== 'light' || style === '3d'); }
+    const r = await this.sceneBuild(raw, { where });
+    return Object.assign({}, r, { parts: parts.length, source: art.source, paths: parts.reduce((n, p) => n + p.paths.length, 0) });
+  }
+  /** an SVG / image as editable shape layers in the open comp (Overlord-style) */
+  vectorImport(o = {}) { return this.logoAnimate(Object.assign({ style: 'static', where: 'here', fit: 0.8 }, o)); }
+  /**
+   * Morph: the selected shape / text layers (in order), or 2+ logo / image files → one shape layer that turns
+   * from each into the next (paths matched + aligned, colours too).
+   */
+  async morph({ files = [], dur = 1, hold = 0.6, loop = false, ease = 'easeInOut' } = {}) {
+    let stages, comp, where = 'here';
+    if (files.length >= 2) {
+      const cur = await this.compSize(); comp = { width: cur.width || 1920, height: cur.height || 1080 }; where = cur.width ? 'here' : 'new';
+      stages = [];
+      for (const f of files.slice(0, 8)) {
+        const parts = logoFx.toParts(await this.art(f), comp, { fit: 0.6 });
+        stages.push({ name: path.basename(f), fill: parts[0].fill, paths: parts.flatMap(p => p.paths.map(q => ({ v: q.v.map(v => [v[0] + p.position[0], v[1] + p.position[1]]), i: q.i, o: q.o, c: q.c }))) });
+      }
+    } else {
+      const r = await this.host('readShapes', {});
+      comp = r.comp;
+      stages = r.layers.map(L => ({ name: L.name, paths: logoFx.layerPaths(L), fill: L.fill, stroke: L.stroke, strokeWidth: L.strokeWidth }));
+    }
+    const m = logoFx.morphScene(stages, { comp, dur, hold, loop, where, ease, name: 'EF Morph' });
+    const r = await this.sceneBuild(m.raw, { where });
+    return Object.assign({}, r, { stages: stages.length, paths: m.paths, points: m.points });
+  }
+
+  /* ---------- صورة → ثري دي ---------- */
+  async falRun(model, input) {
+    const key = this.settings.keys.fal;
+    if (!key) throw new Error('حط مفتاح fal.ai من الإعدادات (للعمق / الموديل الثري دي)');
+    const res = await this.fetch('https://fal.run/' + model, { method: 'POST', headers: { Authorization: 'Key ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(input), timeout: 600000 });
+    const txt = await res.text();
+    if (!res.ok) throw new Error('fal.ai ' + res.status + ': ' + txt.slice(0, 200));
+    return JSON.parse(txt);
+  }
+  static findUrl(o, re) {
+    if (!o) return null;
+    if (typeof o === 'string') return re.test(o) ? o : null;
+    if (typeof o === 'object') for (const k of Object.keys(o)) { const u = AEServices.findUrl(o[k], re); if (u) return u; }
+    return null;
+  }
+  dataUri(file) { const ext = path.extname(file).slice(1).toLowerCase(); return 'data:image/' + (ext === 'jpg' ? 'jpeg' : ext || 'png') + ';base64,' + fs.readFileSync(file).toString('base64'); }
+  async download(url, file) { const res = await this.fetch(url, { timeout: 600000 }); if (!res.ok) throw new Error('التحميل وقف: ' + res.status); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, Buffer.from(await res.arrayBuffer())); return file; }
+  /**
+   * A photo → a 3D parallax shot: depth (depth file | fal.ai | estimate with the subject from the vision model) →
+   * depth slices as 3D layers + a moving camera. move: push | orbit | rise | float
+   */
+  async photo3D({ file, depthFile = null, depth = 'auto', slices = 5, move = 'push', strength = 1, duration = 6, onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
+    if (!file) throw new Error('اختار الصورة');
+    const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe;
+    let W0 = 1920, H0 = 1080; try { const p = await ff.probe(probe, file); W0 = p.width; H0 = p.height; } catch (_) {}
+    const s = Math.min(1, 1920 / Math.max(W0, H0)), w = Math.round(W0 * s / 2) * 2, h = Math.round(H0 * s / 2) * 2;
+    step('بيقرا الصورة…');
+    const rgba = await photo3d.decodeExact(ffmpeg, file, w, h);
+    let d, how;
+    const tmpDir = path.join(config.dataDir(), '3d-photo');
+    if (depthFile) { d = photo3d.fromGray(await photo3d.decodeExact(ffmpeg, depthFile, w, h, { gray: true }), w, h); how = 'ملف العمق'; }
+    else if ((depth === 'fal' || depth === 'auto') && this.settings.keys.fal) {
+      step('بيحسب العمق (fal.ai)…');
+      const r = await this.falRun('fal-ai/imageutils/depth', { image_url: this.dataUri(file) });
+      const url = AEServices.findUrl(r, /^https?:|^data:image/);
+      if (!url) throw new Error('fal.ai مارجّعش خريطة عمق');
+      const df = path.join(tmpDir, 'depth-' + Date.now() + '.png');
+      if (/^data:/.test(url)) fs.writeFileSync(df, Buffer.from(url.split(',')[1], 'base64')); else await this.download(url, df);
+      d = photo3d.fromGray(await photo3d.decodeExact(ffmpeg, df, w, h, { gray: true }), w, h); how = 'fal.ai';
+    } else {
+      let subject = null;
+      if (this.settings.keys.openrouter) {
+        step('بيدوّر على الموضوع الأساسي…');
+        try {
+          const b64 = await vision.frameJpeg(ffmpeg, file, 0, { width: 512 });
+          const r = await this.askJson('حدد العنصر الأساسي (الأقرب للكاميرا) في الصورة. رجّع JSON: {"x":0-1,"y":0-1,"w":0-1,"h":0-1} (مربع حواليه، نسبة من الصورة)', vision.imageMessage([{ label: 'الصورة', time: 0, b64 }], 'الصورة').content, 300, { history: false });
+          if (isFinite(+r.x) && isFinite(+r.w) && +r.w > 0) subject = { x: +r.x, y: +r.y, w: +r.w, h: +r.h };
+        } catch (e) { this.log('photo3D subject: ' + e.message); }
+      }
+      d = photo3d.guessDepth(w, h, subject); how = subject ? 'تقدير + الموضوع الأساسي' : 'تقدير';
+    }
+    step('بيقطّع الصورة لطبقات…');
+    const parts = photo3d.slices(rgba, d, w, h, Math.max(2, Math.min(8, slices)));
+    const files = await photo3d.writeSlices(ffmpeg, parts, w, h, tmpDir, path.basename(file).replace(/\.\w+$/, '').replace(/[^\w؀-ۿ-]+/g, '_').slice(0, 30) + '-' + Date.now().toString(36));
+    const raw = photo3d.photoScene(files, { width: w, height: h, duration, move, strength, name: '3D ' + path.basename(file).slice(0, 30) });
+    step('ببني المشهد…');
+    const r = await this.sceneBuild(raw, { where: 'new' });
+    return Object.assign({}, r, { slices: files.length, depth: how });
+  }
+  /** a picture → a real 3D model (.glb) via fal.ai, imported into a 3D comp with camera + lights (AE 2024+) */
+  async imageTo3DModel({ file, model = 'fal-ai/trellis', onStep } = {}) {
+    if (!file) throw new Error('اختار الصورة');
+    onStep && onStep('بيعمل الموديل الثري دي (دقيقة أو اتنين)…');
+    const r = await this.falRun(model, { image_url: this.dataUri(file) });
+    const url = AEServices.findUrl(r, /\.(glb|gltf)(\?|$)/i);
+    if (!url) throw new Error('fal.ai مارجّعش ملف .glb');
+    const out = path.join(config.dataDir(), '3d-models', path.basename(file).replace(/\.\w+$/, '') + '-' + Date.now().toString(36) + '.glb');
+    await this.download(url, out);
+    onStep && onStep('بيحطه في الأفتر…');
+    const raw = { comp: { create: true, name: '3D Model', duration: 8, bg: '#0b0806', renderer: '3d' }, layers: [
+      { type: 'camera', name: 'Camera', camera: { zoom: 2200 }, transform: { position: ['50%', '50%', -2200] }, keys: { position: [[0, ['40%', '45%', -2400], 'easeInOut'], [8, ['60%', '50%', -1900]]] } },
+      { type: 'light', name: 'Key', lightType: 'point', light: { intensity: 120 }, transform: { position: ['30%', '20%', -900] } },
+      { type: 'light', name: 'Ambient', lightType: 'ambient', light: { intensity: 40 } },
+      { type: 'footage', name: 'Model', file: out, cover: false, threeD: true, expressions: { rotationY: 'time*25' } }
+    ] };
+    const b = await this.sceneBuild(raw, { where: 'new' });
+    return Object.assign({}, b, { file: out });
+  }
+
+  /* ---------- تراكينج ---------- */
+  /** the footage to track + a picture of the current frame to click points on */
+  async trackFrame() {
+    const src = await this.host('trackSource', {});
+    const t = Math.max(0, src.comp.time - src.layer.startTime);
+    const b64 = await vision.frameJpeg(this.ffmpeg(), src.layer.file, t, { width: 960 });
+    return { src, b64, time: t };
+  }
+  /** "الوش" / "الموبايل" → where it is in the frame (normalised), from the vision model; corners for a screen */
+  async trackFind(what, { corners = false } = {}) {
+    if (!this.settings.keys.openrouter) throw new Error('حط مفتاح OpenRouter الأول');
+    const { b64 } = await this.trackFrame();
+    const r = await this.askJson(corners
+      ? 'حدد الـ 4 أركان بتوع "' + what + '" في الصورة (شاشة / لوحة / ورقة). رجّع JSON: {"points":[[x,y] فوق-شمال، فوق-يمين، تحت-يمين، تحت-شمال]} الأرقام 0-1 من عرض وطول الصورة.'
+      : 'حدد نقطة واضحة فيها تفاصيل (مش مساحة سادة) على "' + what + '" في الصورة تنفع للتراكينج. رجّع JSON: {"points":[[x,y]]} الأرقام 0-1 من عرض وطول الصورة. لو عايز نقطتين (للسكيل واللف) حط نقطتين متباعدتين على نفس الحاجة.',
+      vision.imageMessage([{ label: 'الفريم', time: 0, b64 }], 'الفريم').content, 400, { history: false });
+    const pts = (r.points || []).filter(p => Array.isArray(p) && isFinite(+p[0]) && isFinite(+p[1])).map(p => [Math.min(1, Math.max(0, +p[0])), Math.min(1, Math.max(0, +p[1]))]);
+    if (!pts.length) throw new Error('مالقيتش "' + what + '" في الفريم');
+    return { points: pts.slice(0, 4) };
+  }
+  /**
+   * Track from the comp time. points: normalised [x,y] on the frame (1 = position, 2 = + scale & rotation, 4 = corner pin).
+   * mode: attach (null + parent the other selected layers / a new text) | pin (Corner Pin on a selected layer) | stabilize
+   */
+  async track({ points = [], mode = 'attach', duration = 0, text = '', onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
+    if (!points.length) throw new Error('حط نقطة (أو أكتر) على الفريم الأول');
+    if (mode === 'pin' && points.length !== 4) throw new Error('الـ Corner Pin محتاج 4 نقط (الأركان)');
+    const src = await this.host('trackSource', {}), L = src.layer, C = src.comp;
+    const start = Math.max(0, C.time - L.startTime), dur = Math.max(0.2, Math.min(60, duration || (L.outPoint - C.time), C.duration - C.time));
+    step('بيقرا الفريمات…');
+    const fr = await track.frames(this.ffmpeg(), L.file, { start, duration: dur, fps: Math.round(C.fps) || 30, width: 640, srcW: L.srcW, srcH: L.srcH });
+    if (fr.frames.length < 2) throw new Error('الفيديو قصير قوي من المكان ده');
+    step('بيتتبّع ' + fr.frames.length + ' فريم…');
+    const tracks = points.map(p => track.trackPoint(fr.frames, fr.w, fr.h, [p[0] * fr.w, p[1] * fr.h]));
+    const lost = Math.min(...tracks.map(t => { const k = track.lostAt(t); return k < 0 ? Infinity : k; }));
+    const n = isFinite(lost) ? Math.max(2, lost) : fr.frames.length;
+    const times = [], src2 = i => tracks.map(t => [t[i].x / fr.scale, t[i].y / fr.scale]);
+    for (let i = 0; i < n; i++) times.push(+(C.time + i / fr.fps).toFixed(4));
+    const comp = pt => track.toComp(pt, L);
+    const a = { name: 'EF Track ' + (points.length > 1 ? points.length + 'pt' : '') + ' ' + L.name, times };
+    if (mode === 'stabilize') {
+      a.stabilize = L.name;
+      a.anchor = times.map((_, i) => src2(i)[0]);
+      if (points.length >= 2) { const sim = track.similarity(tracks[0].slice(0, n), tracks[1].slice(0, n)); const s0 = (L.scale || [100])[0]; a.anchor = sim.map(q => [q.x / fr.scale, q.y / fr.scale]); a.stabScale = sim.map(q => s0 * 100 / q.scale); a.stabRotation = sim.map(q => (L.rotation || 0) - q.rotation); }
+    } else if (mode === 'pin') {
+      const target = (src.others || [])[0];
+      if (!target) throw new Error('اختار مع الفيديو اللير اللي هيتحط على الشاشة (الصورة / الفيديو الجديد)');
+      const inv = q => { const an = target.anchor || [0, 0], po = target.position || [0, 0], sc = target.scale || [100, 100], r = -(target.rotation || 0) * Math.PI / 180; const x = q[0] - po[0], y = q[1] - po[1]; return [(x * Math.cos(r) - y * Math.sin(r)) * 100 / sc[0] + an[0], (x * Math.sin(r) + y * Math.cos(r)) * 100 / sc[1] + an[1]]; };
+      a.pin = target.name;
+      a.corners = times.map((_, i) => src2(i).map(q => inv(comp(q))));
+    } else {
+      if (points.length >= 2) {
+        const sim = track.similarity(tracks[0].slice(0, n), tracks[1].slice(0, n));
+        a.position = sim.map(q => comp([q.x / fr.scale, q.y / fr.scale])); a.scale = sim.map(q => q.scale); a.rotation = sim.map(q => q.rotation);
+      } else a.position = times.map((_, i) => comp(src2(i)[0]));
+      a.attach = (src.others || []).map(o => o.name);
+      if (text) {
+        const tname = 'Tracked Text';
+        await this.sceneEdit([{ op: 'add', layer: { type: 'text', name: tname, text, size: Math.round(C.height * 0.05), transform: { position: [a.position[0][0], a.position[0][1] - C.height * 0.08] }, effects: [{ name: 'shadow', params: { opacity: 60, distance: 4, softness: 12 } }] } }]);
+        a.attach.push(tname);
+      }
+    }
+    step('بيكتب الكي فريمز…');
+    const r = await this.host('applyTrack', a);
+    return Object.assign({}, r, { frames: n, of: fr.frames.length, lost: isFinite(lost) ? +(lost / fr.fps).toFixed(2) : null });
+  }
+
+  /* ---------- كاراكتر ---------- */
+  characterActions() { return Object.keys(character.ACTIONS).map(id => ({ id, name: character.ACTIONS[id] })); }
+  /** a flat rubber-hose character, rigged with sliders, in the open comp (or a new one) */
+  async characterAdd({ name = 'Character', action = 'walk', colors = {}, height = 0, walkAcross = false, where = 'auto' } = {}) {
+    const comp = await this.compSize();
+    const raw = { comp: { create: !comp.width || where === 'new', name: name + ' — ' + (character.ACTIONS[action] || action), duration: 8, bg: '#fff7ed' }, layers: [{ type: 'character', name, action, colors, height: height || undefined, walkAcross }] };
+    return this.sceneBuild(raw, { where: comp.width && where !== 'new' ? 'here' : 'new' });
+  }
+  /** rig the user's own character layers (PSD / AI pieces named head, body, arm L…): joints, parents, walk/idle sliders, IK */
+  async characterRig({ ik = false } = {}) {
+    const info = await this.host('rigInfo', {});
+    const plan = character.rigPlan(info.layers, { ik });
+    const r = await this.host('rigApply', { plan });
+    return Object.assign({}, r, { roles: plan.layers.map(l => l.role + (l.side ? ' ' + l.side : '') + ' ← ' + l.name) });
+  }
+  /** lip sync: the voice's loudness per frame → the "Mouth" slider of a character controller (+ the audio in the comp) */
+  async lipSync({ audio, ctrl } = {}) {
+    if (!audio) throw new Error('اختار ملف الصوت');
+    const st = await this.host('sceneState', {});
+    if (!st.comp) throw new Error('افتح الكومب اللي فيه الكاراكتر');
+    const target = ctrl || ((st.layers || []).find(l => / Ctrl$|^EF Character$/.test(l.name)) || {}).name;
+    if (!target) throw new Error('مالقيتش كنترولر كاراكتر (اعمل كاراكتر أو ريج الأول)');
+    const fps = Math.round(st.comp.fps) || 30, rate = 16000;
+    const pcm = await ff.decodePCM(this.ffmpeg(), audio, { rate, duration: Math.max(1, st.comp.duration - st.comp.time) });
+    const curve = character.mouthCurve(pcm, rate, fps);
+    const keys = curve.slice(0, 6000).map((v, i) => [st.comp.time + i / fps, v, 'linear']);
+    const r = await this.sceneEdit([
+      { op: 'set', layer: target, look: { effects: [{ name: 'slider', label: 'Mouth' }], keys: { 'fx:Mouth.value': keys } } },
+      { op: 'add', layer: { type: 'footage', name: 'Voice', file: audio, start: st.comp.time, cover: false } }
+    ], st);
+    return Object.assign({}, r, { frames: keys.length, ctrl: target });
+  }
+
+  /* ---------- أدوات الشغل اليومي (زي Motion Tools / Explode Shape Layers / Ray Dynamic Color) ---------- */
+  explodeShapes() { return this.host('explodeShapes', {}); }
+  alignLayers(o) { return this.host('alignLayers', o || {}); }
+  sequenceLayers(o) { return this.host('sequenceLayers', o || {}); }
+  colorRig() { return this.host('colorRig', {}); }
+  /** music / voice loudness → "EF Audio" null with a Level slider (0–100) keyed per frame; the selected layers pulse with it */
+  async audioReact({ audio, amount = 30, link = 'scale' } = {}) {
+    if (!audio) throw new Error('اختار ملف الصوت');
+    const st = await this.host('sceneState', {}), info = await this.compInfo();
+    if (!st.comp) throw new Error('افتح كومب الأول');
+    const fps = Math.round(st.comp.fps) || 30, rate = 16000;
+    const pcm = await ff.decodePCM(this.ffmpeg(), audio, { rate, duration: Math.max(1, st.comp.duration - st.comp.time) });
+    const curve = character.mouthCurve(pcm, rate, fps, { floor: 3, attack: 0.9, release: 0.35 });
+    const keys = curve.slice(0, 6000).map((v, i) => [st.comp.time + i / fps, v, 'linear']);
+    const level = 'thisComp.layer("EF Audio").effect("Level")("Slider")';
+    const ex = { scale: `var l=${level}/100*${+amount / 100};mul(value,1+l)`, opacity: `var l=${level};Math.min(100,value*(0.4+l/100*0.6))`, glow: '' }[link];
+    const ops = [{ op: 'add', layer: { type: 'null', name: 'EF Audio', effects: [{ name: 'slider', label: 'Level' }], keys: { 'fx:Level.value': keys } } }, { op: 'add', layer: { type: 'footage', name: 'Audio', file: audio, start: st.comp.time, cover: false } }];
+    for (const s of ((info.comp && info.comp.selected) || []).slice(0, 30)) if (ex) ops.push({ op: 'set', layer: s.name, look: { expressions: { [link]: ex } } });
+    const r = await this.sceneEdit(ops, st);
+    return Object.assign({}, r, { frames: keys.length, linked: Math.max(0, ops.length - 2) });
   }
 
   async selfTest() { return this.host('selfTest', {}); }

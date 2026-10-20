@@ -461,6 +461,8 @@ EFM.EXPR = {
   flicker: { label: 'Flicker', sliders: [['EF Flicker', 40]], prop: 'opacity', expr: 'var a=effect("EF Flicker")("ADBE Slider Control-0001");seedRandom(Math.floor(time*24),true);value-random(a)' },
   spin: { label: 'Spin', sliders: [['EF Spin deg/s', 90]], prop: 'rotation', expr: 'value+time*effect("EF Spin deg/s")("ADBE Slider Control-0001")' },
   'float': { label: 'Float', sliders: [['EF Float Amp', 12], ['EF Float Speed', 1]], prop: 'position', expr: 'var a=effect("EF Float Amp")("ADBE Slider Control-0001"),s=effect("EF Float Speed")("ADBE Slider Control-0001");value+[0,Math.sin(time*s*2*Math.PI)*a]' },
+  squash: { label: 'Squash & stretch', sliders: [['EF Squash', 25]], prop: 'scale', expr: 'var v=transform.position.velocity,sp=Math.min(1,Math.sqrt(v[0]*v[0]+v[1]*v[1])/3000)*effect("EF Squash")("ADBE Slider Control-0001")/100;[value[0]*(1-sp*0.5),value[1]*(1+sp)]' },
+  pendulum: { label: 'Pendulum', sliders: [['EF Swing deg', 25], ['EF Swing Speed', 1], ['EF Swing Decay', 0.4]], prop: 'rotation', expr: 'var a=effect("EF Swing deg")("ADBE Slider Control-0001"),f=effect("EF Swing Speed")("ADBE Slider Control-0001"),d=effect("EF Swing Decay")("ADBE Slider Control-0001"),t=time-inPoint;value+a*Math.sin(t*f*Math.PI*2)*Math.exp(-d*t)' },
   typewriter: { label: 'Typewriter', sliders: [['EF Chars/s', 18]], prop: 'text', expr: 'var n=Math.floor((time-inPoint)*effect("EF Chars/s")("ADBE Slider Control-0001"));text.sourceText.substr(0,Math.max(0,n))' }
 };
 /**
@@ -478,7 +480,7 @@ EFMAPI.addExpression = function (a) {
       L = EFM.selected(c);
       for (i = 0; i < L.length; i++) {
         var want = X.prop || 'position';
-        p = want === 'opacity' ? EFM.tr(L[i], 'ADBE Opacity') : want === 'rotation' ? EFM.tr(L[i], 'ADBE Rotate Z') : want === 'text' ? (L[i] instanceof TextLayer ? L[i].property('ADBE Text Properties').property('ADBE Text Document') : null) : EFM.tr(L[i], 'ADBE Position');
+        p = want === 'opacity' ? EFM.tr(L[i], 'ADBE Opacity') : want === 'scale' ? EFM.tr(L[i], 'ADBE Scale') : want === 'rotation' ? EFM.tr(L[i], 'ADBE Rotate Z') : want === 'text' ? (L[i] instanceof TextLayer ? L[i].property('ADBE Text Properties').property('ADBE Text Document') : null) : EFM.tr(L[i], 'ADBE Position');
         if (p) targets.push(p);
       }
     }
@@ -567,15 +569,40 @@ EFM.find = function (group, match, depth) {
   for (i = 1; i <= group.numProperties; i++) { p = group.property(i); if (p && p.propertyType !== PropertyType.PROPERTY) { r = EFM.find(p, match, (depth || 0) + 1); if (r) return r; } }
   return null;
 };
+/** the n-th property with this matchName under group (depth first, in order) */
+EFM.findNth = function (group, match, n) {
+  var found = null, k = 0;
+  (function walk(g, d) {
+    var i, p;
+    if (found || d > 14 || !g || !g.numProperties) return;
+    for (i = 1; i <= g.numProperties && !found; i++) { p = g.property(i); if (!p) continue; if (p.matchName === match && ++k === n) { found = p; return; } if (p.propertyType !== PropertyType.PROPERTY) walk(p, d + 1); }
+  })(group, 0);
+  return found;
+};
+/** Advanced 3D (or Cinema 4D) renderer on a comp, for extrusion / 3D models */
+EFM.renderer3d = function (c) {
+  var r = c.renderers || [], i;
+  for (i = 0; i < r.length; i++) if (r[i] === 'ADBE Advanced 3d') { c.renderer = r[i]; return r[i]; }
+  for (i = 0; i < r.length; i++) if (r[i] === 'ADBE Ernst') { c.renderer = r[i]; return r[i]; }
+  EFM.warn.push('3D renderer'); return null;
+};
 /** the property a scene key targets: transform names, shape:\u2026, mask:n.\u2026, camera:\u2026, light:\u2026, "fx:<effect match>|<param>" */
 EFM.target = function (L, key) {
   var m, fx, i, e, parts, list, j, p;
   try {
+    if (key.indexOf('fxl:') === 0) {
+      parts = key.substr(4).split('|'); fx = L.property('ADBE Effect Parade');
+      for (i = 1; i <= fx.numProperties; i++) { e = fx.property(i); if (e.name === parts[0]) return EFM.find(e, parts[1]); }
+      return null;
+    }
     if (key.indexOf('fx:') === 0) {
       parts = key.substr(3).split('|'); fx = L.property('ADBE Effect Parade');
       for (i = 1; i <= fx.numProperties; i++) { e = fx.property(i); if (e.matchName === parts[0]) return EFM.find(e, parts[1]); }
       return null;
     }
+    m = /^shape:path\.(\d+)$/.exec(key);
+    if (m) return EFM.findNth(L.property('ADBE Root Vectors Group'), 'ADBE Vector Shape', +m[1]);
+    if (key.indexOf('geometry:') === 0) return EFM.find(L.property('ADBE Extrsn Options Group'), { depth: 'ADBE Extrsn Depth', bevelDepth: 'ADBE Bevel Depth', bevelStyle: 'ADBE Bevel Styles' }[key.substr(9)]);
     if (key.indexOf('shape:') === 0) {
       list = EFM.SHAPEP[key.substr(6)]; if (!list) return null;
       if (!EFM.isArr(list)) list = [list];
@@ -631,14 +658,14 @@ EFM.shapeContents = function (L, S) {
       try { path.property('ADBE Vector Star Type').setValue(it.kind === 'star' ? 1 : 2); path.property('ADBE Vector Star Points').setValue(it.points); path.property('ADBE Vector Star Outer Radius').setValue(it.outer); if (it.kind === 'star') path.property('ADBE Vector Star Inner Radius').setValue(it.inner); } catch (eS) {}
     } else { path = pv.addProperty('ADBE Vector Shape - Rect'); path.property('ADBE Vector Rect Size').setValue(it.size); path.property('ADBE Vector Rect Roundness').setValue(it.round || 0); }
   }
-  if (S.trim) { try { var tp = v.addProperty('ADBE Vector Filter - Trim'); tp.property('ADBE Vector Trim Start').setValue(S.trim.start); tp.property('ADBE Vector Trim End').setValue(S.trim.end); tp.property('ADBE Vector Trim Offset').setValue(S.trim.offset); } catch (eTr) { EFM.warn.push('Trim Paths'); } }
+  if (S.trim) { try { var tp = v.addProperty('ADBE Vector Filter - Trim'); tp.property('ADBE Vector Trim Start').setValue(S.trim.start); tp.property('ADBE Vector Trim End').setValue(S.trim.end); tp.property('ADBE Vector Trim Offset').setValue(S.trim.offset); if (S.trim.mode) tp.property('ADBE Vector Trim Type').setValue(S.trim.mode); } catch (eTr) { EFM.warn.push('Trim Paths'); } }
   if (S.stroke) {
     var st = v.addProperty('ADBE Vector Graphic - Stroke');
     st.property('ADBE Vector Stroke Color').setValue(S.stroke); st.property('ADBE Vector Stroke Width').setValue(S.strokeWidth);
     if (S.lineCap) { try { st.property('ADBE Vector Stroke Line Cap').setValue(S.lineCap); st.property('ADBE Vector Stroke Line Join').setValue(2); } catch (eC) {} }
     if (S.dash) { try { st.property('ADBE Vector Stroke Dashes').addProperty('ADBE Vector Stroke Dash 1').setValue(S.dash); } catch (eD) {} }
   }
-  if (S.fill) v.addProperty('ADBE Vector Graphic - Fill').property('ADBE Vector Fill Color').setValue(S.fill);
+  if (S.fill) { var fl = v.addProperty('ADBE Vector Graphic - Fill'); fl.property('ADBE Vector Fill Color').setValue(S.fill); if (S.fillRule) { try { fl.property('ADBE Vector Fill Rule').setValue(S.fillRule); } catch (eFr) {} } }
   if (S.repeater) {
     try {
       var rp = v.addProperty('ADBE Vector Filter - Repeater'), R = S.repeater, rt = rp.property('ADBE Vector Repeater Transform');
@@ -703,6 +730,7 @@ EFM.makeLayer = function (c, o) {
   else if (o.type === 'precomp') {
     var cs = o.comp, sub = app.project.items.addComp(cs.name, cs.width, cs.height, 1, cs.duration, cs.fps);
     try { sub.parentFolder = EFM.folder('EditFast Scenes'); } catch (eP) {}
+    if (cs.renderer === '3d') EFM.renderer3d(sub);
     if (cs.bg) { var sbg = sub.layers.addSolid([cs.bg[0], cs.bg[1], cs.bg[2]], 'Background', sub.width, sub.height, 1, sub.duration); sbg.locked = true; }
     EFM.fillComp(sub, o.layers);
     L = c.layers.add(sub);
@@ -734,11 +762,12 @@ EFM.makeLayer = function (c, o) {
 };
 /** effects, masks, still values, keys, text animators and expressions of a scene layer, on an existing layer */
 EFM.applyLook = function (L, o, c) {
-  var k, i, n = 0, p;
+  var k, i, n = 0, p, used = [];
   for (i = 0; i < (o.effects || []).length; i++) {
     var ef = o.effects[i], fx = L.property('ADBE Effect Parade'), eff = null, j;
-    for (j = 1; j <= fx.numProperties; j++) if (fx.property(j).matchName === ef.match) eff = fx.property(j);
-    if (!eff) { try { eff = fx.addProperty(ef.match); } catch (e2) { EFM.warn.push('\u0625\u0641\u0643\u062a \u0645\u0634 \u0645\u062a\u0633\u0637\u0628: ' + ef.match); continue; } }
+    // each listed effect takes its own instance (two glows = two Glow effects); an existing one is updated
+    for (j = 1; j <= fx.numProperties && !eff; j++) if (!EFM.has(used, j) && (ef.label ? fx.property(j).name === ef.label : fx.property(j).matchName === ef.match)) { eff = fx.property(j); used.push(j); }
+    if (!eff) { try { eff = fx.addProperty(ef.match); if (ef.label) eff.name = ef.label; used.push(fx.numProperties); } catch (e2) { EFM.warn.push('\u0625\u0641\u0643\u062a \u0645\u0634 \u0645\u062a\u0633\u0637\u0628: ' + ef.match); continue; } }
     for (var pm in ef.params) if (ef.params.hasOwnProperty(pm)) {
       var q = EFM.find(eff, pm);
       if (!q) { EFM.warn.push(ef.match + ' \u2190 ' + pm); continue; }
@@ -766,7 +795,7 @@ EFM.fillComp = function (c, layers) {
   for (i = layers.length - 1; i >= 0; i--) { made.push({ layer: EFM.makeLayer(c, layers[i]), spec: layers[i] }); }
   for (i = 0; i < made.length; i++) {
     for (var k in made[i].spec.keys) if (made[i].spec.keys.hasOwnProperty(k)) keys += made[i].spec.keys[k].length;
-    if (made[i].spec.parent) { var par = EFM.layerByName(c, made[i].spec.parent); if (par && par !== made[i].layer) { try { made[i].layer.parent = par; } catch (e1) {} } else EFM.warn.push('Parent ' + made[i].spec.parent); }
+    if (made[i].spec.parent) { var par = EFM.layerByName(c, made[i].spec.parent); if (par && par !== made[i].layer) { try { if (made[i].layer.setParentWithJump) made[i].layer.setParentWithJump(par); else made[i].layer.parent = par; } catch (e1) {} } else EFM.warn.push('Parent ' + made[i].spec.parent); }
   }
   for (i = 0; i < made.length; i++) if (made[i].spec.matte) { try { EFM.setMatte(made[i].layer, EFM.layerByName(c, made[i].spec.matte.layer), made[i].spec.matte.type); } catch (e2) { EFM.warn.push('Matte ' + made[i].spec.name); } }
   return { layers: made.length, keys: keys };
@@ -784,6 +813,7 @@ EFMAPI.buildScene = function (a) {
       try { c.parentFolder = EFM.folder('EditFast Scenes'); } catch (e0) {}
       if (cs.bg) { var bg = c.layers.addSolid([cs.bg[0], cs.bg[1], cs.bg[2]], 'Background', c.width, c.height, 1, c.duration); bg.locked = true; }
     } else c = EFM.comp();
+    if (cs.renderer === '3d') EFM.renderer3d(c);
     var r = EFM.fillComp(c, s.layers);
     c.openInViewer();
     return { comp: c.name, compId: c.id, layers: r.layers, keys: r.keys, created: !!cs.create, skipped: EFM.warn.slice(0, 30) };
@@ -881,6 +911,249 @@ EFMAPI.effectsList = function () {
     }
   } catch (x) {}
   return { effects: out };
+};
+
+/* ---------------- read shapes (for morph / reuse) ---------------- */
+EFM.xfOf = function (t, names) {
+  var o = {};
+  try { o.anchor = t.property(names[0]).value; o.position = t.property(names[1]).value; o.scale = t.property(names[2]).value; o.rotation = t.property(names[3]).value; } catch (e) {}
+  return o;
+};
+/** paths of a shape layer's contents at the comp time: path groups as vertices, rect / ellipse / star as their numbers */
+EFM.collectPaths = function (group, chain, out, look) {
+  var i, p, m, ch;
+  for (i = 1; i <= group.numProperties; i++) {
+    p = group.property(i); if (!p) continue; m = p.matchName;
+    try { if (p.enabled === false) continue; } catch (eE) {}
+    if (m === 'ADBE Vector Group') {
+      ch = chain.slice(0);
+      ch.unshift(EFM.xfOf(p.property('ADBE Vector Transform Group'), ['ADBE Vector Anchor', 'ADBE Vector Position', 'ADBE Vector Scale', 'ADBE Vector Rotation']));
+      EFM.collectPaths(p.property('ADBE Vectors Group'), ch, out, look);
+    } else if (m === 'ADBE Vector Shape - Group') {
+      var s = p.property('ADBE Vector Shape').value;
+      out.push({ v: s.vertices, i: s.inTangents, o: s.outTangents, c: s.closed, xf: chain });
+    } else if (m === 'ADBE Vector Shape - Rect') out.push({ kind: 'rect', size: p.property('ADBE Vector Rect Size').value, position: p.property('ADBE Vector Rect Position') ? p.property('ADBE Vector Rect Position').value : [0, 0], round: p.property('ADBE Vector Rect Roundness').value, xf: chain });
+    else if (m === 'ADBE Vector Shape - Ellipse') out.push({ kind: 'ellipse', size: p.property('ADBE Vector Ellipse Size').value, position: p.property('ADBE Vector Ellipse Position') ? p.property('ADBE Vector Ellipse Position').value : [0, 0], xf: chain });
+    else if (m === 'ADBE Vector Shape - Star') {
+      var g = function (n) { var q = p.property(n); return q ? q.value : 0; };
+      out.push({ kind: 'star', type: g('ADBE Vector Star Type'), points: g('ADBE Vector Star Points'), outer: g('ADBE Vector Star Outer Radius'), inner: g('ADBE Vector Star Inner Radius'), rotation: g('ADBE Vector Star Rotation'), position: p.property('ADBE Vector Star Position') ? p.property('ADBE Vector Star Position').value : [0, 0], xf: chain });
+    } else if (m === 'ADBE Vector Graphic - Fill' && !look.fill) look.fill = EFM.toHex(p.property('ADBE Vector Fill Color').value);
+    else if (m === 'ADBE Vector Graphic - Stroke' && !look.stroke) { look.stroke = EFM.toHex(p.property('ADBE Vector Stroke Color').value); look.strokeWidth = p.property('ADBE Vector Stroke Width').value; }
+  }
+};
+/** a text layer → its outlines (AE's "Create Shapes from Text"), or null */
+EFM.textToShapes = function (c, L) {
+  var id = 0, i, before = c.numLayers;
+  try { id = app.findMenuCommandId('Create Shapes from Text'); } catch (e0) {}
+  if (!id) id = 3781;
+  for (i = 1; i <= c.numLayers; i++) c.layer(i).selected = false;
+  L.selected = true;
+  try { app.executeCommand(id); } catch (e1) { return null; }
+  if (c.numLayers === before) return null;
+  for (i = 1; i <= c.numLayers; i++) if (c.layer(i) instanceof ShapeLayer && c.layer(i).selected) return c.layer(i);
+  var up = c.layer(L.index - 1);
+  return up instanceof ShapeLayer ? up : null;
+};
+/** the selected shape / text layers' paths (+ layer transform and colours), in selection order */
+EFMAPI.readShapes = function () {
+  var c = EFM.comp(), L = EFM.selected(c), out = [], i;
+  var sel = L.slice(0);
+  return EFM.undo('قراية الأشكال', function () {
+    for (i = 0; i < sel.length; i++) {
+      var src = sel[i], tmp = null, S = src, look = {};
+      if (src instanceof TextLayer) { tmp = EFM.textToShapes(c, src); S = tmp; try { look.fill = EFM.toHex(src.property('ADBE Text Properties').property('ADBE Text Document').value.fillColor); } catch (eF) {} }
+      if (!(S instanceof ShapeLayer)) continue;
+      var paths = [];
+      EFM.collectPaths(S.property('ADBE Root Vectors Group'), [], paths, look);
+      out.push({ name: src.name, layer: EFM.xfOf(S.property('ADBE Transform Group'), ['ADBE Anchor Point', 'ADBE Position', 'ADBE Scale', 'ADBE Rotate Z']), paths: paths, fill: look.fill, stroke: look.stroke, strokeWidth: look.strokeWidth, text: src instanceof TextLayer });
+      if (tmp) { try { tmp.remove(); src.enabled = true; } catch (eR) {} }
+    }
+    for (i = 0; i < sel.length; i++) { try { sel[i].selected = true; } catch (eS) {} }
+    if (!out.length) throw new Error('اختار ليرز أشكال أو كلام الأول');
+    return { comp: { width: c.width, height: c.height, duration: c.duration, time: c.time }, layers: out };
+  });
+};
+
+/* ---------------- tracking ---------------- */
+/** the footage to track: the selected video layer (or the first one), its file, timing and 2D transform */
+EFMAPI.trackSource = function () {
+  var c = EFM.comp(), i, L = null, sel = c.selectedLayers, others = [];
+  for (i = 0; i < sel.length; i++) { var s = sel[i]; try { if (!L && s.source && s.source.file && s.source.hasVideo) { L = s; continue; } } catch (e0) {} try { others.push({ name: s.name, anchor: EFM.tr(s, 'ADBE Anchor Point').value, position: EFM.tr(s, 'ADBE Position').value, scale: EFM.tr(s, 'ADBE Scale').value, rotation: EFM.tr(s, 'ADBE Rotate Z').value }); } catch (eO) { others.push({ name: s.name }); } }
+  if (!L) for (i = 1; i <= c.numLayers; i++) { try { if (c.layer(i).source && c.layer(i).source.file && c.layer(i).source.hasVideo) { L = c.layer(i); break; } } catch (e1) {} }
+  if (!L) throw new Error('اختار لير الفيديو اللي هتتبّعه');
+  var t = EFM.tr;
+  return { comp: { name: c.name, width: c.width, height: c.height, fps: 1 / c.frameDuration, time: c.time, duration: c.duration },
+    layer: { name: L.name, index: L.index, file: L.source.file.fsName, startTime: L.startTime, inPoint: L.inPoint, outPoint: L.outPoint, stretch: L.stretch, srcW: L.source.width, srcH: L.source.height,
+      anchor: t(L, 'ADBE Anchor Point').value, position: t(L, 'ADBE Position').value, scale: t(L, 'ADBE Scale').value, rotation: t(L, 'ADBE Rotate Z').value }, others: others };
+};
+/**
+ * Write a track. a = { name, times: [comp t], position: [[x,y]], scale?: [%], rotation?: [deg], corners?: [[4 × [x,y]]],
+ *   attach: [layer names] (parented to the track null), pin: layer name (Corner Pin), stabilize: layer name, anchor: [[x,y]] }
+ */
+EFMAPI.applyTrack = function (a) {
+  var c = EFM.comp(), i, k;
+  return EFM.undo('تراكينج', function () {
+    var lin = function (vals) { var ks = []; for (var j = 0; j < a.times.length; j++) ks.push({ t: a.times[j], v: vals[j], bz: null, hold: false }); return ks; };
+    var out = { keys: 0 };
+    if (a.position) {
+      var N = c.layers.addNull(c.duration); N.name = a.name || 'EF Track';
+      try { N.label = 9; } catch (eL) {}
+      out.keys += EFM.writeKeys(EFM.tr(N, 'ADBE Position'), lin(a.position), 0);
+      if (a.scale) { var sc = []; for (k = 0; k < a.scale.length; k++) sc.push([a.scale[k], a.scale[k]]); out.keys += EFM.writeKeys(EFM.tr(N, 'ADBE Scale'), lin(sc), 0); }
+      if (a.rotation) out.keys += EFM.writeKeys(EFM.tr(N, 'ADBE Rotate Z'), lin(a.rotation), 0);
+      out.track = N.name;
+      // the attached layers follow from where they are now (AE keeps their place when parenting)
+      var t0 = c.time; c.time = a.times[0];
+      for (i = 0; i < (a.attach || []).length; i++) { var L = EFM.layerByName(c, a.attach[i]); if (L && L !== N) { try { L.parent = N; } catch (eP) {} } }
+      c.time = t0;
+      out.attached = (a.attach || []).length;
+    }
+    if (a.corners && a.pin) {
+      var T = EFM.layerByName(c, a.pin);
+      if (!T) throw new Error('مش لاقي اللير: ' + a.pin);
+      var cp = T.property('ADBE Effect Parade').addProperty('ADBE Corner Pin');
+      var names = ['ADBE Corner Pin-0001', 'ADBE Corner Pin-0002', 'ADBE Corner Pin-0003', 'ADBE Corner Pin-0004'];
+      for (k = 0; k < 4; k++) { var vals = []; for (i = 0; i < a.corners.length; i++) vals.push(a.corners[i][k]); out.keys += EFM.writeKeys(cp.property(names[k]), lin(vals), 0); }
+      out.pinned = T.name;
+    }
+    if (a.stabilize && a.anchor) {
+      var S = EFM.layerByName(c, a.stabilize);
+      out.keys += EFM.writeKeys(EFM.tr(S, 'ADBE Anchor Point'), lin(a.anchor), 0);
+      var pos = EFM.tr(S, 'ADBE Position'); while (pos.numKeys) pos.removeKey(1); pos.setValue([c.width / 2, c.height / 2]);
+      if (a.stabScale) { var ss = []; for (k = 0; k < a.stabScale.length; k++) ss.push([a.stabScale[k], a.stabScale[k]]); out.keys += EFM.writeKeys(EFM.tr(S, 'ADBE Scale'), lin(ss), 0); }
+      if (a.stabRotation) out.keys += EFM.writeKeys(EFM.tr(S, 'ADBE Rotate Z'), lin(a.stabRotation), 0);
+      out.stabilized = S.name;
+    }
+    return out;
+  });
+};
+
+/* ---------------- character rig ---------------- */
+/** the selected layers (or all) with their bounds and 2D transform, for the auto-rig */
+EFMAPI.rigInfo = function () {
+  var c = EFM.comp(), L = c.selectedLayers.length ? c.selectedLayers : [], out = [], i;
+  if (!L.length) for (i = 1; i <= c.numLayers; i++) L.push(c.layer(i));
+  for (i = 0; i < L.length; i++) {
+    var x = L[i];
+    if (x instanceof CameraLayer || x instanceof LightLayer || x.nullLayer) continue;
+    try {
+      var r = x.sourceRectAtTime(c.time, false), t = EFM.tr;
+      out.push({ name: x.name, rect: { left: r.left, top: r.top, width: r.width, height: r.height }, anchor: t(x, 'ADBE Anchor Point').value, position: t(x, 'ADBE Position').value, scale: t(x, 'ADBE Scale').value, rotation: t(x, 'ADBE Rotate Z').value, parent: x.parent ? x.parent.name : null, threeD: !!x.threeDLayer });
+    } catch (e) {}
+  }
+  return { layers: out, comp: { width: c.width, height: c.height, time: c.time } };
+};
+/** apply a rig plan: anchors at the joints (layer stays put), parents, the controller with sliders, IK nulls, expressions */
+EFMAPI.rigApply = function (a) {
+  var c = EFM.comp(), P = a.plan, i, k, n = 0;
+  return EFM.undo('ريج كاراكتر', function () {
+    for (i = 0; i < P.layers.length; i++) {
+      var L = EFM.layerByName(c, P.layers[i].name); if (!L) continue;
+      var an = EFM.tr(L, 'ADBE Anchor Point'), po = EFM.tr(L, 'ADBE Position');
+      if (!an.numKeys && !po.numKeys) { an.setValue(EFM.fit(an, P.layers[i].anchor)); po.setValue(EFM.fit(po, P.layers[i].position)); }
+    }
+    for (i = 0; i < P.layers.length; i++) {
+      var C1 = EFM.layerByName(c, P.layers[i].name), par = P.layers[i].parent ? EFM.layerByName(c, P.layers[i].parent) : null;
+      if (C1 && par && C1 !== par) { try { C1.parent = par; } catch (eP) {} }
+    }
+    var ctrl = EFM.layerByName(c, P.ctrl.name);
+    if (!ctrl) { ctrl = c.layers.addNull(c.duration); ctrl.name = P.ctrl.name; try { ctrl.label = 11; } catch (eL) {} }
+    EFM.tr(ctrl, 'ADBE Position').setValue(P.ctrl.position);
+    for (k in P.ctrl.sliders) if (P.ctrl.sliders.hasOwnProperty(k)) { var fx = EFM.effect(ctrl, 'ADBE Slider Control', k); fx.property(1).setValue(P.ctrl.sliders[k]); }
+    for (i = 0; i < (P.ik || []).length; i++) {
+      var ik = EFM.layerByName(c, P.ik[i].name);
+      if (!ik) { ik = c.layers.addNull(c.duration); ik.name = P.ik[i].name; try { ik.label = 2; } catch (eI) {} }
+      EFM.tr(ik, 'ADBE Position').setValue(P.ik[i].position);
+    }
+    for (i = 0; i < P.layers.length; i++) {
+      var X = EFM.layerByName(c, P.layers[i].name); if (!X) continue;
+      for (k in P.layers[i].expressions) if (P.layers[i].expressions.hasOwnProperty(k)) { var p = EFM.target(X, k); if (p) { try { p.expression = P.layers[i].expressions[k]; n++; } catch (eX) { EFM.warn.push(X.name + ': ' + k); } } }
+    }
+    return { layers: P.layers.length, expressions: n, ik: (P.ik || []).length, ctrl: P.ctrl.name };
+  });
+};
+
+/* ---------------- workflow tools (Explode Shape Layers, Motion Tools, Ray Dynamic Color-style) ---------------- */
+/** every top-level group of the selected shape layers → its own layer (the original is hidden) */
+EFMAPI.explodeShapes = function () {
+  var c = EFM.comp(), L = EFM.selected(c), made = 0, i, j, k;
+  return EFM.undo('فصل الأشكال', function () {
+    for (i = 0; i < L.length; i++) {
+      if (!(L[i] instanceof ShapeLayer)) continue;
+      var root = L[i].property('ADBE Root Vectors Group'), n = root.numProperties;
+      if (n < 2) continue;
+      for (j = 1; j <= n; j++) {
+        var d = L[i].duplicate(), dr = d.property('ADBE Root Vectors Group');
+        for (k = dr.numProperties; k >= 1; k--) if (k !== j) dr.property(k).remove();
+        d.name = L[i].name + ' • ' + root.property(j).name; d.enabled = true; made++;
+      }
+      L[i].enabled = false;
+    }
+    if (!made) throw new Error('اختار لير شيب فيه أكتر من جروب');
+    return { layers: made };
+  });
+};
+/** the layer's box in comp space (2D, no parent): from sourceRectAtTime through anchor / scale / position */
+EFM.box = function (L, t) {
+  var r = L.sourceRectAtTime(t, false), a = EFM.tr(L, 'ADBE Anchor Point').value, s = EFM.tr(L, 'ADBE Scale').value, p = EFM.tr(L, 'ADBE Position').value;
+  var x0 = p[0] + (r.left - a[0]) * s[0] / 100, y0 = p[1] + (r.top - a[1]) * s[1] / 100, x1 = x0 + r.width * s[0] / 100, y1 = y0 + r.height * s[1] / 100;
+  return { x0: Math.min(x0, x1), y0: Math.min(y0, y1), x1: Math.max(x0, x1), y1: Math.max(y0, y1) };
+};
+EFM.moveBy = function (L, dx, dy) { EFM.change(EFM.tr(L, 'ADBE Position'), function (v) { var o = v.slice ? v.slice(0) : [v[0], v[1]]; o[0] += dx; o[1] += dy; return o; }); };
+/** align / distribute the selected layers. a = { mode: left|hcenter|right|top|vcenter|bottom|distH|distV, to: comp|selection } */
+EFMAPI.alignLayers = function (a) {
+  var c = EFM.comp(), L = EFM.selected(c), i, B = [], t = c.time;
+  return EFM.undo('محاذاة', function () {
+    for (i = 0; i < L.length; i++) { try { B.push({ L: L[i], b: EFM.box(L[i], t) }); } catch (e) {} }
+    if (!B.length) throw new Error('اختار ليرز');
+    var R = { x0: 0, y0: 0, x1: c.width, y1: c.height };
+    if (a.to === 'selection' && B.length > 1) { R = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 }; for (i = 0; i < B.length; i++) { R.x0 = Math.min(R.x0, B[i].b.x0); R.y0 = Math.min(R.y0, B[i].b.y0); R.x1 = Math.max(R.x1, B[i].b.x1); R.y1 = Math.max(R.y1, B[i].b.y1); } }
+    var m = a.mode;
+    if (m === 'distH' || m === 'distV') {
+      var h = m === 'distH';
+      B.sort(function (p, q) { return h ? (p.b.x0 + p.b.x1) - (q.b.x0 + q.b.x1) : (p.b.y0 + p.b.y1) - (q.b.y0 + q.b.y1); });
+      var first = h ? (B[0].b.x0 + B[0].b.x1) / 2 : (B[0].b.y0 + B[0].b.y1) / 2, lastB = B[B.length - 1].b, last = h ? (lastB.x0 + lastB.x1) / 2 : (lastB.y0 + lastB.y1) / 2;
+      for (i = 1; i < B.length - 1; i++) { var want = first + (last - first) * i / (B.length - 1), cur = h ? (B[i].b.x0 + B[i].b.x1) / 2 : (B[i].b.y0 + B[i].b.y1) / 2; EFM.moveBy(B[i].L, h ? want - cur : 0, h ? 0 : want - cur); }
+    } else {
+      for (i = 0; i < B.length; i++) {
+        var b = B[i].b, dx = 0, dy = 0;
+        if (m === 'left') dx = R.x0 - b.x0; if (m === 'right') dx = R.x1 - b.x1; if (m === 'hcenter') dx = (R.x0 + R.x1) / 2 - (b.x0 + b.x1) / 2;
+        if (m === 'top') dy = R.y0 - b.y0; if (m === 'bottom') dy = R.y1 - b.y1; if (m === 'vcenter') dy = (R.y0 + R.y1) / 2 - (b.y0 + b.y1) / 2;
+        EFM.moveBy(B[i].L, dx, dy);
+      }
+    }
+    return { layers: B.length };
+  });
+};
+/** the selected layers one after another in time (selection order), `gap` frames apart (negative = overlap) */
+EFMAPI.sequenceLayers = function (a) {
+  var c = EFM.comp(), L = EFM.selected(c), i, t;
+  return EFM.undo('ورا بعض', function () {
+    if (L.length < 2) throw new Error('اختار ليرين أو أكتر');
+    t = L[0].outPoint + (a.gap || 0) * c.frameDuration;
+    for (i = 1; i < L.length; i++) { var shift = t - L[i].inPoint; L[i].startTime += shift; t = L[i].outPoint + (a.gap || 0) * c.frameDuration; }
+    return { layers: L.length };
+  });
+};
+/** one controller for every colour of the comp: "EF Colors" with a Color Control per colour, every fill / stroke linked */
+EFMAPI.colorRig = function () {
+  var c = EFM.comp(), map = {}, list = [], i, n = 0;
+  return EFM.undo('كنترول الألوان', function () {
+    var ctrl = EFM.layerByName(c, 'EF Colors');
+    if (!ctrl) { ctrl = c.layers.addNull(c.duration); ctrl.name = 'EF Colors'; ctrl.guideLayer = true; try { ctrl.label = 11; } catch (eL) {} }
+    for (i = 1; i <= c.numLayers; i++) {
+      var L = c.layer(i); if (L === ctrl) continue;
+      EFM.walk(L, function (p) {
+        if (!/^(ADBE Vector Fill Color|ADBE Vector Stroke Color|ADBE Fill-0002|ADBE Color Control-0001)$/.test(p.matchName) || p.numKeys || p.expression) return;
+        if (p.matchName === 'ADBE Color Control-0001' && L === ctrl) return;
+        var k = EFM.colorKey(p.value);
+        if (!map[k]) { var fx = EFM.effect(ctrl, 'ADBE Color Control', 'Color ' + (list.length + 1)); fx.property(1).setValue(p.value); map[k] = fx.name; list.push(EFM.toHex(p.value)); }
+        p.expression = 'thisComp.layer("EF Colors").effect("' + map[k] + '")(1)'; n++;
+      });
+    }
+    if (!n) throw new Error('مفيش ألوان أشكال أو Fill في الكومب');
+    return { colors: list, linked: n };
+  });
 };
 
 /* ---------------- shapes, lower thirds ---------------- */

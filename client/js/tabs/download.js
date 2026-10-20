@@ -1,5 +1,7 @@
 /* تحميل من يوتيوب/إنستجرام/تيك توك/بنترست/X: الجودة + البداية والنهاية + يتحط على التايملين. */
 (function () {
+  // play() rejects when a pause / new source interrupts it — that's fine here
+  function quiet(pr) { if (pr && pr.catch) pr.catch(function () {}); }
   var EF = window.EF, UI = EF.ui, h = UI.h;
   var o = { url: '', quality: '1080', start: '', end: '', place: true, info: null };
   EF.tabs.push({
@@ -129,8 +131,8 @@
         function playAt(t, until) {
           want = t; stopAt = until === undefined ? null : until;
           if (!v) return;
-          if (mode === 'chunk') { if (clen && t >= cs && t < cs + clen - 0.5) { v.currentTime = t - cs; v.play(); } else chunkAt(t, true); }
-          else if (v.readyState >= 1) { v.currentTime = t; v.play(); }
+          if (mode === 'chunk') { if (clen && t >= cs && t < cs + clen - 0.5) { v.currentTime = t - cs; quiet(v.play()); } else chunkAt(t, true); }
+          else if (v.readyState >= 1) { v.currentTime = t; quiet(v.play()); }
         }
         var start = UI.btn('▶ بريفيو بالصوت والصورة', function () {
           say('بيفتح البريفيو…');
@@ -143,7 +145,7 @@
                 clearTimeout(dog);
                 // HEVC / ProRes: the sound may play with no picture → a playable piece made by ffmpeg instead
                 if (src.type === 'video' && !v.videoWidth) return toChunks();
-                say(''); v.currentTime = want; v.play();
+                say(''); v.currentTime = want; quiet(v.play());
               });
               v.addEventListener('error', function () { if (mode === 'direct') toChunks(); else fail(new Error('البريفيو مااشتغلش (' + ((v.error && v.error.code) || '?') + ')')); });
               v.addEventListener('timeupdate', function () {

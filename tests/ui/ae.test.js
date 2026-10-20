@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'studio', 'track', 'character', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -139,6 +139,59 @@ test('director: describe → chat answer; reference attached; library scene with
   await page.waitForTimeout(200);
   assert.match(await page.locator('#view').textContent(), /16 قطع على 120 BPM/);
   await shot('ae-04-director');
+});
+
+test('studio, tracking, characters, workflow: each tool reaches AE with its choices', async () => {
+  await open('studio'); await clear();
+  await page.evaluate(() => { window.EF.test.pickFile = () => '/logos/brand.svg'; window.EF.test.pickFiles = () => ['/logos/a.svg', '/logos/b.svg']; });
+  await click('اختار اللوجو');
+  await page.locator('[data-style="neon"]').click();
+  await click('حرّك اللوجو');
+  assert.deepEqual(await call('logoAnimate'), { file: '/logos/brand.svg', style: 'neon', colors: 0, detail: 3, duration: 5 });
+  await click('حطه شكل ثابت هنا'); assert.equal((await call('vectorImport')).file, '/logos/brand.svg');
+  await click('من ملفات…'); await page.locator('#view .card', { hasText: 'مورف' }).locator('input[type=checkbox]').check();
+  await click('اعمل المورف');
+  assert.deepEqual(await call('morph'), { files: ['/logos/a.svg', '/logos/b.svg'], dur: 1, hold: 0.6, loop: true });
+  await page.evaluate(() => { window.EF.test.pickFile = () => '/photos/street.jpg'; });
+  await click('اختار الصورة'); await page.locator('.seg button', { hasText: 'بتلف' }).click();
+  await click('اعملها ثري دي');
+  assert.deepEqual(await call('photo3D'), { file: '/photos/street.jpg', move: 'orbit', slices: 5 });
+  await shot('ae-05-studio');
+
+  await open('track'); await clear();
+  await click('هات الفريم'); await page.waitForSelector('.track-stage.on');
+  const box = await page.locator('.track-stage').boundingBox();
+  await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.5);
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height * 0.5);
+  assert.equal(await page.locator('.track-dot').count(), 2);
+  await page.fill('#view input[placeholder^="كلام يمشي"]', 'سعر 99');
+  await click('تراك', '#view .card');
+  const t = await call('track');
+  assert.equal(t.points.length, 2); assert.ok(Math.abs(t.points[0][0] - 0.25) < 0.02); assert.equal(t.text, 'سعر 99'); assert.equal(t.mode, 'attach');
+  await page.fill('#view input[placeholder^="أو قول"]', 'الموبايل');
+  await page.locator('.seg button', { hasText: 'Corner Pin' }).click();
+  await click('دوّر عليها بالـ AI');
+  assert.deepEqual(await call('trackFind'), { what: 'الموبايل', corners: true });
+  await shot('ae-06-track');
+
+  await open('character'); await clear();
+  await page.locator('[data-act="wave"]').click();
+  await click('ضيف الكاراكتر');
+  assert.deepEqual(await call('characterAdd'), { name: 'Ali', action: 'wave', walkAcross: false });
+  await click('اعمل الريج'); assert.deepEqual(await call('characterRig'), { ik: true });
+  await page.evaluate(() => { window.EF.test.pickFile = () => '/audio/voice.wav'; });
+  await click('ليب سينك من ملف صوت'); assert.deepEqual(await call('lipSync'), { audio: '/audio/voice.wav' });
+  await click('Audio React'); assert.deepEqual(await call('audioReact'), { audio: '/audio/voice.wav', amount: 30, link: 'scale' });
+  await shot('ae-07-character');
+
+  await open('routine'); await clear();
+  await page.locator('[data-align="hcenter"]').click(); await page.waitForTimeout(200);
+  assert.deepEqual(await call('alignLayers'), { mode: 'hcenter', to: 'comp' });
+  await page.locator('[data-align="distH"]').click(); await page.waitForTimeout(200);
+  assert.equal((await page.evaluate(() => window.__calls.filter(c => c.name === 'alignLayers')[1].args)).to, 'selection');
+  await click('فصّل الشيب لليرز'); assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'explodeShapes')));
+  await click('كنترول واحد لكل الألوان'); assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'colorRig')));
+  await click('رتّبهم ورا بعض'); assert.deepEqual(await call('sequenceLayers'), { gap: 0 });
 });
 
 test('⌘K in After Effects lists AE tools (motion, curves, expressions, cameras)', async () => {

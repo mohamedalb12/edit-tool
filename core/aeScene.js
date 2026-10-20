@@ -3,6 +3,7 @@
 // — بيتراجع هنا ويتحوّل لحاجة الأفتر يبنيها ليرز عادية تتعدّل. الـ AI عمره ما بيكتب كود بيتشغّل في الأفتر.
 const curves = require('./curves');
 const svg = require('./svgPath');
+const character = require('./character');
 
 /**
  * Effects the AI may use by a friendly name: AE matchName + its parameters (a param is a matchName, or the English
@@ -33,13 +34,20 @@ const EFFECTS = {
   exposure: { match: 'ADBE Exposure2', params: { exposure: 'Exposure' } },
   brightness: { match: 'ADBE Brightness & Contrast 2', params: { brightness: 'Brightness', contrast: 'Contrast' } },
   vibrance: { match: 'ADBE Vibrance', params: { vibrance: 'Vibrance', saturation: 'Saturation' } },
+  slider: { match: 'ADBE Slider Control', params: { value: 'ADBE Slider Control-0001' } },
+  checkbox: { match: 'ADBE Checkbox Control', params: { value: 'ADBE Checkbox Control-0001' } },
+  angle: { match: 'ADBE Angle Control', params: { value: 'ADBE Angle Control-0001' } },
+  colorControl: { match: 'ADBE Color Control', params: { color: 'ADBE Color Control-0001' } },
+  pointControl: { match: 'ADBE Point Control', params: { point: 'ADBE Point Control-0001' } },
+  cornerPin: { match: 'ADBE Corner Pin', params: { topLeft: 'ADBE Corner Pin-0001', topRight: 'ADBE Corner Pin-0002', bottomLeft: 'ADBE Corner Pin-0003', bottomRight: 'ADBE Corner Pin-0004' } },
   motionTile: { match: 'ADBE Tile', params: { outputWidth: 'Output Width', outputHeight: 'Output Height', mirror: 'Mirror Edges' } }
 };
-const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light', 'precomp', 'particles'];
+const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light', 'precomp', 'particles', 'character', 'plexus'];
 const PROPS = ['position', 'scale', 'rotation', 'opacity', 'anchor', 'rotationX', 'rotationY', 'orientation'];
 const SHAPE_PROPS = ['trimStart', 'trimEnd', 'trimOffset', 'fillColor', 'fillOpacity', 'strokeColor', 'strokeWidth', 'size', 'roundness', 'path',
   'repeaterCopies', 'repeaterOffset', 'repeaterPosition', 'repeaterScale', 'repeaterRotation', 'outerRadius', 'innerRadius', 'starRotation', 'groupPosition', 'groupScale', 'groupRotation'];
 const MASK_PROPS = ['path', 'feather', 'expansion', 'opacity'];
+const GEOMETRY_PROPS = ['depth', 'bevelDepth', 'bevelStyle'];
 const CAMERA_PROPS = ['zoom', 'focusDistance', 'aperture', 'blurLevel', 'dof'];
 const LIGHT_PROPS = ['intensity', 'color', 'coneAngle', 'coneFeather', 'castsShadows'];
 const BLEND = ['normal', 'add', 'screen', 'multiply', 'overlay', 'softLight', 'colorDodge', 'lighten', 'darken', 'difference'];
@@ -102,6 +110,10 @@ function keyTarget(k, effects) {
   if (PROPS.indexOf(k) >= 0) return { key: k, kind: k };
   let m = /^shape:(\w+)$/.exec(k);
   if (m && SHAPE_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: 'shape:' + m[1] };
+  m = /^shape:path\.(\d+)$/.exec(k);
+  if (m && +m[1] >= 1 && +m[1] <= 400) return { key: k, kind: 'shape:path' };
+  m = /^geometry:(\w+)$/.exec(k);
+  if (m && GEOMETRY_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: k };
   m = /^mask:(\d+)\.(\w+)$/.exec(k);
   if (m && MASK_PROPS.indexOf(m[2]) >= 0 && +m[1] >= 1 && +m[1] <= 10) return { key: k, kind: 'mask:' + m[2] };
   m = /^camera:(\w+)$/.exec(k);
@@ -112,6 +124,12 @@ function keyTarget(k, effects) {
     const body = k.slice(3), dot = body.lastIndexOf('.');
     if (dot < 1) return null;
     const fxName = body.slice(0, dot), param = body.slice(dot + 1);
+    const labelled = effects && effects.find(e => e.label && e.label === fxName);
+    if (labelled) {
+      const ldef = Object.values(EFFECTS).find(d => d.match === labelled.match);
+      const pm = ldef && ldef.params[param] ? ldef.params[param] : (MATCH_RE.test(param) ? param : null);
+      return pm ? { key: 'fxl:' + labelled.label + '|' + pm, kind: 'fx' } : null;
+    }
     const def = EFFECTS[fxName];
     if (def) {
       if (!def.params[param]) return null;
@@ -155,11 +173,11 @@ function effectList(list, comp, warnings) {
         if (def.params[k]) params[def.params[k]] = valueFor('fx', fx.params[k], comp);
         else warnings.push('باراميتر مش معروف: ' + fx.name + '.' + k);
       }
-      out.push({ name: fx.name, match: def.match, params });
+      out.push({ name: fx.name, match: def.match, params, label: fx.label ? String(fx.label).slice(0, 40) : undefined });
     } else if (fx.match && MATCH_RE.test(String(fx.match))) {
       const params = {};
       for (const k of Object.keys(fx.params || {}).slice(0, 30)) if (MATCH_RE.test(k)) params[k] = valueFor('fx', fx.params[k], comp);
-      out.push({ name: 'raw', match: String(fx.match), params });
+      out.push({ name: 'raw', match: String(fx.match), params, label: fx.label ? String(fx.label).slice(0, 40) : undefined });
     } else warnings.push('إفكت مش متاح: ' + (fx.name || fx.match));
   }
   return out;
@@ -182,6 +200,14 @@ function shapeSpec(s, comp, warnings) {
   for (const it of src.slice(0, 30)) {
     const kind = ['rect', 'ellipse', 'star', 'polygon', 'path'].indexOf(it.kind) >= 0 ? it.kind : (it.path || it.svg || it.points ? 'path' : 'rect');
     const pos = it.position !== undefined ? vec(it.position, comp) : null;
+    if (Array.isArray(it.paths)) {
+      // ready-made paths (traced / imported art): kept as they are, only checked
+      const ok = it.paths.filter(p => p && Array.isArray(p.v) && p.v.length > 1 && Array.isArray(p.i) && Array.isArray(p.o) && p.i.length === p.v.length && p.o.length === p.v.length && p.v.concat(p.i, p.o).every(q => Array.isArray(q) && isFinite(q[0]) && isFinite(q[1])))
+        .slice(0, 400).map(p => ({ v: p.v.map(q => [+q[0], +q[1]]), i: p.i.map(q => [+q[0], +q[1]]), o: p.o.map(q => [+q[0], +q[1]]), c: !!p.c }));
+      if (!ok.length) { warnings.push('مسار مش مفهوم'); continue; }
+      items.push({ kind: 'path', paths: ok, position: pos });
+      continue;
+    }
     if (kind === 'path') {
       const paths = pathValue(it.path || it.svg ? (it.path || it.svg) : { points: it.points, closed: it.closed, smooth: it.smooth }, comp, { center: true, size: it.size ? vec(it.size, comp) : (src.length === 1 && s.size ? vec(s.size, comp) : null) });
       if (!paths) { warnings.push('مسار مش مفهوم'); continue; }
@@ -195,11 +221,12 @@ function shapeSpec(s, comp, warnings) {
   const o = { items };
   const fill = s.fill === undefined ? (open ? null : '#f97316') : s.fill;
   if (fill) o.fill = hex(fill);
+  if (s.fillRule === 'evenodd') o.fillRule = 2;
   if (s.stroke || (open && !fill)) { o.stroke = hex(s.stroke || '#ffffff'); o.strokeWidth = clamp(+s.strokeWidth || 6, 0.5, 400); }
   if (s.lineCap) o.lineCap = { butt: 1, round: 2, square: 3 }[s.lineCap] || 2;
   else if (s.trim) o.lineCap = 2;
   if (s.dash) o.dash = clamp(+s.dash, 1, 2000);
-  if (s.trim) o.trim = { start: clamp(+s.trim.start || 0, 0, 100), end: clamp(s.trim.end === undefined ? 100 : +s.trim.end, 0, 100), offset: +s.trim.offset || 0 };
+  if (s.trim) o.trim = { start: clamp(+s.trim.start || 0, 0, 100), end: clamp(s.trim.end === undefined ? 100 : +s.trim.end, 0, 100), offset: +s.trim.offset || 0, mode: s.trim.individually ? 2 : 1 };
   if (s.repeater) {
     const r = s.repeater;
     o.repeater = { copies: clamp(+r.copies || 3, 1, 200), offset: +r.offset || 0, position: r.position !== undefined ? vec(r.position, comp) : [100, 0], scale: r.scale !== undefined ? valueFor('shape:repeaterScale', r.scale, comp) : [100, 100], rotation: +r.rotation || 0, startOpacity: r.startOpacity === undefined ? 100 : +r.startOpacity, endOpacity: r.endOpacity === undefined ? 100 : +r.endOpacity };
@@ -250,6 +277,21 @@ function particleLayers(L, comp) {
   return { layers: out, effects: fx, blend: P === 'snow' || P === 'confetti' ? 'normal' : 'screen' };
 }
 
+/** plexus: drifting points + lines that fade in when two points are close (all expressions, in a precomp) */
+function plexusLayer(L, comp) {
+  const n = clamp(Math.round(+L.count || 16), 4, 24), W = comp.width, H = comp.height, maxD = +L.distance || Math.min(W, H) * 0.28, col = L.color || '#fdba74';
+  const pt = i => JSON.stringify('P' + (i + 1));
+  const layers = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    layers.push({ type: 'shape', name: 'Line ' + (i + 1) + '-' + (j + 1), transform: { position: [0, 0] }, shape: { kind: 'path', path: 'M0 0 L1 1', fill: null, stroke: col, strokeWidth: +L.lineWidth || 1.5 },
+      expressions: { 'shape:path': `var a=fromComp(thisComp.layer(${pt(i)}).transform.position),b=fromComp(thisComp.layer(${pt(j)}).transform.position);createPath([a,b],[],[],false)`,
+        opacity: `var d=length(thisComp.layer(${pt(i)}).transform.position,thisComp.layer(${pt(j)}).transform.position);d<${maxD.toFixed(0)}?linear(d,0,${maxD.toFixed(0)},90,0):0` } });
+  }
+  for (let i = 0; i < n; i++) layers.push({ type: 'shape', name: 'P' + (i + 1), shape: { kind: 'ellipse', size: [+L.size || 8, +L.size || 8], fill: col },
+    expressions: { position: `seedRandom(index,true);var x=random(${W * 0.05},${W * 0.95}),y=random(${H * 0.05},${H * 0.95}),a=random(0,6.28),s=random(0.2,0.6)*${+L.speed || 1};[x+Math.sin(time*s+a)*${(W * 0.08).toFixed(0)},y+Math.cos(time*s*0.8+a)*${(H * 0.08).toFixed(0)}]` } });
+  return { type: 'precomp', name: L.name || 'Plexus', start: L.start, end: L.end, transform: L.transform, keys: L.keys, blend: L.blend || 'screen', comp: { duration: comp.duration }, layers, effects: (L.effects || []).concat([{ name: 'glow', params: { radius: 12, intensity: 0.8 } }]) };
+}
+
 /**
  * The AI's scene → what the AE host builds. Unknown things are dropped (never sent), numbers clamped,
  * colours → [r,g,b,a], "%" → pixels, eases → cubic-bezier, svg → AE paths. → { spec, warnings }
@@ -266,6 +308,7 @@ function normalize(raw, compInfo = {}) {
     duration: clamp(+c.duration || compInfo.duration || 8, 0.5, 600),
     bg: c.bg ? hex(c.bg) : null
   };
+  if (c.renderer === '3d' || (raw && (raw.layers || []).some(l => l && l.extrude))) comp.renderer = '3d';
   const ctx = { layers: 0, keys: 0, warnings };
   const layers = layerList((raw && raw.layers) || [], comp, ctx, 0);
   return { spec: { comp, layers }, warnings };
@@ -276,6 +319,9 @@ function layerList(list, comp, ctx, depth) {
     if (ctx.layers >= 250) { ctx.warnings.push('أكتر من 250 لير — الباقي اتساب'); break; }
     if (ctx.keys > 5000) { ctx.warnings.push('كي فريمز كتير قوي — اتقلّلت'); break; }
     if (!L || TYPES.indexOf(L.type) < 0) { ctx.warnings.push('نوع لير مش معروف: ' + (L && L.type)); continue; }
+    // generated groups: a rigged character (plain layers) / a plexus (precomp)
+    if (L.type === 'character') { out.push(...layerList(character.flatCharacter(L, comp), comp, ctx, depth)); continue; }
+    if (L.type === 'plexus') { out.push(...layerList([plexusLayer(L, comp)], comp, ctx, depth)); continue; }
     const made = layerSpec(L, comp, ctx, depth);
     for (const m of made) { out.push(m); ctx.layers++; }
   }
@@ -326,7 +372,7 @@ function layerSpec(L, comp, ctx, depth) {
   if (L.type === 'precomp' || L.type === 'particles') {
     if (depth >= 3) { warnings.push('بري كومب جوه بري كومب أكتر من 3 مرات'); return []; }
     const sub = L.comp || {};
-    o.comp = { name: String(sub.name || o.name).slice(0, 60), width: Math.round(clamp(+sub.width || comp.width, 16, 7680)), height: Math.round(clamp(+sub.height || comp.height, 16, 4320)), fps: comp.fps, duration: clamp(+sub.duration || (o.end ? o.end - o.start : comp.duration), 0.1, 600), bg: sub.bg ? hex(sub.bg) : null };
+    o.comp = { renderer: sub.renderer === '3d' || (L.layers || []).some(l => l && l.extrude) ? '3d' : undefined, name: String(sub.name || o.name).slice(0, 60), width: Math.round(clamp(+sub.width || comp.width, 16, 7680)), height: Math.round(clamp(+sub.height || comp.height, 16, 4320)), fps: comp.fps, duration: clamp(+sub.duration || (o.end ? o.end - o.start : comp.duration), 0.1, 600), bg: sub.bg ? hex(sub.bg) : null };
     if (L.type === 'particles') {
       const p = particleLayers(L, o.comp);
       o.layers = layerList(p.layers, o.comp, ctx, depth + 1);
@@ -343,6 +389,11 @@ function layerSpec(L, comp, ctx, depth) {
   const sets = Object.assign({}, L.transform || {});
   if (L.camera) for (const k of Object.keys(L.camera)) sets['camera:' + k] = L.camera[k];
   if (L.light) for (const k of Object.keys(L.light)) sets['light:' + k] = L.light[k];
+  if (L.extrude && (L.type === 'shape' || L.type === 'text')) {
+    o.threeD = true;
+    sets['geometry:depth'] = L.extrude.depth === undefined ? 40 : L.extrude.depth;
+    if (L.extrude.bevel) { sets['geometry:bevelDepth'] = L.extrude.bevel; sets['geometry:bevelStyle'] = { angular: 2, concave: 3, convex: 4 }[L.extrude.bevelStyle] || 4; }
+  }
   for (const k of Object.keys(sets)) {
     const t = keyTarget(k, o.effects);
     if (!t) { warnings.push('خاصية مش معروفة: ' + k); continue; }
@@ -409,12 +460,16 @@ function promptDoc() {
     '   "trim":{"start":0,"end":100,"offset":0} (خط بيترسم: حرّك shape:trimEnd من 0 لـ 100),',
     '   "repeater":{"copies":8,"position":[0,0],"rotation":45,"scale":100,"startOpacity":100,"endOpacity":30}}',
     '- solid / adjustment: "color":"#hex" · footage: "file":"مسار","srcIn":0 · light: "lightType":"spot|point|parallel|ambient","light":{"intensity":100,"color":"#fff","castsShadows":1}',
+    '- ثري دي حقيقي لكلام أو شكل: "extrude":{"depth":60,"bevel":6,"bevelStyle":"convex"} (الكومب بيتحوّل Advanced 3D لوحده) — حط camera + light.',
     '- camera: "camera":{"zoom":2000,"dof":1,"focusDistance":2000,"aperture":50,"blurLevel":100}',
     '- precomp: "comp":{"width","height","duration"},"layers":[…] (مشاهد جوه مشاهد — استخدمه لتقسيم الفيديو لمشاهد ورا بعض بترانزيشن)',
+    '- character: شخصية فلات بأطراف مطاطية ومتريّجة: "action":"walk|run|idle|wave|talk|jump","colors":{"skin","shirt","pants","hair","shoes"},"height":600,"position":[x, y الأرض],"walkAcross":true,"sliders":{"Speed":1.2} — بتتحرك بسلايدرز على "<name> Ctrl" (Walk, Speed, Stride, Arm Swing, Bob, Breath, Blink, Talk, Mouth, Wave, Jump, Look)',
+    '- plexus: نقط بتطفو وخطوط بينها (تكنولوجي): "count":16,"distance":300,"color":"#hex"',
     '- particles: "preset":"' + PARTICLES.join('|') + '","count":40,"color":"#hex","colors":[…],"size":[3,8],"speed":60,"burstAt":0.5,"origin":["50%","50%"],"life":2.5',
     'الخصايص اللي تتحط في transform / keys / expressions:',
     '  ' + PROPS.join(', '),
     '  shape:' + SHAPE_PROPS.join(', shape:') + '  (shape:path قيمته SVG path أو نقط — كي فريمز بين شكلين = morph)',
+    '  shape:path.2 (المسار التاني في اللير — للـ morph بكذا مسار) · geometry:depth, geometry:bevelDepth (ثري دي)',
     '  mask:1.path, mask:1.feather, mask:1.expansion, mask:1.opacity  ·  camera:' + CAMERA_PROPS.join(', camera:') + '  ·  light:' + LIGHT_PROPS.join(', light:'),
     '  fx:<اسم الإفكت>.<باراميتر> زي fx:glow.intensity، أو fx:<matchName>.<Display Name> لإفكت متسطب',
     'المنحنيات (آخر عنصر في الكي): ' + EASES.join('، ') + '. المكان بالبكسل أو "%" من الكومب. الوقت بالثواني من أول اللير. الألوان #hex.',

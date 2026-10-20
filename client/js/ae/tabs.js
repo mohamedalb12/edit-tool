@@ -155,7 +155,7 @@
     id: 'expr', label: 'إكسبريشن', title: 'إكسبريشنز بضغطة',
     render: function (view) {
       var list = [['wiggle', 'Wiggle (اهتزاز)', 'بسلايدرز للسرعة والقوة'], ['bounce', 'Bounce (ارتداد)', 'بعد آخر كي فريم يرتد ويهدى'], ['loopCycle', 'Loop', 'يكرر الكي فريمز'], ['loopPingpong', 'رايح جاي', 'يكرر رايح جاي'],
-        ['autoFade', 'فيد تلقائي', 'ظهور واختفاء مع أول وآخر اللير'], ['float', 'طفو', 'طالع نازل بهدوء'], ['spin', 'لف مستمر', 'درجات في الثانية'], ['flicker', 'فليكر', 'رعشة في الشفافية'], ['typewriter', 'آلة كاتبة', 'للكلام: حرف حرف بسرعة']];
+        ['autoFade', 'فيد تلقائي', 'ظهور واختفاء مع أول وآخر اللير'], ['float', 'طفو', 'طالع نازل بهدوء'], ['spin', 'لف مستمر', 'درجات في الثانية'], ['flicker', 'فليكر', 'رعشة في الشفافية'], ['typewriter', 'آلة كاتبة', 'للكلام: حرف حرف بسرعة'], ['squash', 'Squash & Stretch', 'بيتمط ويتكبس مع سرعة الحركة'], ['pendulum', 'بندول', 'بيتمرجح ويهدى (لافتات، حاجات متعلقة)']];
       var g = h('div', { class: 'list' });
       list.forEach(function (x) {
         g.appendChild(h('div', { class: 'item' }, h('div', { class: 'grow' }, h('b', null, x[1]), h('div', { class: 'hint' }, x[2])),
@@ -192,7 +192,19 @@
   EF.tabs.push({
     id: 'routine', label: 'الروتين', title: 'الروتين',
     render: function (view) {
-      var r = { template: 'h264', ame: false };
+      var r = { template: 'h264', ame: false }, gap = 0;
+      var al = h('div', { class: 'chips' });
+      [['left', '⇤ شمال'], ['hcenter', '↔ نص'], ['right', 'يمين ⇥'], ['top', '⤒ فوق'], ['vcenter', '↕ نص'], ['bottom', 'تحت ⤓'], ['distH', 'وزّع أفقي'], ['distV', 'وزّع رأسي']].forEach(function (x) {
+        al.appendChild(h('button', { type: 'button', class: 'chip', 'data-align': x[0], onclick: function () { UI.safe('بيحاذي', function () { return S().alignLayers({ mode: x[0], to: /^dist/.test(x[0]) ? 'selection' : alignTo }).then(function (q) { ok(q.layers + ' لير ✓'); }); }); } }, x[1]));
+      });
+      var alignTo = 'comp';
+      view.appendChild(UI.card('أدوات الشغل اليومي',
+        UI.row(h('label', null, 'حاذي على'), UI.seg([{ value: 'comp', label: 'الكومب' }, { value: 'selection', label: 'المختار' }], alignTo, function (v) { alignTo = v; })), al,
+        UI.field('ورا بعض في الوقت', UI.slider(-30, 30, 1, gap, function (v) { return (v > 0 ? '+' : '') + v + ' فريم'; }, function (v) { gap = v; })),
+        UI.row(action('رتّبهم ورا بعض', 'بيرتّب', function () { return S().sequenceLayers({ gap: gap }).then(function (q) { ok(q.layers + ' لير ورا بعض ✓'); }); }),
+          action('فصّل الشيب لليرز', 'بيفصل', function () { return S().explodeShapes().then(function (q) { ok(q.layers + ' لير جديد ✓ (الأصلي اتقفل)'); }); }),
+          action('كنترول واحد لكل الألوان', 'بيربط الألوان', function () { return S().colorRig().then(function (q) { ok(q.colors.length + ' لون على "EF Colors" — غيّر اللون مرة يتغيّر في ' + q.linked + ' مكان ✓'); }); })),
+        UI.hint('زي Motion Tools وExplode Shape Layers وRay Dynamic Color: محاذاة، توزيع، ترتيب في الوقت، تفصيل جروبات الشيب، ولوحة ألوان واحدة للكومب كله.')));
       view.appendChild(UI.card('ريندر وابعته لبريمير',
         UI.row(UI.seg([{ value: 'h264', label: 'MP4 عادي' }, { value: 'alpha', label: 'شفاف (ProRes 4444)' }, { value: 'prores', label: 'ProRes' }], r.template, function (v) { r.template = v; })),
         UI.row(h('label', null, h('input', { type: 'checkbox', onchange: function (e) { r.ame = e.target.checked; } }), ' من Media Encoder (الأفتر يفضل فاضي)')),
@@ -330,6 +342,102 @@
     }
   });
 
+  /* ——— لوجو وثري دي: تتبّع اللوجو، أنيميشن، SVG، مورف، صورة → ثري دي ——— */
+  var lg = { file: null, style: 'draw', colors: 0, detail: 3, duration: 5 }, mo = { files: [], dur: 1, hold: 0.6, loop: false }, p3 = { file: null, depthFile: null, slices: 5, move: 'push', strength: 1 };
+  EF.tabs.push({
+    id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي',
+    render: function (view) {
+      var lgInfo = h('p', { class: 'hint' }, lg.file ? base(lg.file) : 'SVG أو PNG / JPG (بيترسم مسارات لوحده)');
+      var styles = h('div', { class: 'chips' });
+      S().logoStyles().forEach(function (st) { styles.appendChild(h('button', { type: 'button', class: 'chip' + (lg.style === st.id ? ' on' : ''), 'data-style': st.id, title: st.name, onclick: function () { lg.style = st.id; Array.prototype.forEach.call(styles.children, function (b) { b.classList.toggle('on', b.dataset.style === st.id); }); } }, st.name)); });
+      view.appendChild(UI.card('أنيميشن لوجو (من أي صورة أو SVG)',
+        UI.hint('بيحوّل اللوجو لمسارات حقيقية (Image Trace) بألوانها، وبعدين يحرّكه: يترسم بخط ويتملي، نيون، الأجزاء تتبني، أو ثري دي مجسّم بكاميرا وإضاءة.'),
+        UI.row(UI.btn('اختار اللوجو', function () { var f = EF.pickFile('اللوجو', ['svg', 'png', 'jpg', 'jpeg', 'webp']); if (f) { lg.file = f; lgInfo.textContent = base(f); } }, 'small')), lgInfo, styles,
+        UI.field('الألوان', UI.slider(0, 8, 1, lg.colors, function (v) { return v ? v + ' ألوان' : 'تلقائي'; }, function (v) { lg.colors = v; })),
+        UI.field('التفاصيل', UI.slider(1, 5, 1, lg.detail, function (v) { return ['', 'قليلة', 'ناعمة', 'متوسطة', 'كتير', 'كل حاجة'][v]; }, function (v) { lg.detail = v; })),
+        UI.field('المدة', UI.slider(2, 15, 0.5, lg.duration, function (v) { return v + 's'; }, function (v) { lg.duration = v; })),
+        UI.row(action('حرّك اللوجو', 'بيحوّل ويحرّك', function () { return S().logoAnimate({ file: lg.file, style: lg.style, colors: lg.colors, detail: lg.detail, duration: lg.duration }).then(function (r) { ok(r.parts + ' جزء · ' + r.paths + ' مسار' + (r.source === 'trace' ? ' (اتعمله Trace)' : '') + ' ✓'); }); }, 'primary'),
+          action('حطه شكل ثابت هنا', 'بيحوّل', function () { return S().vectorImport({ file: lg.file, colors: lg.colors, detail: lg.detail }).then(function (r) { ok('اتحط ' + r.layers + ' لير أشكال ✓'); }); }))));
+
+      var moInfo = h('p', { class: 'hint' });
+      function moDraw() { moInfo.textContent = mo.files.length ? mo.files.map(base).join(' ← ') : 'من غير ملفات: بيعمل مورف بين الليرز المختارة (أشكال أو كلام) بترتيب اختيارك'; }
+      view.appendChild(UI.card('مورف (شكل يتحوّل لشكل)',
+        UI.hint('اختار ليرين أو أكتر (أشكال، أيقونات، أو كلام — الكلام بيتحوّل Outlines لوحده) أو لوجوهات من ملفات: بيظبط عدد النقط ويقابلها عشان التحوّل يبقى ناعم، والألوان كمان.'),
+        UI.row(UI.btn('من ملفات…', function () { var f = EF.pickFiles('الأشكال بالترتيب', ['svg', 'png', 'jpg', 'jpeg']); if (f && f.length) { mo.files = f; moDraw(); } }, 'small'), UI.btn('من الليرز المختارة', function () { mo.files = []; moDraw(); }, 'small ghost')), moInfo,
+        UI.field('مدة التحوّل', UI.slider(0.2, 4, 0.1, mo.dur, function (v) { return v.toFixed(1) + 's'; }, function (v) { mo.dur = v; })),
+        UI.field('يثبت قد إيه', UI.slider(0, 4, 0.1, mo.hold, function (v) { return v.toFixed(1) + 's'; }, function (v) { mo.hold = v; })),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: mo.loop, onchange: function (e) { mo.loop = e.target.checked; } }), ' يرجع لأول شكل (لوب)')),
+        UI.row(action('اعمل المورف', 'بيعمل مورف', function () { return S().morph({ files: mo.files, dur: mo.dur, hold: mo.hold, loop: mo.loop }).then(function (r) { ok('مورف ' + r.stages + ' أشكال · ' + r.paths + ' مسار × ' + r.points + ' نقطة ✓'); }); }, 'primary'))));
+      moDraw();
+
+      var p3Info = h('p', { class: 'hint' }, p3.file ? base(p3.file) : 'مفيش صورة'), p3Step = h('p', { class: 'hint' });
+      view.appendChild(UI.card('صورة → ثري دي',
+        UI.hint('صورة عادية تبقى لقطة ثري دي: بيحسب العمق، يقطّعها طبقات بعمقها، ويحطها في 3D بكاميرا بتتحرك (زي 3D Photo). العمق: من fal.ai لو حطيت مفتاحه (أدق)، أو ملف عمق عندك، أو تقدير بالـ AI للموضوع الأساسي.'),
+        UI.row(UI.btn('اختار الصورة', function () { var f = EF.pickFile('الصورة', ['jpg', 'jpeg', 'png', 'webp']); if (f) { p3.file = f; p3Info.textContent = base(f); } }, 'small'), UI.btn('ملف عمق (اختياري)', function () { var f = EF.pickFile('خريطة العمق (أبيض = قريب)', ['png', 'jpg']); if (f) { p3.depthFile = f; p3Info.textContent = base(p3.file || '') + ' + ' + base(f); } }, 'small ghost')), p3Info,
+        UI.row(h('label', null, 'الحركة'), UI.seg([{ value: 'push', label: 'داخلة' }, { value: 'orbit', label: 'بتلف' }, { value: 'rise', label: 'طالعة' }, { value: 'float', label: 'طافية' }], p3.move, function (v) { p3.move = v; })),
+        UI.field('الطبقات', UI.slider(2, 8, 1, p3.slices, function (v) { return v; }, function (v) { p3.slices = v; })),
+        UI.field('العمق', UI.slider(0.3, 2.5, 0.1, p3.strength, function (v) { return v.toFixed(1) + 'x'; }, function (v) { p3.strength = v; })),
+        UI.row(action('اعملها ثري دي', 'بيعمل الثري دي', function () { return S().photo3D({ file: p3.file, depthFile: p3.depthFile, slices: p3.slices, move: p3.move, strength: p3.strength, onStep: function (m) { p3Step.textContent = m; } }).then(function (r) { p3Step.textContent = r.slices + ' طبقات · العمق: ' + r.depth; ok('اللقطة الثري دي جاهزة ✓'); }); }, 'primary'),
+          action('موديل ثري دي حقيقي (fal.ai)', 'بيعمل الموديل', function () { return S().imageTo3DModel({ file: p3.file, onStep: function (m) { p3Step.textContent = m; } }).then(function (r) { p3Step.textContent = base(r.file); ok('الموديل اتحط في كومب ثري دي ✓ (محتاج AE 2024+)'); }); })), p3Step));
+    }
+  });
+
+  /* ——— تراكينج ——— */
+  var tk = { points: [], mode: 'attach', text: '', duration: 0, what: '' };
+  EF.tabs.push({
+    id: 'track', label: 'تراكينج', title: 'تراكينج',
+    render: function (view) {
+      var stage = h('div', { class: 'track-stage' }), img = h('img', { alt: '' }), dots = h('div', { class: 'track-dots' }), info = h('p', { class: 'hint' }), step = h('p', { class: 'hint' });
+      stage.appendChild(img); stage.appendChild(dots);
+      function drawDots() {
+        UI.empty(dots);
+        tk.points.forEach(function (p, i) { var d = h('span', { class: 'track-dot', title: 'شيل', onclick: function (e) { e.stopPropagation(); tk.points.splice(i, 1); drawDots(); } }, String(i + 1)); d.style.left = (p[0] * 100) + '%'; d.style.top = (p[1] * 100) + '%'; dots.appendChild(d); });
+        info.textContent = tk.points.length ? tk.points.length + ' نقطة — ' + (tk.points.length === 1 ? 'مكان بس' : tk.points.length === 4 ? '4 أركان (Corner Pin)' : 'مكان + سكيل + لف') : 'دوس على الصورة عشان تحط نقطة (1 = مكان، 2 = + سكيل ولف، 4 = أركان شاشة)';
+      }
+      stage.addEventListener('click', function (e) { var r = stage.getBoundingClientRect(); if (!img.src || tk.points.length >= 4) return; tk.points.push([(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]); drawDots(); });
+      var load = action('هات الفريم', 'بيجيب الفريم', function () { return S().trackFrame().then(function (r) { img.src = 'data:image/jpeg;base64,' + r.b64; stage.classList.add('on'); tk.points = []; drawDots(); step.textContent = r.src.layer.name + (r.src.others.length ? ' · مختار معاه: ' + r.src.others.map(function (o) { return o.name; }).join('، ') : ''); }); });
+      var what = h('input', { class: 'grow', placeholder: 'أو قول عايز تتبّع إيه: الوش، الموبايل، اللافتة…', value: tk.what, oninput: function (e) { tk.what = e.target.value; } });
+      var txt = h('input', { class: 'grow', placeholder: 'كلام يمشي مع الحاجة (اختياري)', value: tk.text, oninput: function (e) { tk.text = e.target.value; } });
+      view.appendChild(UI.card('تتبّع حاجة في الفيديو',
+        UI.hint('اختار لير الفيديو (ومعاه الليرز اللي عايزها تمشي مع الحركة، أو الصورة اللي هتتحط على الشاشة)، حط المؤشر على أول فريم، ودوس "هات الفريم".'),
+        UI.row(load), stage, info,
+        UI.row(what, action('دوّر عليها بالـ AI', 'بيدوّر', function () { return S().trackFind(tk.what, { corners: tk.mode === 'pin' }).then(function (r) { tk.points = r.points; drawDots(); }); })),
+        UI.row(h('label', null, 'بعدها'), UI.seg([{ value: 'attach', label: 'ليرز تمشي معاها' }, { value: 'pin', label: 'شاشة (Corner Pin)' }, { value: 'stabilize', label: 'ثبّت الفيديو' }], tk.mode, function (v) { tk.mode = v; })),
+        UI.row(txt),
+        UI.field('لحد', UI.slider(0, 30, 0.5, tk.duration, function (v) { return v ? v + 's' : 'آخر اللير'; }, function (v) { tk.duration = v; })),
+        UI.row(action('تراك', 'بيتتبّع', function () { return S().track({ points: tk.points, mode: tk.mode, text: tk.text, duration: tk.duration, onStep: function (m) { step.textContent = m; } }).then(function (r) { step.textContent = r.frames + ' فريم' + (r.lost !== null ? ' — ⚠ التتبّع ضاع عند ' + r.lost + 's من البداية (حط نقطة أوضح وكمّل من هناك)' : ' ✓'); ok('التراكينج خلص ✓'); }); }, 'primary')), step));
+      drawDots();
+    }
+  });
+
+  /* ——— كاراكتر ——— */
+  var ch = { name: 'Ali', action: 'walk', colors: { skin: '#f2c29b', shirt: '#f97316', pants: '#1e293b', hair: '#2b1a10' }, walkAcross: false, ik: true, react: 30, link: 'scale' };
+  EF.tabs.push({
+    id: 'character', label: 'كاراكتر', title: 'كاراكتر أنيميشن',
+    render: function (view) {
+      var nm = h('input', { class: 'grow', value: ch.name, placeholder: 'اسم الكاراكتر', oninput: function (e) { ch.name = e.target.value; } });
+      var acts = h('div', { class: 'chips' });
+      S().characterActions().forEach(function (a) { acts.appendChild(h('button', { type: 'button', class: 'chip' + (ch.action === a.id ? ' on' : ''), 'data-act': a.id, onclick: function () { ch.action = a.id; Array.prototype.forEach.call(acts.children, function (b) { b.classList.toggle('on', b.dataset.act === a.id); }); } }, a.name)); });
+      var cols = h('div', { class: 'row' });
+      [['skin', 'البشرة'], ['shirt', 'التيشيرت'], ['pants', 'البنطلون'], ['hair', 'الشعر']].forEach(function (c) { cols.appendChild(h('label', { title: c[1] }, c[1] + ' ', h('input', { type: 'color', value: ch.colors[c[0]], oninput: function (e) { ch.colors[c[0]] = e.target.value; } }))); });
+      view.appendChild(UI.card('كاراكتر جاهز ومتريّج (زي RubberHose)',
+        UI.hint('شخصية فلات بأطراف مطاطية بتتحرك لوحدها. كل حاجة سلايدرز على "<الاسم> Ctrl": Walk، Speed، Stride، Arm Swing، Wave، Talk، Jump، Look… وحرّك "<الاسم> Root" عشان يمشي في الكادر.'),
+        UI.row(nm), acts, cols,
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: ch.walkAcross, onchange: function (e) { ch.walkAcross = e.target.checked; } }), ' يعدّي الكادر من الشمال لليمين')),
+        UI.row(action('ضيف الكاراكتر', 'بيعمل الكاراكتر', function () { return S().characterAdd({ name: ch.name || 'Character', action: ch.action, colors: ch.colors, walkAcross: ch.walkAcross }).then(function (r) { ok(r.layers + ' لير متريّجين ✓'); }); }, 'primary'))));
+      view.appendChild(UI.card('ريج للكاراكتر بتاعك (زي Duik)',
+        UI.hint('سمّي الليرز (من فوتوشوب / إليستريتور): head / body / arm L upper / arm L lower / hand L / leg R / shin R / foot R … (أو راس، جسم، دراع شمال، رجل يمين). بيحط الأنكر في المفاصل من غير ما حاجة تتحرك، يربطهم ببعض، ويضيف كنترولر بسلايدرز للمشي والتنفّس والرمش والكلام.'),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: ch.ik, onchange: function (e) { ch.ik = e.target.checked; } }), ' IK للإيدين والرجلين (حرّك نل الإيد والدراع يتبعه)')),
+        UI.row(action('اعمل الريج', 'بيعمل الريج', function () { return S().characterRig({ ik: ch.ik }).then(function (r) { ok(r.layers + ' جزء · ' + r.expressions + ' إكسبريشن' + (r.ik ? ' · ' + r.ik + ' IK' : '') + ' ✓'); }); }, 'primary'))));
+      view.appendChild(UI.card('ليب سينك وصوت',
+        UI.hint('ليب سينك: بيسمع الصوت ويحرّك سلايدر "Mouth" بتاع الكاراكتر فريم فريم. Audio React: أي لير مختار ينبض مع المزيكا (سلايدر Level على "EF Audio").'),
+        UI.row(action('ليب سينك من ملف صوت', 'بيعمل ليب سينك', function () { var f = EF.pickFile('الصوت', ['wav', 'mp3', 'm4a', 'aac']); if (!f) return Promise.resolve(); return S().lipSync({ audio: f }).then(function (r) { ok('ليب سينك ' + r.frames + ' فريم على ' + r.ctrl + ' ✓'); }); })),
+        UI.row(h('label', null, 'المختار'), UI.seg([{ value: 'scale', label: 'يكبر ويصغر' }, { value: 'opacity', label: 'ينوّر' }], ch.link, function (v) { ch.link = v; })),
+        UI.field('القوة', UI.slider(5, 100, 5, ch.react, function (v) { return v + '%'; }, function (v) { ch.react = v; })),
+        UI.row(action('Audio React', 'بيسمع المزيكا', function () { var f = EF.pickFile('المزيكا', ['wav', 'mp3', 'm4a', 'aac']); if (!f) return Promise.resolve(); return S().audioReact({ audio: f, amount: ch.react, link: ch.link }).then(function (r) { ok(r.frames + ' فريم · ' + r.linked + ' لير بينبض ✓'); }); }))));
+    }
+  });
+
   /* ——— مكتبتي (نفس مكتبة بريمير) ——— */
   EF.tabs.push({
     id: 'library', label: 'مكتبتي', title: 'مكتبتي',
@@ -359,6 +467,9 @@
       var out = h('pre', { class: 'ltr hint' });
       view.appendChild(UI.card('مفتاح OpenRouter (لمساعد الموشن)', UI.row(key, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { openrouter: key.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); })),
         UI.hint('المفاتيح والمكتبة والإعدادات واحدة مع EditFast في بريمير.')));
+      var fal = h('input', { class: 'grow ltr', type: 'password', value: S().settings.keys.fal || '', placeholder: 'fal key' });
+      view.appendChild(UI.card('مفتاح fal.ai (اختياري)', UI.row(fal, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { fal: fal.value.trim() } }); ok('اتحفظ ✓'); })),
+        UI.hint('لعمق أدق في "صورة → ثري دي" ولعمل موديل ثري دي حقيقي من صورة. من غيره الأدوات بتشتغل بالتقدير.')));
       var conn = h('div', { class: 'hint' });
       function drawConn() {
         UI.empty(conn);

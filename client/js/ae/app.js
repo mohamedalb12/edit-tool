@@ -4,6 +4,9 @@
   EF.GROUPS = [
     { id: 'templates', label: 'قوالبي', title: 'قوالبي (لبريمير)', icon: 'templates', members: ['templates'] },
     { id: 'director', label: 'المونتير', title: 'المونتير الذكي', icon: 'auto', members: ['director'] },
+    { id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي', icon: 'cube', members: ['studio'] },
+    { id: 'track', label: 'تراكينج', title: 'تراكينج', icon: 'reels', members: ['track'] },
+    { id: 'character', label: 'كاراكتر', title: 'كاراكتر أنيميشن', icon: 'agent', members: ['character'] },
     { id: 'motion', label: 'الحركة', title: 'الحركة', icon: 'motion', members: ['motion'] },
     { id: 'text', label: 'الكلام', title: 'الكلام والأشكال', icon: 'titles', members: ['text'] },
     { id: 'expr', label: 'إكسبريشن', title: 'إكسبريشنز بضغطة', icon: 'code', members: ['expr'] },
@@ -41,6 +44,13 @@
     A('stagger', '⋰', 'ستاجر 3 فريم', 'stagger offset ستاجر', function () { return S.stagger({ frames: 3 }).then(function () { UI.toast('✓'); }); });
     A('render', '⏺', 'ريندر الكومب لبريمير', 'render ريندر', function () { return S.render({}).then(function () { UI.toast('✓'); }); });
     A('director', '🎬', 'المونتير الذكي: وصّف مشهد', 'ai director scene مشهد مونتير', function () { show('director'); });
+    A('logo', '✒', 'أنيميشن لوجو من صورة / SVG', 'logo trace svg لوجو', function () { show('studio'); });
+    A('morph', '◐', 'مورف بين الليرز المختارة', 'morph shape مورف', function () { return S.morph({}).then(function (r) { UI.toast('مورف ' + r.stages + ' أشكال ✓'); }); });
+    A('photo3d', '🧊', 'صورة → ثري دي', '3d photo parallax ثري دي صورة', function () { show('studio'); });
+    A('track', '⌖', 'تراكينج', 'track tracking corner pin stabilize تراك ثبت', function () { show('track'); });
+    A('char', '🧍', 'كاراكتر متريّج', 'character rig rubberhose duik كاراكتر ريج', function () { show('character'); });
+    A('explode', '✂', 'فصّل الشيب لليرز', 'explode shape layers فصل', function () { return S.explodeShapes().then(function (r) { UI.toast(r.layers + ' ✓'); }); });
+    A('colors', '🎨', 'كنترول واحد لكل الألوان', 'color controller palette ألوان', function () { return S.colorRig().then(function (r) { UI.toast(r.colors.length + ' لون ✓'); }); });
     A('save', '💾', 'احفظ الكومب كقالب', 'template mogrt قالب', function () { show('templates'); });
     return out;
   };

@@ -99,12 +99,12 @@ function effect(matchName) {
 function vectorItem(m) {
   if (m === 'ADBE Vector Group') { const g = new Group(m, 'Group 1', PropertyType.INDEXED_GROUP); g.add(new Group('ADBE Vectors Group', 'Contents', PropertyType.INDEXED_GROUP, vectorItem)); const t = g.add(new Group('ADBE Vector Transform Group', 'Transform')); t.add(new Prop('ADBE Vector Position', 'Position', [0, 0], PVT.TwoD_SPATIAL)); t.add(new Prop('ADBE Vector Scale', 'Scale', [100, 100], PVT.TwoD)); t.add(new Prop('ADBE Vector Rotation', 'Rotation', 0, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Group') { const g = new Group(m, 'Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Shape', 'Path', new Shape(), PVT.SHAPE)); return g; }
-  if (m === 'ADBE Vector Filter - Trim') { const g = new Group(m, 'Trim Paths 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Trim Start', 'Start', 0, PVT.OneD)); g.add(new Prop('ADBE Vector Trim End', 'End', 100, PVT.OneD)); g.add(new Prop('ADBE Vector Trim Offset', 'Offset', 0, PVT.OneD)); return g; }
+  if (m === 'ADBE Vector Filter - Trim') { const g = new Group(m, 'Trim Paths 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Trim Start', 'Start', 0, PVT.OneD)); g.add(new Prop('ADBE Vector Trim End', 'End', 100, PVT.OneD)); g.add(new Prop('ADBE Vector Trim Offset', 'Offset', 0, PVT.OneD)); g.add(new Prop('ADBE Vector Trim Type', 'Trim Multiple Shapes', 1, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Filter - Repeater') { const g = new Group(m, 'Repeater 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Repeater Copies', 'Copies', 3, PVT.OneD)); g.add(new Prop('ADBE Vector Repeater Offset', 'Offset', 0, PVT.OneD)); const t = g.add(new Group('ADBE Vector Repeater Transform', 'Transform')); t.add(new Prop('ADBE Vector Repeater Position', 'Position', [100, 0], PVT.TwoD_SPATIAL)); t.add(new Prop('ADBE Vector Repeater Scale', 'Scale', [100, 100], PVT.TwoD)); t.add(new Prop('ADBE Vector Repeater Rotation', 'Rotation', 0, PVT.OneD)); t.add(new Prop('ADBE Vector Repeater Opacity 1', 'Start Opacity', 100, PVT.OneD)); t.add(new Prop('ADBE Vector Repeater Opacity 2', 'End Opacity', 100, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Rect') { const g = new Group(m, 'Rectangle Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Rect Size', 'Size', [100, 100], PVT.TwoD)); g.add(new Prop('ADBE Vector Rect Roundness', 'Roundness', 0, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Shape - Ellipse') { const g = new Group(m, 'Ellipse Path 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Ellipse Size', 'Size', [100, 100], PVT.TwoD)); return g; }
   if (m === 'ADBE Vector Shape - Star') { const g = new Group(m, 'Polystar Path 1', PropertyType.INDEXED_GROUP); ['ADBE Vector Star Type', 'ADBE Vector Star Points', 'ADBE Vector Star Outer Radius', 'ADBE Vector Star Inner Radius', 'ADBE Vector Star Rotation'].forEach(x => g.add(new Prop(x, x, 1, PVT.OneD))); return g; }
-  if (m === 'ADBE Vector Graphic - Fill') { const g = new Group(m, 'Fill 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Fill Color', 'Color', [1, 0, 0, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Fill Opacity', 'Opacity', 100, PVT.OneD)); return g; }
+  if (m === 'ADBE Vector Graphic - Fill') { const g = new Group(m, 'Fill 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Fill Color', 'Color', [1, 0, 0, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Fill Opacity', 'Opacity', 100, PVT.OneD)); g.add(new Prop('ADBE Vector Fill Rule', 'Fill Rule', 1, PVT.OneD)); return g; }
   if (m === 'ADBE Vector Graphic - Stroke') { const g = new Group(m, 'Stroke 1', PropertyType.INDEXED_GROUP); g.add(new Prop('ADBE Vector Stroke Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); g.add(new Prop('ADBE Vector Stroke Width', 'Stroke Width', 2, PVT.OneD)); g.add(new Prop('ADBE Vector Stroke Line Cap', 'Line Cap', 1, PVT.OneD)); g.add(new Prop('ADBE Vector Stroke Line Join', 'Line Join', 1, PVT.OneD)); g.add(new Group('ADBE Vector Stroke Dashes', 'Dashes', PropertyType.INDEXED_GROUP, dm => dm === 'ADBE Vector Stroke Dash 1' ? new Prop(dm, 'Dash', 10, PVT.OneD) : null)); return g; }
   return null;
 }
@@ -133,7 +133,7 @@ class TextDocument { constructor(text) { this.text = text; this.fontSize = 72; t
 
 class Layer {
   constructor(comp, name, kind) {
-    this.containingComp = comp; this.name = name; this.kind = kind; this.parent = null; this.threeDLayer = false; this.guideLayer = false; this.enabled = true; this.shy = false;
+    this.containingComp = comp; this.name = name; this.kind = kind; this.parent = null; this._3d = false; this.guideLayer = false; this.enabled = true; this.shy = false;
     this.inPoint = 0; this.outPoint = comp.duration; this.startTime = 0; this.nullLayer = kind === 'null'; this.source = null; this.label = 0; this.id = IDS++;
     this.root = new Group('ADBE Layer', name); this.root.parentProperty = this;
     const tr = this.root.add(new Group('ADBE Transform Group', 'Transform'));
@@ -150,18 +150,30 @@ class Layer {
     }));
     this.root.add(new Group('ADBE Effect Parade', 'Effects', PropertyType.INDEXED_GROUP, effect));
     this.root.add(new Group('ADBE Material Options Group', 'Material Options')).add(new Prop('ADBE Casts Shadows', 'Casts Shadows', 0, PVT.OneD));
-    this.root.add(new Group('ADBE Extrsn Options Group', 'Geometry Options')).add(new Prop('ADBE Extrsn Depth', 'Extrusion Depth', 0, PVT.OneD));
+    const geo = this.root.add(new Group('ADBE Extrsn Options Group', 'Geometry Options')); geo.add(new Prop('ADBE Extrsn Depth', 'Extrusion Depth', 0, PVT.OneD)); geo.add(new Prop('ADBE Bevel Styles', 'Bevel Style', 1, PVT.OneD)); geo.add(new Prop('ADBE Bevel Depth', 'Bevel Depth', 0, PVT.OneD));
+  }
+  get startTime() { return this._st || 0; }
+  set startTime(v) { const d = v - (this._st || 0); this._st = v; if (this.outPoint !== undefined) { this.inPoint += d; this.outPoint += d; } }
+  get threeDLayer() { return this._3d; }
+  set threeDLayer(v) {
+    this._3d = !!v;
+    if (!v) return;
+    // AE: a 3D layer's position / anchor / scale get a z
+    const t = this.root.property('ADBE Transform Group');
+    for (const [m, z] of [['ADBE Position', 0], ['ADBE Anchor Point', 0], ['ADBE Scale', 100]]) { const p = t.property(m); if (p.value.length === 2) { p.value = p.value.concat([z]); p.propertyValueType = m === 'ADBE Scale' ? PVT.ThreeD : PVT.ThreeD_SPATIAL; } }
   }
   get index() { return this.containingComp.layerList.indexOf(this) + 1; }
   get numProperties() { return this.root.numProperties; }
   property(k) { return this.root.property(k); }
   get transform() { return this.root.property('ADBE Transform Group'); }
   get selected() { return this.containingComp.selectedLayers.includes(this); }
+  set selected(v) { const S = this.containingComp.selectedLayers, i = S.indexOf(this); if (v && i < 0) S.push(this); if (!v && i >= 0) S.splice(i, 1); }
   moveBefore(other) { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.splice(L.indexOf(other), 0, this); }
   sourceRectAtTime() { return this._rect || { left: -100, top: -50, width: 200, height: 100 }; }
-  duplicate() { return this; }
+  duplicate() { return this.containingComp._duplicate ? this.containingComp._duplicate(this) : this; }
   remove() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); }
   moveToEnd() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.push(this); }
+  setParentWithJump(p) { this.parent = p; this.jumped = true; }
   setTrackMatte(m, type) { this.trackMatteLayer = m; this.trackMatteType = type; }
 }
 // 2D layers report 2D position / scale values
@@ -239,6 +251,12 @@ function loadAE({ dir } = {}) {
       }
       return d;
     };
+    c._duplicate = L => {
+      const N = L.kind === 'shape' ? c.layers.addShape() : L.kind === 'text' ? c.layers.addText(L.property('ADBE Text Properties').property('ADBE Text Document').value.text) : c.layers.addNull();
+      if (L.kind === 'shape') N.root.property('ADBE Root Vectors Group').children.length = 0;
+      N.name = L.name + ' 2'; N.inPoint = L.inPoint; N.outPoint = L.outPoint; copyTree(L.root, N.root);
+      N.moveBefore(L); return N;
+    };
     c.openInViewer = () => { project._active = c; return c; };
     c.saveFrameToPng = (t, f) => { fs.mkdirSync(path.dirname(f.fsName), { recursive: true }); fs.writeFileSync(f.fsName, require('../../core/util').makePng(16, 9, [249, 115, 22, 255])); };
     c.exportAsMotionGraphicsTemplate = (overwrite, p) => {
@@ -274,6 +292,20 @@ function loadAE({ dir } = {}) {
   const app = {
     version: '25.0', project, undo: [], effects: [{ displayName: 'Glow', matchName: 'ADBE Glo2', category: 'Stylize' }, { displayName: 'Saber', matchName: 'VIDEOCOPILOT 3DSaber', category: 'Video Copilot' }, { displayName: 'Old', matchName: 'X Old', category: '_Obsolete' }], preferences: { scriptsCanWrite: 1, getPrefAsLong(sec, key) { return key === 'Pref_SCRIPTING_FILE_NETWORK_SECURITY' ? this.scriptsCanWrite : 0; } },
     beginUndoGroup(n) { app.undo.push(n); }, endUndoGroup() {},
+    findMenuCommandId(name) { return name === 'Create Shapes from Text' ? 3781 : 0; },
+    executeCommand(id) {
+      const c = project._active; if (!c || id !== 3781) return;
+      for (const T of c.selectedLayers.slice()) {
+        if (T.kind !== 'text') continue;
+        const S = c.layers.addShape(); S.name = T.name + ' Outlines'; S.moveBefore(T);
+        const g = S.property('ADBE Root Vectors Group').addProperty('ADBE Vector Group'); g.name = 'H';
+        const sh = g.property('ADBE Vectors Group').addProperty('ADBE Vector Shape - Group').property('ADBE Vector Shape').value;
+        const shape = new Shape(); shape.vertices = [[-50, -30], [50, -30], [50, 30], [-50, 30]]; shape.inTangents = shape.vertices.map(() => [0, 0]); shape.outTangents = shape.vertices.map(() => [0, 0]); shape.closed = true;
+        g.property('ADBE Vectors Group').property(1).property('ADBE Vector Shape').value = shape; void sh;
+        g.property('ADBE Vectors Group').addProperty('ADBE Vector Graphic - Fill');
+        T.enabled = false; c.selectedLayers.length = 0; c.selectedLayers.push(S);
+      }
+    },
     open(f) { project.file = f; project.opened = f.fsName; return project; }
   };
   const ctx = vm.createContext({

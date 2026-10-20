@@ -649,3 +649,9 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .mgt-fields .field { margin: 6px 0; }
 .mgt-fields input[type=color] { width: 44px; height: 26px; padding: 0; border: 0; background: none; }
 .chip button.x { border: 0; background: none; padding: 0 2px; font-size: 11px; }
+/* tracking: click points on the frame */
+.track-stage { position: relative; display: none; margin: 8px 0; border-radius: 12px; overflow: hidden; cursor: crosshair; border: 1px solid var(--line-2); background: #000; }
+.track-stage.on { display: block; }
+.track-stage img { display: block; width: 100%; height: auto; user-select: none; pointer-events: none; }
+.track-dots { position: absolute; inset: 0; }
+.track-dot { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--grad); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 0 2px #fff, 0 6px 16px -6px rgba(234, 88, 12, .9); cursor: pointer; }

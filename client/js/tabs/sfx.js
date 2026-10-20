@@ -14,7 +14,7 @@
         history.forEach(function (x) {
           var audio = h('audio', { src: EF.fileUrl(x.file), preload: 'none' });
           hist.appendChild(h('div', { class: 'item' },
-            UI.btn('▶', function () { audio.currentTime = 0; audio.play(); }, 'small'),
+            UI.btn('▶', function () { audio.currentTime = 0; var pr = audio.play(); if (pr && pr.catch) pr.catch(function () {}); }, 'small'),
             h('span', { class: 'grow ltr' }, x.prompt), audio,
             UI.btn('حط عند رأس التشغيل', function () { UI.safe('بيحط الصوت', function () { return S.seq().then(function (s) { return S.host('placeFile', { path: x.file, time: s.playhead, kind: 'audio', track: -1, bin: 'EditFast/SFX' }); }).then(function () { UI.toast('اتحط ✓'); }); }); }, 'small')));
         });
