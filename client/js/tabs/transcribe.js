@@ -68,7 +68,10 @@
         var r = ranges(); if (!r.length) return UI.toast('اشطب كلام الأول', true);
         UI.safe('بيقص', function () { return S.cutRanges({ ranges: r }).then(function (x) { UI.toast('اتشال ' + (x.ranges || 0) + ' جزء ✓ على نسخة: ' + (x.sequence || '')); struck = {}; cutInfo(); S.transcript = null; drawWords(); }); }, doCut);
       }, 'small');
-      view.appendChild(UI.card('التفريغ (أوفلاين بـ Whisper)', UI.field('اللهجة', dialect), UI.field('تراك الكلام', trackSel), UI.modelPicker('spellfix'),
+      var S0 = EF.services, groqOn = !!(S0.settings.keys.groq && S0.settings.transcribeEngine !== 'local');
+      var engineNote = h('p', { class: 'hint' }, groqOn ? '⚡ بيفرّغ على Groq (Whisper Large v3) — أدق وأسرع.' : 'بيفرّغ على جهازك. للدقة الأعلى في العربي حط مفتاح Groq من الإعدادات (ببلاش).',
+        groqOn ? null : h('button', { type: 'button', class: 'btn small', onclick: function () { EF.show('settings'); } }, 'حط مفتاح Groq'));
+      view.appendChild(UI.card(groqOn ? 'التفريغ (Groq)' : 'التفريغ (أوفلاين بـ Whisper)', engineNote, UI.field('اللهجة', dialect), UI.field('تراك الكلام', trackSel), UI.modelPicker('spellfix'),
         UI.hint('التوقيت لكل كلمة. كل ملف بيتفرّغ مرة واحدة بس حتى لو اتقص لحتت. دوس على كلمة تروح لها، ودبل كليك تصحّحها قبل الكابشن. "القص بالكلام": اشطب الكلام اللي مش عايزه وهو يتشال من التايملين.'),
         UI.row(go, prog), UI.row(modeBtn, doCut, cutTxt), words));
       // ——— كابشن عادي: من غير أي أنيميشن ———

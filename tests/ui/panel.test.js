@@ -339,7 +339,7 @@ test('الإعدادات: keys (with a Key-ID check), a model picker for every A
   await page.locator('input[type=password]').first().fill('sk-or-NEW'); await page.locator('input[type=password]').first().dispatchEvent('change');
   assert.equal(await page.evaluate(() => EF.services.settings.keys.openrouter), 'sk-or-NEW');
   // the ElevenLabs "Key ID" mix-up is caught right away
-  const el = page.locator('input[type=password]').nth(1);
+  const el = page.locator('input[type=password][placeholder="ElevenLabs (SFX)"]');
   await el.fill('7680bba80141e4112eda7e49d5c3bb71'); await el.dispatchEvent('change');
   assert.match(await page.textContent('#view'), /ده شكله الـ Key ID/);
   await el.fill('sk_real'); await el.dispatchEvent('change');

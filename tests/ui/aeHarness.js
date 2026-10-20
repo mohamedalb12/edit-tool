@@ -93,6 +93,8 @@
     favUse: function (id) { return rec('favUse', id, {}); },
     kinetic: function (o) { return rec('kinetic', { audio: o.audio, style: o.style }, { words: 12 }); },
     voiceAd: function (o) { return rec('voiceAd', { audio: o.audio, brief: o.brief, captions: o.captions }, { sentences: 4, say: '' }); },
+    highlightPresets: function () { return [{ id: 'blue-rest', name: 'الباقي أزرق والمبنى طبيعي' }, { id: 'bw-rest', name: 'الباقي أبيض وأسود' }, { id: 'gold', name: 'ذهبي' }, { id: 'color-building', name: 'المبنى ملوّن' }, { id: 'focus', name: 'غامق ومبلّر' }]; },
+    highlight: function (o) { o.onStep && o.onStep('بيتتبّع'); return rec('highlight', { n: o.points.length, mode: o.mode, preset: o.preset, look: o.look, label: o.label }, { frames: 50, controls: 'EF Highlight 1 Controls', mode: o.mode }); },
     selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); }
   };
   window.EF_TEST = { node: load, services: S, host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'After Effects (test)' } : {}); } };

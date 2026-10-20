@@ -22,6 +22,7 @@ const character = require('./character');
 const motionKit = require('./motionKit');
 const physics = require('./physics');
 const kinetic = require('./kinetic');
+const highlight = require('./highlight');
 const STILL = /\.(png|jpe?g|webp|bmp|tiff?|gif|psd)$/i;
 
 /** AI steps the motion assistant may run (name → what it does, for the prompt) */
@@ -804,7 +805,9 @@ class AEServices {
   /* ---------- كلام مع الصوت، وصوت → أنيميشن ---------- */
   async transcribeAudio(file, onStep) {
     const t = this.tools(), model = this.settings.paths.whisperModel;
-    const r = await require('./transcribe').transcribe({ ffmpeg: this.ffmpeg(), whisper: t.whisper, model, file, dialectId: this.settings.dialect || 'egyptian', cacheDir: config.cacheDir('transcripts'), onProgress: onStep });
+    const r = await require('./transcribe').transcribe({ ffmpeg: this.ffmpeg(), whisper: t.whisper, model, file, dialectId: this.settings.dialect || 'egyptian', cacheDir: config.cacheDir('transcripts'), onProgress: onStep,
+      engine: this.settings.transcribeEngine || 'auto', groqKey: this.settings.keys.groq, groqModel: this.settings.groqModel || 'whisper-large-v3', fetchImpl: this.fetch,
+      llm: this.settings.keys.openrouter ? this.llm : null, spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null });
     if (!r.words.length) throw new Error('مفيش كلام اتسمع في الملف');
     return r;
   }
@@ -908,6 +911,89 @@ class AEServices {
       made++;
     }
     return { made };
+  }
+
+  /* ---------- إبراز مبنى (عقارات) ---------- */
+  highlightPresets() { return Object.keys(highlight.PRESETS).map(id => ({ id, name: highlight.PRESETS[id].name })); }
+  /**
+   * Highlight a building / plot from the comp time on: manual = the outline you clicked (≥ 3 points) tracked with
+   * perspective; ai = one click → SAM2 (fal.ai) mask on every frame, steered by the tracked click.
+   * look: preset + overrides { rest: {color, opacity, dim, blur}, building: {color, opacity}, outline: {color, width, glow}, feather }
+   * label: { title, price, currency, area } → a pin + info card that follows the building
+   */
+  async highlight({ points = [], mode = 'manual', preset = 'blue-rest', look = {}, seconds = 0, label = null, outline = true, onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
+    if (mode === 'ai' && !this.settings.keys.fal) throw new Error('التحديد بالـ AI محتاج مفتاح fal.ai (الإعدادات) — أو حدّد المبنى بإيدك بنقط حواليه');
+    if (mode === 'manual' && points.length < 3) throw new Error('حط 3 نقط أو أكتر على حدود المبنى (أركانه)');
+    if (mode === 'ai' && !points.length) throw new Error('دوس على المبنى في الفريم');
+    const src = await this.host('trackSource', {}), L = src.layer, C = src.comp, fps = Math.round(C.fps) || 25;
+    const start = Math.max(0, C.time - L.startTime), dur = Math.max(0.2, Math.min(seconds || (L.outPoint - C.time), 60, C.duration - C.time));
+    const st = await this.host('sceneState', {}), n = (st.layers || []).filter(l => /^EF Highlight \d+ Controls$/.test(l.name)).length + 1, name = 'EF Highlight ' + n;
+    const P = highlight.PRESETS[preset] || highlight.PRESETS['blue-rest'];
+    const lk = { rest: Object.assign({}, P.rest, look.rest), building: Object.assign({}, P.building, look.building), outline: Object.assign({}, P.outline, look.outline), feather: look.feather };
+    step('بيقرا الفريمات…');
+    const fr = await track.frames(this.ffmpeg(), L.file, { start, duration: dur, fps, width: 640, srcW: L.srcW, srcH: L.srcH });
+    if (fr.frames.length < 2) throw new Error('الفيديو قصير قوي من المكان ده');
+    const times = fr.frames.map((_, i) => +(C.time + i / fps).toFixed(4));
+    const toComp = p => track.toComp(p, L), extra = [];
+    let pinPts, a;
+    if (mode === 'manual') {
+      step('بيتتبّع حدود المبنى (' + points.length + ' نقط)…');
+      const tracks = points.map(p => track.trackPoint(fr.frames, fr.w, fr.h, [p[0] * fr.w, p[1] * fr.h]));
+      const polys = highlight.fitOutline(tracks).map(poly => poly.map(q => [q[0] / fr.scale, q[1] / fr.scale]));
+      const z = poly => ({ v: poly, i: poly.map(() => [0, 0]), o: poly.map(() => [0, 0]), c: true });
+      a = { mode: 'mask', mask: { keys: polys.map((poly, i) => ({ t: +(times[i] - L.inPoint).toFixed(4), v: z(poly), bz: null, hold: false })) } };
+      const compPolys = polys.map(poly => poly.map(toComp));
+      if (outline) extra.push({ type: 'shape', name: name + ' Outline', start: C.time, transform: { position: [0, 0] }, shape: { items: [{ paths: [z(compPolys[0])] }], fill: null, stroke: lk.outline.color, strokeWidth: lk.outline.width, lineCap: 'round', trim: { end: 0 } },
+        keys: { 'shape:path.1': compPolys.map((poly, i) => [+(times[i] - C.time).toFixed(4), z(poly), 'linear']), 'shape:trimEnd': [[0, 0, 'easeInOut'], [1.2, 100]] },
+        effects: [{ name: 'glow', params: { radius: 25, intensity: 1 } }],
+        expressions: { 'shape:strokeColor': `thisComp.layer("${name} Controls").effect("Outline Color")(1)`, 'shape:strokeWidth': `thisComp.layer("${name} Controls").effect("Outline Width")(1)`, 'fx:glow.intensity': `thisComp.layer("${name} Controls").effect("Glow")(1)/40` } });
+      pinPts = compPolys.map(poly => { const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, top = Math.min(...poly.map(p => p[1])); return [cx, top]; });
+    } else {
+      // AI: the click is tracked, every frame asks SAM2 for the object under it (and inside last frame's box)
+      const click = points[0], pt = track.trackPoint(fr.frames, fr.w, fr.h, [click[0] * fr.w, click[1] * fr.h]);
+      const step2 = Math.max(1, Math.round(fps / 12)), dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'editfast-hl-'));
+      const W = Math.min(1024, L.srcW || 1024), H = Math.round(W * ((L.srcH || 576) / (L.srcW || 1024)) / 2) * 2;
+      step('بيطلّع الفريمات…');
+      await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-nostdin', '-ss', String(start), '-i', L.file, '-t', String(dur), '-vf', `fps=${fps / step2},scale=${W}:${H}`, path.join(dir, 'f_%05d.png')]);
+      const files = fs.readdirSync(dir).filter(f => /^f_\d+\.png$/.test(f)).sort();
+      let box = null;
+      for (let k = 0; k < files.length; k++) {
+        step('AI بيحدّد المبنى ' + (k + 1) + ' / ' + files.length);
+        const tp = pt[Math.min(pt.length - 1, k * step2)], cx = tp.x / fr.w * W, cy = tp.y / fr.h * H, fp = path.join(dir, files[k]);
+        const r = await this.falRun('fal-ai/sam2/image', { image_url: this.dataUri(fp), prompts: [{ x: Math.round(cx), y: Math.round(cy), label: 1 }], box_prompts: box ? [box] : [], apply_mask: false, output_format: 'png' });
+        const url = (r.image && r.image.url) || AEServices.findUrl(r, /^https?:|^data:image/);
+        if (!url) throw new Error('fal.ai مارجّعش ماسك');
+        const out = path.join(dir, 'r_' + files[k].slice(2));
+        if (/^data:/.test(url)) fs.writeFileSync(out, Buffer.from(url.split(',')[1], 'base64')); else await this.download(url, out);
+        const res = await photo3d.decodeExact(this.ffmpeg(), out, W, H), orig = await photo3d.decodeExact(this.ffmpeg(), fp, W, H);
+        const mask = highlight.maskFrom(res, orig, W, H, [cx, cy]);
+        box = highlight.maskBox(mask, W, H);
+        const rgba = Buffer.alloc(W * H * 4); for (let i = 0; i < W * H; i++) { rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = mask[i]; rgba[i * 4 + 3] = 255; }
+        fs.writeFileSync(path.join(dir, 'm_' + files[k].slice(2)), require('./util').encodePng(W, H, rgba));
+      }
+      const matte = path.join(config.dataDir(), 'highlight', mogrt.safeName(L.name) + '-' + Date.now().toString(36) + '.mp4');
+      fs.mkdirSync(path.dirname(matte), { recursive: true });
+      step('بيجمّع الماسك…');
+      await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', '-framerate', String(fps / step2), '-i', path.join(dir, 'm_%05d.png'), '-vf', `fps=${fps},format=gray`, '-c:v', 'libx264', '-crf', '12', '-pix_fmt', 'yuv420p', matte]);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      a = { mode: 'matte', matte: { file: matte, start: C.time } };
+      pinPts = pt.map(q => toComp([q.x / fr.scale, q.y / fr.scale - (L.srcH || 1080) * 0.12]));
+    }
+    if (label && (label.title || label.price || label.area)) {
+      const s = Math.round(C.height * 0.032), pin = name + ' Pin';
+      extra.push({ type: 'null', name: pin, start: C.time, keys: { position: pinPts.map((p, i) => [+(times[i] - C.time).toFixed(4), [p[0], p[1] - C.height * 0.04], 'linear']) } });
+      const lines = [label.title, label.price ? motionKit.formatNumber(+label.price, { format: 'currency', currency: label.currency || 'EGP', arabic: !!label.arabic }) : '', label.area ? motionKit.formatNumber(+label.area, { arabic: !!label.arabic, suffix: ' م²' }) : ''].filter(Boolean);
+      const cardH = s * 1.7 * lines.length + s;
+      extra.push({ type: 'shape', name: name + ' Dot', parent: pin, start: C.time, shape: { kind: 'ellipse', size: [s * 0.7, s * 0.7], fill: lk.outline.color }, transform: { position: [0, 0] }, expressions: { scale: 'var t=time%1.4;[100+t*40,100+t*40]' } });
+      extra.push({ type: 'shape', name: name + ' Stem', parent: pin, start: C.time, shape: { path: `M0 0 L0 ${-s * 3}`, fill: null, stroke: lk.outline.color, strokeWidth: 3, trim: { end: 0 } }, transform: { position: [0, 0] }, keys: { 'shape:trimEnd': [[0.6, 0, 'expoOut'], [1.1, 100]] } });
+      extra.push({ type: 'shape', name: name + ' Card', parent: pin, start: C.time, shape: { kind: 'rect', size: [s * 10, cardH], round: s * 0.4, fill: '#0b0806' }, transform: { position: [0, -s * 3 - cardH / 2], opacity: 85 }, keys: { scale: [[0.9, 0, 'backOut'], [1.4, 100]] } });
+      lines.forEach((t, i) => extra.push({ type: 'text', name: name + ' Info ' + (i + 1), parent: pin, start: C.time, text: t, size: i ? Math.round(s * 0.85) : s, color: i === 1 ? lk.outline.color : '#ffffff', transform: { position: [0, -s * 3 - cardH + s * 1.3 + i * s * 1.7] }, keys: { opacity: [[1.1 + i * 0.12, 0], [1.4 + i * 0.12, 100]] } }));
+    }
+    const ex = aeScene.normalize({ comp: { create: false }, layers: extra }, C);
+    step('بيبني الإبراز…');
+    const r = await this.host('highlightBuild', Object.assign({ layer: L.name, name, look: lk, extra: ex.spec.layers }, a));
+    return Object.assign({}, r, { frames: fr.frames.length, mode, warnings: ex.warnings });
   }
 
   async selfTest() { return this.host('selfTest', {}); }

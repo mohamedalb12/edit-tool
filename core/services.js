@@ -148,8 +148,8 @@ class Services {
     const place = [[probe('import'), 'الاستيراد في بريمير مش شغال'], [probe('placeStill'), 'وضع الكليبات على التايملين مش شغال']];
     void why;
     return {
-      captions: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص'], [tool('whisper'), 'whisper ناقص'], [tool('whisperModel'), 'موديل Whisper ناقص']]),
-      nativeCaptions: need([[probe('captions'), 'بريمير مش بيقبل كابشن من سكريبت'], [tool('whisper'), 'whisper ناقص']]),
+      captions: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص'], ...(this.settings.keys.groq && this.settings.transcribeEngine !== 'local' ? [] : [[tool('whisper'), 'whisper ناقص (أو حط مفتاح Groq)'], [tool('whisperModel'), 'موديل Whisper ناقص (أو حط مفتاح Groq)']])]),
+      nativeCaptions: need([[probe('captions'), 'بريمير مش بيقبل كابشن من سكريبت'], ...(this.settings.keys.groq && this.settings.transcribeEngine !== 'local' ? [] : [[tool('whisper'), 'whisper ناقص (أو حط مفتاح Groq)']])]),
       cut: need([[tool('ffmpeg'), 'ffmpeg ناقص'], [probe('razor'), 'القص (razor) مش شغال'], [probe('rippleDelete'), 'الحذف مع سحب الكليبات مش شغال'], [probe('clone'), 'نسخ السيكوينس مش شغال']]),
       audio: need([...place, [tool('ffmpeg'), 'ffmpeg ناقص']]),
       motion: need([[probe('transform'), 'إضافة Transform مش شغالة (بريمير مش بالإنجليزي؟) — هيستخدم Motion بداله']]),
@@ -556,6 +556,17 @@ class Services {
     return { titles, description, tags, chapters: ch.youtube, ai: true };
   }
 
+  /** is the Groq key good? (lists its models — costs nothing) */
+  async groqTest() {
+    const key = this.settings.keys.groq;
+    if (!key) throw new Error('حط مفتاح Groq الأول');
+    const res = await this.fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + key }, timeout: 20000 });
+    if (res.status === 401) throw new Error('مفتاح Groq غلط');
+    if (!res.ok) throw new Error('Groq ' + res.status);
+    const ids = ((await res.json()).data || []).map(m => m.id);
+    return { ok: true, whisper: ids.filter(i => /whisper/.test(i)) };
+  }
+
   /* ---------- التفريغ ---------- */
   async transcribe({ dialect, trackIndex, onProgress } = {}) {
     const d = dialect || this.settings.dialect;
@@ -574,7 +585,8 @@ class Services {
         ffmpeg: this.ffmpeg(), whisper: this.tools.whisper, model: this.settings.paths.whisperModel,
         file: sp.file, start: Math.max(0, Math.floor(sp.a)), duration: Math.ceil(sp.b) - Math.max(0, Math.floor(sp.a)), dialectId: d,
         cacheDir: config.cacheDir('transcripts'), llm: this.settings.keys.openrouter ? this.llm : null,
-        spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null, onProgress: onProgress && (m => onProgress(tag + m))
+        spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null, onProgress: onProgress && (m => onProgress(tag + m)),
+        engine: this.settings.transcribeEngine || 'auto', groqKey: this.settings.keys.groq, groqModel: this.settings.groqModel || 'whisper-large-v3', fetchImpl: this.fetch
       });
       words.set(sp.file, r.words);
     }

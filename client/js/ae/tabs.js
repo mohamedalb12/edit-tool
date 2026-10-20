@@ -587,6 +587,64 @@
     }
   });
 
+  /* ——— عقارات: إبراز مبنى أو أرض ——— */
+  var re = { mode: 'manual', points: [], preset: 'blue-rest', restColor: '#1d4ed8', restOpacity: 70, bColor: '#f97316', bOpacity: 0, oColor: '#ffffff', oWidth: 4, feather: 6, seconds: 0, outline: true, title: '', price: '', currency: 'EGP', area: '', arabic: false };
+  EF.tabs.push({
+    id: 'estate', label: 'عقارات', title: 'إبراز مبنى (عقارات)',
+    render: function (view) {
+      var P = S().highlightPresets(), stage = h('div', { class: 'track-stage' }), img = h('img', { alt: '' }), svgNS = 'http://www.w3.org/2000/svg';
+      var poly = document.createElementNS(svgNS, 'svg'); poly.setAttribute('class', 'hl-poly'); poly.setAttribute('viewBox', '0 0 100 100'); poly.setAttribute('preserveAspectRatio', 'none');
+      var dots = h('div', { class: 'track-dots' }), info = h('p', { class: 'hint' }), step = h('p', { class: 'hint' });
+      stage.appendChild(img); stage.appendChild(poly); stage.appendChild(dots);
+      function draw() {
+        UI.empty(dots); while (poly.firstChild) poly.removeChild(poly.firstChild);
+        if (re.mode === 'manual' && re.points.length > 1) {
+          var pg = document.createElementNS(svgNS, 'polygon');
+          pg.setAttribute('points', re.points.map(function (p) { return (p[0] * 100) + ',' + (p[1] * 100); }).join(' '));
+          poly.appendChild(pg);
+        }
+        re.points.forEach(function (p, i) { var d = h('span', { class: 'track-dot', title: 'شيل', onclick: function (e) { e.stopPropagation(); re.points.splice(i, 1); draw(); } }, String(i + 1)); d.style.left = (p[0] * 100) + '%'; d.style.top = (p[1] * 100) + '%'; dots.appendChild(d); });
+        info.textContent = re.mode === 'ai' ? (re.points.length ? 'تمام — الـ AI هيحدّد المبنى اللي دوست عليه' : 'دوسة واحدة على المبنى') : (re.points.length < 3 ? 'دوس على أركان المبنى بالترتيب حواليه (3 نقط أو أكتر — الأركان الحادة أحسن)' : re.points.length + ' نقط ✓ — تقدر تزوّد أو تشيل');
+      }
+      stage.addEventListener('click', function (e) { if (!img.src) return; var r = stage.getBoundingClientRect(), p = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; if (re.mode === 'ai') re.points = [p]; else if (re.points.length < 16) re.points.push(p); draw(); });
+      var load = action('هات الفريم', 'بيجيب الفريم', function () { return S().trackFrame().then(function (r) { img.src = 'data:image/jpeg;base64,' + r.b64; stage.classList.add('on'); re.points = []; draw(); step.textContent = r.src.layer.name; }); });
+      var presets = h('div', { class: 'chips' });
+      P.forEach(function (x) { presets.appendChild(h('button', { type: 'button', class: 'chip' + (re.preset === x.id ? ' on' : ''), 'data-preset': x.id, onclick: function () { re.preset = x.id; Array.prototype.forEach.call(presets.children, function (b) { b.classList.toggle('on', b.dataset.preset === x.id); }); applyPreset(x.id); } }, x.name)); });
+      var DEF = { 'blue-rest': ['#1d4ed8', 70, '#f97316', 0, '#ffffff'], 'bw-rest': ['#ffffff', 100, '#f97316', 0, '#fbbf24'], gold: ['#0f172a', 55, '#fbbf24', 35, '#fde68a'], 'color-building': ['#1d4ed8', 0, '#f97316', 55, '#f97316'], focus: ['#0b0806', 0, '#f97316', 0, '#ffffff'] };
+      var inRC, inRO, inBC, inBO, inOC;
+      function applyPreset(id) { var d = DEF[id]; if (!d) return; re.restColor = d[0]; re.restOpacity = d[1]; re.bColor = d[2]; re.bOpacity = d[3]; re.oColor = d[4]; inRC.value = d[0]; inBC.value = d[2]; inOC.value = d[4]; inRO.set(d[1]); inBO.set(d[3]); }
+      inRC = h('input', { type: 'color', value: re.restColor, oninput: function (e) { re.restColor = e.target.value; } });
+      inBC = h('input', { type: 'color', value: re.bColor, oninput: function (e) { re.bColor = e.target.value; } });
+      inOC = h('input', { type: 'color', value: re.oColor, oninput: function (e) { re.oColor = e.target.value; } });
+      inRO = UI.slider(0, 100, 1, re.restOpacity, function (v) { return v + '%'; }, function (v) { re.restOpacity = v; });
+      inBO = UI.slider(0, 100, 1, re.bOpacity, function (v) { return v ? v + '%' : 'طبيعي'; }, function (v) { re.bOpacity = v; });
+      if (!inRO.set) inRO.set = function (v) { var i = inRO.querySelector('input'); if (i) { i.value = v; i.dispatchEvent(new Event('input')); } };
+      if (!inBO.set) inBO.set = function (v) { var i = inBO.querySelector('input'); if (i) { i.value = v; i.dispatchEvent(new Event('input')); } };
+      var cur = h('select', { onchange: function (e) { re.currency = e.target.value; } }, ['EGP', 'SAR', 'AED', 'KWD', 'QAR', 'USD', 'EUR'].map(function (c) { return h('option', { value: c, selected: c === re.currency }, c); }));
+      var inp = function (k, ph, type) { return h('input', { class: 'grow', type: type || 'text', placeholder: ph, value: re[k], oninput: function (e) { re[k] = e.target.value; } }); };
+      view.appendChild(UI.card('إبراز مبنى أو أرض',
+        UI.hint('اختار لير الفيديو، حط المؤشر على أول فريم، وهات الفريم. "بإيدك": دوس على أركان المبنى حواليه — الحدود بتتتبّع بالمنظور (شغال من غير أي مفتاح). "AI": دوسة واحدة على المبنى ويتحدّد في كل فريم حتى لو حاجة عدّت قدّامه (fal.ai).'),
+        UI.row(load, UI.seg([{ value: 'manual', label: 'بإيدك (نقط حواليه)' }, { value: 'ai', label: 'AI (دوسة واحدة)' }], re.mode, function (v) { re.mode = v; re.points = re.points.slice(0, v === 'ai' ? 1 : 16); draw(); })),
+        stage, info,
+        presets,
+        UI.row(h('label', null, 'الباقي'), inRC), UI.field('تلوين الباقي', inRO),
+        UI.row(h('label', null, 'المبنى'), inBC), UI.field('تلوين المبنى', inBO),
+        UI.row(h('label', null, 'الإطار'), inOC, h('label', null, h('input', { type: 'checkbox', checked: re.outline, onchange: function (e) { re.outline = e.target.checked; } }), ' خط حوالين المبنى (بإيدك)')),
+        UI.field('نعومة الحواف', UI.slider(0, 40, 1, re.feather, function (v) { return v + 'px'; }, function (v) { re.feather = v; })),
+        UI.field('لحد', UI.slider(0, 60, 1, re.seconds, function (v) { return v ? v + 's' : 'آخر اللير'; }, function (v) { re.seconds = v; })),
+        UI.hint('كارت معلومات بيمشي مع المبنى (اختياري):'),
+        UI.row(inp('title', 'اسم المشروع')), UI.row(inp('price', 'السعر', 'number'), cur, inp('area', 'المساحة م²', 'number')),
+        UI.row(h('label', null, h('input', { type: 'checkbox', onchange: function (e) { re.arabic = e.target.checked; } }), ' أرقام عربي')),
+        UI.row(action('أبرز المبنى', 'بيبرز المبنى', function () {
+          return S().highlight({ points: re.points, mode: re.mode, preset: re.preset, seconds: re.seconds, outline: re.outline,
+            look: { rest: { color: re.restColor, opacity: re.restOpacity }, building: { color: re.bColor, opacity: re.bOpacity }, outline: { color: re.oColor }, feather: re.feather },
+            label: re.title || re.price || re.area ? { title: re.title, price: re.price, currency: re.currency, area: re.area, arabic: re.arabic } : null,
+            onStep: function (m) { step.textContent = m; } }).then(function (r) { step.textContent = r.frames + ' فريم ✓'; ok('اتبرز ✓ — كل الألوان والأوباسيتي سلايدرز على "' + r.controls + '" تعدّلها وانت شايف'); });
+        }, 'primary')), step));
+      draw();
+    }
+  });
+
   /* ——— مكتبتي (نفس مكتبة بريمير) ——— */
   EF.tabs.push({
     id: 'library', label: 'مكتبتي', title: 'مكتبتي',
@@ -616,6 +674,9 @@
       var out = h('pre', { class: 'ltr hint' });
       view.appendChild(UI.card('مفتاح OpenRouter (لمساعد الموشن)', UI.row(key, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { openrouter: key.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); })),
         UI.hint('المفاتيح والمكتبة والإعدادات واحدة مع EditFast في بريمير.')));
+      var gq = h('input', { class: 'grow ltr', type: 'password', value: S().settings.keys.groq || '', placeholder: 'gsk_…' });
+      view.appendChild(UI.card('مفتاح Groq (تفريغ الكلام)', UI.row(gq, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { groq: gq.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); }), UI.btn('هات مفتاح', function () { EF.openUrl('https://console.groq.com/keys'); }, 'small')),
+        UI.hint('للكلام المتحرك مع الصوت و"صوتك ← فيديو": أدق بكتير من التفريغ على الجهاز.')));
       var fal = h('input', { class: 'grow ltr', type: 'password', value: S().settings.keys.fal || '', placeholder: 'fal key' });
       view.appendChild(UI.card('مفتاح fal.ai (اختياري)', UI.row(fal, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { fal: fal.value.trim() } }); ok('اتحفظ ✓'); })),
         UI.hint('لعمق أدق في "صورة → ثري دي" ولعمل موديل ثري دي حقيقي من صورة. من غيره الأدوات بتشتغل بالتقدير.')));

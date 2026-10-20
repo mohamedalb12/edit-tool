@@ -8,7 +8,8 @@
       // a quick sanity check per key (the most common mix-up: pasting ElevenLabs' "Key ID" instead of the sk_ key)
       var KEY_CHECK = {
         openrouter: function (v) { return /^sk-or-/.test(v) ? '' : 'مفتاح OpenRouter بيبدأ بـ sk-or-'; },
-        elevenlabs: function (v) { return /^sk_/.test(v) ? '' : 'ده شكله الـ Key ID — المفتاح الحقيقي بيبدأ بـ sk_ وبيظهر مرة واحدة لما تعمله'; }
+        elevenlabs: function (v) { return /^sk_/.test(v) ? '' : 'ده شكله الـ Key ID — المفتاح الحقيقي بيبدأ بـ sk_ وبيظهر مرة واحدة لما تعمله'; },
+        groq: function (v) { return /^gsk_/.test(v) ? '' : 'مفتاح Groq بيبدأ بـ gsk_'; }
       };
       function keyInput(k, label, url) {
         var warn = h('div', { class: 'hint err key-warn' });
@@ -94,6 +95,11 @@
       if (S.lastSelfTest) drawDiag(S.lastSelfTest);
       view.appendChild(UI.card('المفاتيح', UI.hint('بتتحفظ على جهازك بس (~/.editfast). كل الذكاء الاصطناعي بيعدّي من OpenRouter بمفتاحك.'),
         keyInput('openrouter', 'OpenRouter', 'https://openrouter.ai/keys'), UI.row(testBtn),
+        keyInput('groq', 'Groq (تفريغ الكلام)', 'https://console.groq.com/keys'),
+        UI.row(h('label', null, 'التفريغ'), UI.seg([{ value: 'auto', label: 'Groq لو فيه مفتاح' }, { value: 'groq', label: 'Groq دايمًا' }, { value: 'local', label: 'على الجهاز' }], st.transcribeEngine || 'auto', function (v) { S.saveSettings({ transcribeEngine: v }); }),
+          UI.seg([{ value: 'whisper-large-v3', label: 'الأدق' }, { value: 'whisper-large-v3-turbo', label: 'الأسرع' }], st.groqModel || 'whisper-large-v3', function (v) { S.saveSettings({ groqModel: v }); }),
+          UI.btn('اختبر Groq', function (e) { UI.safe('بيجرّب Groq', function () { return S.groqTest().then(function (r) { UI.toast('مفتاح Groq شغال ✓ (' + r.whisper.join('، ') + ')'); }); }, e.currentTarget); }, 'small')),
+        UI.hint('Groq بيفرّغ بـ Whisper Large v3 على سيرفراتهم: أدق بكتير في العربي وأسرع من اللي على الجهاز. المفتاح ببلاش من console.groq.com ← API Keys ← Create.'),
         keyInput('elevenlabs', 'ElevenLabs (SFX)', 'https://elevenlabs.io/app/settings/api-keys'),
         keyInput('pexels', 'Pexels', 'https://www.pexels.com/api/'), keyInput('pixabay', 'Pixabay', 'https://pixabay.com/api/docs/')));
       var testBox = h('div', { class: 'list', style: { display: 'none' } });

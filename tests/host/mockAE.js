@@ -252,7 +252,8 @@ function loadAE({ dir } = {}) {
       return d;
     };
     c._duplicate = L => {
-      const N = L.kind === 'shape' ? c.layers.addShape() : L.kind === 'text' ? c.layers.addText(L.property('ADBE Text Properties').property('ADBE Text Document').value.text) : c.layers.addNull();
+      const N = L.kind === 'shape' ? c.layers.addShape() : L.kind === 'text' ? c.layers.addText(L.property('ADBE Text Properties').property('ADBE Text Document').value.text) : L.kind === 'footage' ? c.layers.add(L.source) : c.layers.addNull();
+      if (L.kind === 'footage') { N.startTime = L.startTime; const t = N.property('ADBE Transform Group'); ['ADBE Anchor Point', 'ADBE Position', 'ADBE Scale', 'ADBE Rotate Z'].forEach(m => { t.property(m).value = L.property('ADBE Transform Group').property(m).value; }); }
       if (L.kind === 'shape') N.root.property('ADBE Root Vectors Group').children.length = 0;
       N.name = L.name + ' 2'; N.inPoint = L.inPoint; N.outPoint = L.outPoint; copyTree(L.root, N.root);
       N.moveBefore(L); return N;

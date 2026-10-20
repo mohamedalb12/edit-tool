@@ -4,6 +4,7 @@
   EF.GROUPS = [
     { id: 'templates', label: 'قوالبي', title: 'قوالبي (لبريمير)', icon: 'templates', members: ['templates'] },
     { id: 'director', label: 'المونتير', title: 'المونتير الذكي', icon: 'auto', members: ['director'] },
+    { id: 'estate', label: 'عقارات', title: 'إبراز مبنى (عقارات)', icon: 'templates', members: ['estate'] },
     { id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي', icon: 'cube', members: ['studio'] },
     { id: 'track', label: 'تراكينج', title: 'تراكينج', icon: 'reels', members: ['track'] },
     { id: 'character', label: 'كاراكتر', title: 'كاراكتر أنيميشن', icon: 'agent', members: ['character'] },
@@ -53,6 +54,7 @@
     A('char', '🧍', 'كاراكتر متريّج', 'character rig rubberhose duik كاراكتر ريج', function () { show('character'); });
     A('explode', '✂', 'فصّل الشيب لليرز', 'explode shape layers فصل', function () { return S.explodeShapes().then(function (r) { UI.toast(r.layers + ' ✓'); }); });
     A('colors', '🎨', 'كنترول واحد لكل الألوان', 'color controller palette ألوان', function () { return S.colorRig().then(function (r) { UI.toast(r.colors.length + ' لون ✓'); }); });
+    A('estate', '🏢', 'إبراز مبنى (عقارات)', 'real estate building highlight عقارات مبنى ابراز تلوين', function () { show('estate'); });
     A('counter', '🔢', 'عدّاد أرقام', 'counter number عداد رقم دولار نسبة', function () { show('info'); });
     A('chart', '📊', 'رسم بياني / تايملاين', 'chart graph infographic رسم بياني انفوجرافيك تايملاين', function () { show('info'); });
     A('trans', '🔀', 'ترانزيشن بين اللقطات', 'transition zoom whip glitch ترانزيشن', function () { show('fx'); });

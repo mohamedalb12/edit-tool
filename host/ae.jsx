@@ -1261,6 +1261,66 @@ EFMAPI.scenePreview = function (a) {
   return { files: out };
 };
 
+/* ---------------- real-estate highlight ---------------- */
+/**
+ * Highlight a building / plot on a footage layer:
+ *   [extra: outline, pin, card] → building (copy of the footage, masked or matted, its own tint) → "rest" adjustment
+ *   (tint / dim / blur everything else) → the original footage. Every look value is a slider on "<name> Controls".
+ * a = { layer, name, look, mode: 'mask'|'matte', mask: { keys: [{t, v}] (footage layer space) }, matte: { file, start }, extra: [scene layers] }
+ */
+EFMAPI.highlightBuild = function (a) {
+  var c = EFM.comp(), F = EFM.layerByName(c, a.layer), N = a.name, k;
+  if (!F) throw new Error('مش لاقي اللير: ' + a.layer);
+  EFM.warn = [];
+  return EFM.undo('إبراز مبنى', function () {
+    var lk = a.look, q = function (s) { return 'thisComp.layer("' + N + ' Controls").effect("' + s + '")(1)'; };
+    // controls
+    var C = c.layers.addNull(c.duration); C.name = N + ' Controls'; try { C.label = 11; } catch (eL) {}
+    var setC = function (name, match, v) { var e = EFM.effect(C, match, name); e.property(1).setValue(v); };
+    setC('Building Color', 'ADBE Color Control', EFM.fromHex(lk.building.color)); setC('Building Opacity', 'ADBE Slider Control', lk.building.opacity);
+    setC('Rest Color', 'ADBE Color Control', EFM.fromHex(lk.rest.color)); setC('Rest Opacity', 'ADBE Slider Control', lk.rest.opacity);
+    setC('Rest Dim', 'ADBE Slider Control', lk.rest.dim || 0); setC('Rest Blur', 'ADBE Slider Control', lk.rest.blur || 0);
+    setC('Feather', 'ADBE Slider Control', lk.feather === undefined ? 6 : lk.feather);
+    setC('Outline Color', 'ADBE Color Control', EFM.fromHex(lk.outline.color)); setC('Outline Width', 'ADBE Slider Control', lk.outline.width); setC('Glow', 'ADBE Slider Control', lk.outline.glow);
+    // everything else: tint (keeps the detail), dim, blur — mixed by the sliders
+    var R = c.layers.addSolid([1, 1, 1], N + ' Rest', c.width, c.height, 1, c.duration); R.adjustmentLayer = true; R.moveBefore(F);
+    try { R.inPoint = F.inPoint; R.outPoint = F.outPoint; } catch (eT) {}
+    var fx = R.property('ADBE Effect Parade'), t = fx.addProperty('ADBE Tint');
+    t.property('ADBE Tint-0002').expression = q('Rest Color');
+    t.property('ADBE Tint-0001').expression = 'var c=' + q('Rest Color') + ';[c[0]*0.12,c[1]*0.12,c[2]*0.16,1]';
+    t.property('ADBE Tint-0003').expression = q('Rest Opacity');
+    try { var bc = fx.addProperty('ADBE Brightness & Contrast 2'); EFM.find(bc, 'Brightness').expression = '-' + q('Rest Dim'); } catch (eB) { EFM.warn.push('Brightness & Contrast'); }
+    var bl = fx.addProperty('ADBE Gaussian Blur 2'); bl.property(1).expression = q('Rest Blur') + '*3';
+    try { EFM.find(bl, 'Repeat Edge Pixels').setValue(1); } catch (eR) {}
+    // the building: a copy of the footage, cut to the outline (mask) or the AI matte, with its own tint
+    var B = F.duplicate(); B.name = N + ' Building'; B.moveBefore(R);
+    var bt = B.property('ADBE Effect Parade').addProperty('ADBE Tint');
+    bt.property('ADBE Tint-0002').expression = q('Building Color');
+    bt.property('ADBE Tint-0001').expression = 'var c=' + q('Building Color') + ';[c[0]*0.18,c[1]*0.18,c[2]*0.18,1]';
+    bt.property('ADBE Tint-0003').expression = q('Building Opacity');
+    if (a.mode === 'mask') {
+      var m = B.property('ADBE Mask Parade').addProperty('ADBE Mask Atom'); m.name = 'EF Building';
+      EFM.writeKeys(m.property('ADBE Mask Shape'), a.mask.keys, B.inPoint);
+      m.property('ADBE Mask Feather').expression = 'var f=' + q('Feather') + ';[f,f]';
+    } else {
+      var item = app.project.importFile(new ImportOptions(new File(a.matte.file)));
+      try { item.parentFolder = EFM.folder('EditFast Roto'); } catch (eF) {}
+      var M = c.layers.add(item); M.name = N + ' Matte';
+      M.startTime = a.matte.start; M.inPoint = a.matte.start; M.outPoint = Math.min(c.duration, a.matte.start + item.duration);
+      var tr = EFM.tr, kk = F.source.width / item.width, an = tr(F, 'ADBE Anchor Point').value, sc = tr(F, 'ADBE Scale').value;
+      tr(M, 'ADBE Anchor Point').setValue([an[0] / kk, an[1] / kk]); tr(M, 'ADBE Position').setValue(tr(F, 'ADBE Position').value);
+      tr(M, 'ADBE Scale').setValue([sc[0] * kk, sc[1] * kk]); tr(M, 'ADBE Rotate Z').setValue(tr(F, 'ADBE Rotate Z').value);
+      if (F.parent) M.parent = F.parent;
+      M.property('ADBE Effect Parade').addProperty('ADBE Gaussian Blur 2').property(1).expression = q('Feather') + '/2';
+      M.moveBefore(B);
+      EFM.setMatte(B, M, 'luma');
+    }
+    // outline, pin, info card (plain scene layers on top)
+    var made = a.extra && a.extra.length ? EFM.fillComp(c, a.extra) : { layers: 0 };
+    return { name: N, building: B.name, rest: R.name, controls: C.name, extra: made.layers, skipped: EFM.warn.slice(0, 20) };
+  });
+};
+
 /* ---------------- shapes, lower thirds ---------------- */
 EFM.rectShape = function (layer, w, h, r, color, name) {
   var root = layer.property('ADBE Root Vectors Group'), g = root.addProperty('ADBE Vector Group');

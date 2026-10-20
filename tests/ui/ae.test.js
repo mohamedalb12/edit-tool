@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -239,6 +239,27 @@ test('effects, infographics, director extras: transitions, liquid, physics, coun
   await open('routine'); await clear();
   await page.locator('[data-size="4:5"]').click(); await page.locator('[data-size="1:1"]').click();
   await click('اعمل المقاسات'); assert.deepEqual(await call('multiFormat'), { sizes: ['16:9', '9:16', '4:5'], fit: 'blur' });
+});
+
+test('real estate: click the outline on the frame (polygon drawn), presets set colours + opacity, info card, build; AI = one click', async () => {
+  await open('estate'); await clear();
+  await click('هات الفريم'); await page.waitForSelector('#view .track-stage.on');
+  const box = await page.locator('#view .track-stage').boundingBox();
+  for (const [x, y] of [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7], [0.3, 0.7]]) await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+  assert.equal(await page.locator('#view .track-dot').count(), 4);
+  assert.equal(await page.locator('#view .hl-poly polygon').count(), 1);
+  await page.locator('[data-preset="gold"]').click();
+  await page.fill('#view input[placeholder="اسم المشروع"]', 'برج النيل');
+  await page.fill('#view input[placeholder="السعر"]', '2500000');
+  await click('أبرز المبنى');
+  const r = await call('highlight');
+  assert.equal(r.n, 4); assert.equal(r.mode, 'manual'); assert.equal(r.preset, 'gold');
+  assert.deepEqual(r.look.rest, { color: '#0f172a', opacity: 55 }); assert.deepEqual(r.look.building, { color: '#fbbf24', opacity: 35 });
+  assert.deepEqual(r.label, { title: 'برج النيل', price: '2500000', currency: 'EGP', area: '', arabic: false });
+  await shot('ae-10-estate');
+  await page.locator('.seg button', { hasText: 'AI (دوسة واحدة)' }).click();
+  assert.equal(await page.locator('#view .track-dot').count(), 1, 'AI keeps one click');
+  await click('أبرز المبنى'); assert.equal((await page.evaluate(() => window.__calls.filter(c => c.name === 'highlight')[1].args)).mode, 'ai');
 });
 
 test('⌘K favourites: ☆ pins a tool on top (kept per app), recents below', async () => {
