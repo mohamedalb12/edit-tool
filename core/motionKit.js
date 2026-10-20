@@ -33,10 +33,14 @@ function counterOptions(o = {}) {
   if (f === 'time') out.sep = '';
   return out;
 }
+/** loopOut("cycle") written out: AE 26 has no loopOut on shape Path properties ("loopOut is not a function") */
+const PATH_LOOP = 'var n=numKeys;var a=n>1?key(1).time:0,d=n>1?key(n).time-a:0;d>0&&time>a+d?valueAtTime(a+(time-a)%d):value';
+/** AE's Slider Control stops at ±1,000,000: the power of 10 a bigger number is divided by on the slider */
+function sliderUnit(...vals) { const big = Math.max(0, ...vals.map(v => Math.abs(+v || 0))); return big > 999999 ? Math.pow(10, Math.ceil(Math.log10(big / 999999))) : 1; }
 function formatNumber(v, o) { return efFmt(+v || 0, counterOptions(o)); }
 /** the Source Text expression: the slider "Count" (on the same layer) formatted */
-function counterExpr(o, { slider = 'Count', layer = null } = {}) {
-  const src = layer ? 'thisComp.layer(' + JSON.stringify(layer) + ').effect(' + JSON.stringify(slider) + ')("Slider")' : 'effect(' + JSON.stringify(slider) + ')("Slider")';
+function counterExpr(o, { slider = 'Count', layer = null, unit = 1 } = {}) {
+  const src = (layer ? 'thisComp.layer(' + JSON.stringify(layer) + ').effect(' + JSON.stringify(slider) + ')("Slider")' : 'effect(' + JSON.stringify(slider) + ')("Slider")') + (unit > 1 ? '*' + unit : '');
   return FORMAT_SRC + 'efFmt(' + src + ',' + JSON.stringify(counterOptions(o)) + ')';
 }
 const COUNTER_STYLES = { plain: 'رقم بس', ring: 'دايرة بتتملي', bar: 'بار بيتملي', card: 'كارت برقم وعنوان', slot: 'أرقام بتلف (Slot)' };
@@ -50,18 +54,20 @@ function counterLayers(o = {}, comp = { width: 1920, height: 1080 }) {
   const color = o.color || '#ffffff', accent = o.accent || '#f97316', style = COUNTER_STYLES[o.style] ? o.style : 'plain';
   const max = +o.max || (o.format === 'percent' ? 100 : Math.max(Math.abs(to), 1));
   const ease = o.ease || 'expoOut';
+  // AE's Slider Control stops at ±1,000,000: bigger numbers ride the slider divided by 10ⁿ (the text multiplies back)
+  const unit = sliderUnit(from, to);
   const num = { type: 'text', name: N, text: formatNumber(from, o), size, color, font: o.font, tracking: o.format === 'time' ? 20 : 0, start: o.layerStart, end: o.layerEnd,
-    transform: { position: pos }, effects: [{ name: 'slider', label: 'Count', params: { value: from } }],
-    keys: { 'fx:Count.value': [[t0, from, ease], [t0 + d, to]] }, expressions: { text: counterExpr(o) } };
+    transform: { position: pos }, effects: [{ name: 'slider', label: 'Count', params: { value: from / unit } }],
+    keys: { 'fx:Count.value': [[t0, from / unit, ease], [t0 + d, to / unit]] }, expressions: { text: counterExpr(o, { unit }) } };
   if (style === 'slot') { num.keys.position = undefined; num.effects.push({ name: 'directionalBlur', params: { direction: 0, length: 0 } }); num.keys['fx:directionalBlur.length'] = [[t0, 30, 'expoOut'], [t0 + d, 0]]; delete num.keys.position; }
   num.keys.scale = [[t0, 85, 'backOut'], [t0 + Math.min(0.6, d), 100]];
   const layers = [num];
-  const link = 'thisComp.layer(' + JSON.stringify(N) + ').effect("Count")("Slider")';
+  const link = 'thisComp.layer(' + JSON.stringify(N) + ').effect("Count")("Slider")' + (unit > 1 ? '*' + unit : '');
   if (o.label) layers.push({ type: 'text', name: N + ' Label', text: String(o.label).slice(0, 80), size: Math.round(size * 0.28), color: o.labelColor || '#fed7aa', transform: { position: [pos[0], typeof pos[1] === 'string' ? (parseFloat(pos[1]) + 15) + '%' : pos[1] + size * 0.9] }, textAnimators: [{ preset: 'fadeUp', by: 'words', duration: 0.6, start: t0 + 0.2 }] });
   if (style === 'ring') {
     const r = size * 1.6;
     layers.push({ type: 'shape', name: N + ' Ring', shape: { kind: 'ellipse', size: [r * 2, r * 2], fill: null, stroke: accent, strokeWidth: size * 0.14, lineCap: 'round', trim: { end: 0 } }, transform: { position: pos, rotation: 0 },
-      expressions: { 'shape:trimEnd': `clamp((${link}-${Math.min(from, 0)})/${max}*100,0,100)` } },
+      expressions: { 'shape:trimEnd': `clamp((${link}-(${Math.min(from, 0)}))/${max}*100,0,100)` } },
     { type: 'shape', name: N + ' Track', shape: { kind: 'ellipse', size: [r * 2, r * 2], fill: null, stroke: '#ffffff', strokeWidth: size * 0.14 }, transform: { position: pos, opacity: 15 } });
   }
   if (style === 'bar') {
@@ -101,7 +107,7 @@ function chartScene(o = {}, comp = { width: 1920, height: 1080 }) {
   const stag = Math.min(0.15, 1.5 / n), layers = [];
   const area = { x0: W * 0.12, x1: W * 0.9, y0: H * (o.title ? 0.24 : 0.12), y1: H * 0.8 };
   const label = (name, text, x, y, size, t, extra) => Object.assign({ type: 'text', name, text: String(text).slice(0, 60), size, color: txt, transform: { position: [x, y] }, keys: { opacity: [[t, 0, 'easeOut'], [t + 0.4, 100]] } }, extra || {});
-  const valueText = (name, v, x, y, size, t) => ({ type: 'text', name, text: formatNumber(0, fmt), size, color: txt, transform: { position: [x, y] }, effects: [{ name: 'slider', label: 'Count', params: { value: 0 } }], keys: { 'fx:Count.value': [[t, 0, 'expoOut'], [t + 1.2, v]], opacity: [[t, 0], [t + 0.2, 100]] }, expressions: { text: counterExpr(fmt) } });
+  const valueText = (name, v, x, y, size, t) => { const u = sliderUnit(v); return { type: 'text', name, text: formatNumber(0, fmt), size, color: txt, transform: { position: [x, y] }, effects: [{ name: 'slider', label: 'Count', params: { value: 0 } }], keys: { 'fx:Count.value': [[t, 0, 'expoOut'], [t + 1.2, v / u]], opacity: [[t, 0], [t + 0.2, 100]] }, expressions: { text: counterExpr(fmt, { unit: u }) } }; };
   if (o.title) layers.push(label('Chart Title', o.title, '50%', H * 0.12, Math.round(H * 0.06), 0, { textAnimators: [{ preset: 'fadeUp', by: 'words', duration: 0.6, start: 0 }], keys: {} }));
   const fs = Math.round(H * 0.03);
   if (type === 'column' || type === 'bar') {
@@ -192,14 +198,14 @@ function waveExpr(w, amp, waves, speed, { fillTo = null, phase = 0, n = 24 } = {
     (fillTo === null ? 'createPath(p,it,ot,false)' : `p.push([w/2,${fillTo}]);p.push([-w/2,${fillTo}]);it.push([0,0],[0,0]);ot.push([0,0],[0,0]);createPath(p,it,ot,true)`);
 }
 const LIQUID = {
-  'blob-calm': { name: 'بلوب هادي', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(1, c.r)] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(1, c.r, { dur: 8, irregular: 0.15 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: 'time*6' } }] },
-  'blob-energetic': { name: 'بلوب سريع', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(3, c.r)] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(3, c.r, { dur: 2.4, irregular: 0.3 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: 'time*25' } }] },
+  'blob-calm': { name: 'بلوب هادي', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(1, c.r)] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(1, c.r, { dur: 8, irregular: 0.15 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: 'time*6' } }] },
+  'blob-energetic': { name: 'بلوب سريع', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(3, c.r)] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(3, c.r, { dur: 2.4, irregular: 0.3 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: 'time*25' } }] },
   'blob-duo': { name: 'بلوبين فوق بعض', build: (o, c) => [
-    { type: 'shape', name: o.name + ' A', blend: 'screen', shape: { items: [{ paths: [blob(5, c.r)] }], fill: o.color }, transform: { position: o.pos, opacity: 85 }, keys: { 'shape:path.1': blobKeys(5, c.r, { dur: 6 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: 'time*10' } },
-    { type: 'shape', name: o.name + ' B', blend: 'screen', shape: { items: [{ paths: [blob(9, c.r * 0.9)] }], fill: o.color2 }, transform: { position: o.pos, opacity: 85 }, keys: { 'shape:path.1': blobKeys(9, c.r * 0.9, { dur: 7 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: '-time*8' } }] },
-  'blob-outline': { name: 'بلوب خط', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(11, c.r)] }], fill: null, stroke: o.color, strokeWidth: c.r * 0.05 }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(11, c.r, { dur: 5 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: 'time*12' } }] },
-  'morph-ring': { name: 'رينج بيتشكّل', build: (o, c) => [0, 1, 2].map(k => ({ type: 'shape', name: o.name + ' ' + (k + 1), shape: { items: [{ paths: [blob(20 + k, c.r * (1 - k * 0.12))] }], fill: null, stroke: k % 2 ? o.color2 : o.color, strokeWidth: c.r * 0.025 }, transform: { position: o.pos, opacity: 100 - k * 25 }, keys: { 'shape:path.1': blobKeys(20 + k, c.r * (1 - k * 0.12), { dur: 4 + k, irregular: 0.12 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")', rotation: (k % 2 ? '-' : '') + 'time*' + (10 + k * 6) } })) },
-  'liquid-circle': { name: 'دايرة بتترجرج', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(30, c.r, { irregular: 0.05, points: 10 })] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(30, c.r, { dur: 1.6, irregular: 0.06, points: 10 }) }, expressions: { 'shape:path.1': 'loopOut("cycle")' } }] },
+    { type: 'shape', name: o.name + ' A', blend: 'screen', shape: { items: [{ paths: [blob(5, c.r)] }], fill: o.color }, transform: { position: o.pos, opacity: 85 }, keys: { 'shape:path.1': blobKeys(5, c.r, { dur: 6 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: 'time*10' } },
+    { type: 'shape', name: o.name + ' B', blend: 'screen', shape: { items: [{ paths: [blob(9, c.r * 0.9)] }], fill: o.color2 }, transform: { position: o.pos, opacity: 85 }, keys: { 'shape:path.1': blobKeys(9, c.r * 0.9, { dur: 7 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: '-time*8' } }] },
+  'blob-outline': { name: 'بلوب خط', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(11, c.r)] }], fill: null, stroke: o.color, strokeWidth: c.r * 0.05 }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(11, c.r, { dur: 5 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: 'time*12' } }] },
+  'morph-ring': { name: 'رينج بيتشكّل', build: (o, c) => [0, 1, 2].map(k => ({ type: 'shape', name: o.name + ' ' + (k + 1), shape: { items: [{ paths: [blob(20 + k, c.r * (1 - k * 0.12))] }], fill: null, stroke: k % 2 ? o.color2 : o.color, strokeWidth: c.r * 0.025 }, transform: { position: o.pos, opacity: 100 - k * 25 }, keys: { 'shape:path.1': blobKeys(20 + k, c.r * (1 - k * 0.12), { dur: 4 + k, irregular: 0.12 }) }, expressions: { 'shape:path.1': PATH_LOOP, rotation: (k % 2 ? '-' : '') + 'time*' + (10 + k * 6) } })) },
+  'liquid-circle': { name: 'دايرة بتترجرج', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(30, c.r, { irregular: 0.05, points: 10 })] }], fill: o.color }, transform: { position: o.pos }, keys: { 'shape:path.1': blobKeys(30, c.r, { dur: 1.6, irregular: 0.06, points: 10 }) }, expressions: { 'shape:path.1': PATH_LOOP } }] },
   'wave-line': { name: 'خط موج', build: (o, c) => [{ type: 'shape', name: o.name, transform: { position: o.pos }, shape: { kind: 'path', path: 'M0 0 L1 1', fill: null, stroke: o.color, strokeWidth: c.H * 0.008, lineCap: 'round' }, expressions: { 'shape:path': waveExpr(c.W * 0.8, c.H * 0.05, 2, 2.5) } }] },
   'wavy-stripes': { name: 'خطوط موج كتير', build: (o, c) => [0, 1, 2, 3, 4].map(k => ({ type: 'shape', name: o.name + ' ' + (k + 1), transform: { position: [o.pos[0], typeof o.pos[1] === 'number' ? o.pos[1] + (k - 2) * c.H * 0.06 : (parseFloat(o.pos[1]) + (k - 2) * 6) + '%'] }, shape: { kind: 'path', path: 'M0 0 L1 1', fill: null, stroke: k % 2 ? o.color2 : o.color, strokeWidth: c.H * 0.006, lineCap: 'round' }, expressions: { 'shape:path': waveExpr(c.W * 0.9, c.H * 0.03, 1.5, 2, { phase: k * 0.7 }) } })) },
   'water-fill': { name: 'مية بتملا الكادر', build: (o, c) => [
@@ -227,7 +233,7 @@ const LIQUID = {
   'ripple-rings': { name: 'موجات دواير', build: (o, c) => [0, 1, 2, 3].map(k => ({ type: 'shape', name: o.name + ' ' + (k + 1), shape: { kind: 'ellipse', size: [c.r * 2, c.r * 2], fill: null, stroke: o.color, strokeWidth: c.r * 0.03 }, transform: { position: o.pos }, expressions: { scale: `var t=(time+${k * 0.5})%2;[t*80,t*80]`, opacity: `var t=(time+${k * 0.5})%2;linear(t,0,2,100,0)` } })) },
   'splash-burst': { name: 'طرطشة من النص', build: (o, c) => Array.from({ length: 12 }, (_, k) => { const a = k / 12 * Math.PI * 2, d = c.r * (1.1 + (k % 3) * 0.25); return { type: 'shape', name: o.name + ' ' + (k + 1), shape: { path: 'M0 -60 C20 -25 35 0 35 20 C35 40 18 55 0 55 C-18 55 -35 40 -35 20 C-35 0 -20 -25 0 -60 Z', size: [c.r * 0.18, c.r * 0.26], fill: k % 2 ? o.color2 : o.color }, transform: { position: o.pos, rotation: a * 180 / Math.PI + 90 }, keys: { position: [[0.1, [c.cx, c.cy], 'expoOut'], [0.8, [c.cx + Math.cos(a) * d, c.cy + Math.sin(a) * d]]], scale: [[0.1, 0, 'backOut'], [0.5, 100], [1.4, 100, 'easeIn'], [1.9, 0]] } }; }) },
   'liquid-button': { name: 'زرار سايل', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [svg.parse(`M${-c.r} 0 C${-c.r} ${-c.r * 0.35} ${-c.r * 0.6} ${-c.r * 0.4} 0 ${-c.r * 0.4} C${c.r * 0.6} ${-c.r * 0.4} ${c.r} ${-c.r * 0.35} ${c.r} 0 C${c.r} ${c.r * 0.35} ${c.r * 0.6} ${c.r * 0.4} 0 ${c.r * 0.4} C${-c.r * 0.6} ${c.r * 0.4} ${-c.r} ${c.r * 0.35} ${-c.r} 0 Z`)[0]] }], fill: o.color }, transform: { position: o.pos }, effects: [{ name: 'waveWarp', params: { height: c.r * 0.04, width: c.r * 0.8, speed: 1 } }], keys: { scale: [[0, 0, 'backOut'], [0.6, 100]] } }] },
-  'blob-cluster': { name: 'بلوبات صغيرة بتطفو', build: (o, c) => Array.from({ length: 6 }, (_, k) => { const rr = c.r * (0.25 + (k % 3) * 0.12); return { type: 'shape', name: o.name + ' ' + (k + 1), shape: { items: [{ paths: [blob(50 + k, rr)] }], fill: k % 2 ? o.color2 : o.color }, expressions: { position: `seedRandom(${k + 11},true);[random(${c.W * 0.15},${c.W * 0.85})+Math.sin(time*0.5+${k})*${(c.W * 0.04).toFixed(0)},random(${c.H * 0.2},${c.H * 0.8})+Math.cos(time*0.4+${k})*${(c.H * 0.05).toFixed(0)}]`, 'shape:path.1': 'loopOut("cycle")' }, keys: { 'shape:path.1': blobKeys(50 + k, rr, { dur: 5 + k }) } }; }) },
+  'blob-cluster': { name: 'بلوبات صغيرة بتطفو', build: (o, c) => Array.from({ length: 6 }, (_, k) => { const rr = c.r * (0.25 + (k % 3) * 0.12); return { type: 'shape', name: o.name + ' ' + (k + 1), shape: { items: [{ paths: [blob(50 + k, rr)] }], fill: k % 2 ? o.color2 : o.color }, expressions: { position: `seedRandom(${k + 11},true);[random(${c.W * 0.15},${c.W * 0.85})+Math.sin(time*0.5+${k})*${(c.W * 0.04).toFixed(0)},random(${c.H * 0.2},${c.H * 0.8})+Math.cos(time*0.4+${k})*${(c.H * 0.05).toFixed(0)}]`, 'shape:path.1': PATH_LOOP }, keys: { 'shape:path.1': blobKeys(50 + k, rr, { dur: 5 + k }) } }; }) },
   'blob-reveal': { name: 'بلوب بيغطي الكادر', build: (o, c) => [{ type: 'shape', name: o.name, shape: { items: [{ paths: [blob(60, c.r)] }], fill: o.color }, transform: { position: o.pos }, keys: { scale: [[0, 0, 'expoIn'], [0.8, 550], [1.2, 550, 'expoOut'], [2, 0]], 'shape:path.1': blobKeys(60, c.r, { dur: 2, irregular: 0.3 }) } }] }
 };
 /** a liquid preset → raw layers. o: { preset, name, color, color2, size (px radius), position } */
@@ -294,4 +300,4 @@ function transitionLayers(kind, t, { d = 0.6, comp = { width: 1920, height: 1080
   return transitionLayers('zoomIn', t, { d, comp, color, color2, index });
 }
 
-module.exports = { FORMAT_SRC, efFmt, CURRENCIES, FORMATS, COUNTER_STYLES, counterOptions, formatNumber, counterExpr, counterLayers, CHARTS, PALETTE, parseTable, chartScene, LIQUID, blob, liquidLayers, waveExpr, TRANSITIONS, transitionLayers };
+module.exports = { sliderUnit, PATH_LOOP, FORMAT_SRC, efFmt, CURRENCIES, FORMATS, COUNTER_STYLES, counterOptions, formatNumber, counterExpr, counterLayers, CHARTS, PALETTE, parseTable, chartScene, LIQUID, blob, liquidLayers, waveExpr, TRANSITIONS, transitionLayers };

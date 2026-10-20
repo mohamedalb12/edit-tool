@@ -357,10 +357,10 @@ function layerSpec(L, comp, ctx, depth) {
     if (L.stroke) { o.stroke = hex(L.stroke); o.strokeWidth = clamp(+L.strokeWidth || 2, 0, 100); }
     if (L.counter && isFinite(+L.counter.to)) {
       // a counting number = slider "Count" (keyed from → to) + the formatted Source Text expression
-      const C = L.counter, from = +C.from || 0, t0 = Math.max(0, (C.start === undefined ? o.start : +C.start) - o.start);
-      L = Object.assign({}, L, { effects: (L.effects || []).concat([{ name: 'slider', label: 'Count', params: { value: from } }]),
-        keys: Object.assign({}, L.keys, { 'fx:Count.value': [[t0, from, C.ease || 'expoOut'], [t0 + Math.max(0.1, +C.duration || 2), +C.to]] }),
-        expressions: Object.assign({}, L.expressions, { text: motionKit.counterExpr(C) }) });
+      const C = L.counter, from = +C.from || 0, t0 = Math.max(0, (C.start === undefined ? o.start : +C.start) - o.start), u = motionKit.sliderUnit(from, C.to);
+      L = Object.assign({}, L, { effects: (L.effects || []).concat([{ name: 'slider', label: 'Count', params: { value: from / u } }]),
+        keys: Object.assign({}, L.keys, { 'fx:Count.value': [[t0, from / u, C.ease || 'expoOut'], [t0 + Math.max(0.1, +C.duration || 2), +C.to / u]] }),
+        expressions: Object.assign({}, L.expressions, { text: motionKit.counterExpr(C, { unit: u }) }) });
       o.effects = effectList(L.effects, comp, warnings);
     }
     const anims = [].concat(L.textAnimators || [], L.textAnimator ? [L.textAnimator] : [], L.textOut ? [Object.assign({ out: true }, L.textOut)] : []);
@@ -427,7 +427,9 @@ function layerSpec(L, comp, ctx, depth) {
   for (const k of Object.keys(L.expressions || {})) {
     const t = keyTarget(k, o.effects);
     if (!t) continue;
-    const ex = String(L.expressions[k]).slice(0, 1500);
+    // a minus followed by a negative number ("value--1*x") is a syntax error in AE: "value- -1*x"
+    const ex = String(L.expressions[k]).replace(/([\w)\].])--(?=[\d.(])/g, '$1- -');
+    if (ex.length > 6000) { warnings.push('إكسبريشن طويل قوي اتشال: ' + k); continue; }
     if (BAD_EXPR.test(ex)) { warnings.push('إكسبريشن اترفض'); continue; }
     o.expressions[t.key] = ex;
   }

@@ -18,6 +18,8 @@ test('self-test: every tool runs on its own scratch comp, AE checks the expressi
   const r = await svc.fullTest({ onStep: m => steps.push(m) });
   const fails = r.results.filter(x => !x.ok).map(x => x.group + ' · ' + x.name + ' → ' + (x.error || '') + (x.errors || []).join(' | '));
   assert.deepEqual(fails, [], r.report);
+  const warns = r.results.filter(x => x.warn && x.warn.length).map(x => x.name + ': ' + x.warn.join(', '));
+  assert.deepEqual(warns, [], 'nothing skipped inside a tool');
   assert.ok(r.total > 120, 'covers the tools: ' + r.total);
   assert.equal(r.env.pick3d, 'ADBE Calder');
   assert.ok(r.results.every(x => x.layers > 0), 'every tool made its layers');

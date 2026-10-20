@@ -395,7 +395,14 @@ EFM.easeSegment = function (p, ka, kb, bz) {
 
 /** ease the selected keyframes (Flow-style): every pair of neighbouring selected keys gets the curve */
 EFMAPI.applyEase = function (a) {
-  var c = EFM.comp(), props = c.selectedProperties, n = 0, i, j, p, ks;
+  var c = EFM.comp(), props = [], n = 0, i, j, p, ks;
+  for (i = 0; i < c.selectedProperties.length; i++) props.push(c.selectedProperties[i]);
+  // nothing picked in the graph: every keyframed transform property of the selected layers
+  var keyed = false; for (i = 0; i < props.length; i++) if (props[i].propertyType === PropertyType.PROPERTY && props[i].numKeys > 1) keyed = true;
+  if (!keyed) {
+    var Ls = c.selectedLayers, tm = ['ADBE Position', 'ADBE Scale', 'ADBE Rotate Z', 'ADBE Opacity', 'ADBE Anchor Point', 'ADBE Position_0', 'ADBE Position_1'];
+    for (i = 0; i < Ls.length; i++) for (j = 0; j < tm.length; j++) { try { p = EFM.tr(Ls[i], tm[j]); if (p && p.numKeys > 1) props.push(p); } catch (eT) {} }
+  }
   return EFM.undo('\u0645\u0646\u062d\u0646\u0649', function () {
     for (i = 0; i < props.length; i++) {
       p = props[i];
@@ -463,8 +470,8 @@ EFMAPI.nullController = function (a) {
 /* ---------------- expressions in one click ---------------- */
 EFM.EXPR = {
   wiggle: { label: 'Wiggle', sliders: [['EF Wiggle Freq', 2], ['EF Wiggle Amp', 30]], expr: 'wiggle(effect("EF Wiggle Freq")("ADBE Slider Control-0001"), effect("EF Wiggle Amp")("ADBE Slider Control-0001"))' },
-  loopCycle: { label: 'Loop', expr: 'loopOut("cycle")', keys: true },
-  loopPingpong: { label: 'Ping-pong', expr: 'loopOut("pingpong")', keys: true },
+  loopCycle: { label: 'Loop', expr: 'var n=numKeys;var a=n>1?key(1).time:0,d=n>1?key(n).time-a:0;d>0&&time>a+d?valueAtTime(a+(time-a)%d):value', keys: true },
+  loopPingpong: { label: 'Ping-pong', expr: 'var n=numKeys;var a=n>1?key(1).time:0,d=n>1?key(n).time-a:0;var k=d>0?(time-a)%(2*d):0;d>0&&time>a+d?valueAtTime(k<d?a+k:a+2*d-k):value', keys: true },
   bounce: { label: 'Inertial bounce', sliders: [['EF Bounce Amp', 0.06], ['EF Bounce Freq', 2.5], ['EF Bounce Decay', 6]], keys: true,
     expr: 'var amp=effect("EF Bounce Amp")("ADBE Slider Control-0001"),freq=effect("EF Bounce Freq")("ADBE Slider Control-0001"),decay=effect("EF Bounce Decay")("ADBE Slider Control-0001");var n=0;if(numKeys>0){n=nearestKey(time).index;if(key(n).time>time)n--;}var t=0;if(n>0)t=time-key(n).time;if(n>0&&t<1){var v=velocityAtTime(key(n).time-thisComp.frameDuration/10);value+v*amp*Math.sin(freq*t*2*Math.PI)/Math.exp(decay*t);}else value' },
   autoFade: { label: 'Auto fade', sliders: [['EF Fade Frames', 8]], prop: 'opacity',
@@ -578,16 +585,24 @@ EFM.SHAPEP = { trimStart: 'ADBE Vector Trim Start', trimEnd: 'ADBE Vector Trim E
   outerRadius: 'ADBE Vector Star Outer Radius', innerRadius: 'ADBE Vector Star Inner Radius', starRotation: 'ADBE Vector Star Rotation', groupPosition: 'ADBE Vector Position', groupScale: 'ADBE Vector Scale', groupRotation: 'ADBE Vector Rotation' };
 EFM.MASKP = { path: 'ADBE Mask Shape', feather: 'ADBE Mask Feather', expansion: 'ADBE Mask Offset', opacity: 'ADBE Mask Opacity' };
 EFM.CAMP = { zoom: 'ADBE Camera Zoom', focusDistance: 'ADBE Camera Focus Distance', aperture: 'ADBE Camera Aperture', blurLevel: 'ADBE Camera Blur Level', dof: 'ADBE Camera Depth of Field' };
-EFM.LIGHTP = { intensity: 'ADBE Light Intensity', color: 'ADBE Light Color', coneAngle: 'ADBE Light Cone Angle', coneFeather: 'ADBE Light Cone Feather 2', castsShadows: 'ADBE Light Casts Shadows' };
+EFM.LIGHTP = { intensity: 'ADBE Light Intensity', color: 'ADBE Light Color', coneAngle: 'ADBE Light Cone Angle', coneFeather: 'ADBE Light Cone Feather 2', castsShadows: 'ADBE Casts Shadows' };
 EFM.BLEND = { normal: 'NORMAL', add: 'ADD', screen: 'SCREEN', multiply: 'MULTIPLY', overlay: 'OVERLAY', softLight: 'SOFT_LIGHT', colorDodge: 'COLOR_DODGE', lighten: 'LIGHTEN', darken: 'DARKEN', difference: 'DIFFERENCE' };
 EFM.warn = [];
 EFM.layerByName = function (c, name) { var i; for (i = 1; i <= c.numLayers; i++) if (c.layer(i).name === name) return c.layer(i); return null; };
 /** the first property / group under `group` whose matchName (or English name, any case) is `match` \u2014 children first, then deeper */
+/* names as AE shows them can differ a little from what we write: curly vs straight apostrophes, and the Transform
+   effect's "Scale" is really "Scale Height" (relabelled only while Uniform Scale is on) */
+EFM.norm = function (s) { return String(s).toLowerCase().replace(/[\u2018\u2019\u02bc`]/g, "'").replace(/\s+/g, ' '); };
+EFM.ALIAS = { 'scale': 'scale height' };
 EFM.find = function (group, match, depth) {
-  var i, p, r, lm = String(match).toLowerCase();
-  if ((depth || 0) > 14 || !group || !group.numProperties) return null;
-  for (i = 1; i <= group.numProperties; i++) { p = group.property(i); if (p && (p.matchName === match || String(p.name).toLowerCase() === lm)) return p; }
-  for (i = 1; i <= group.numProperties; i++) { p = group.property(i); if (p && p.propertyType !== PropertyType.PROPERTY) { r = EFM.find(p, match, (depth || 0) + 1); if (r) return r; } }
+  var r = EFM.find1(group, match, depth || 0), a = EFM.ALIAS[EFM.norm(match)];
+  return r || (a ? EFM.find1(group, a, depth || 0) : null);
+};
+EFM.find1 = function (group, match, depth) {
+  var i, p, r, lm = EFM.norm(match);
+  if (depth > 14 || !group || !group.numProperties) return null;
+  for (i = 1; i <= group.numProperties; i++) { p = group.property(i); if (p && (p.matchName === match || EFM.norm(p.name) === lm)) return p; }
+  for (i = 1; i <= group.numProperties; i++) { p = group.property(i); if (p && p.propertyType !== PropertyType.PROPERTY) { r = EFM.find1(p, match, depth + 1); if (r) return r; } }
   return null;
 };
 /** the n-th property with this matchName under group (depth first, in order) */
@@ -643,7 +658,7 @@ EFM.target = function (L, key) {
     m = /^mask:(\d+)\.(\w+)$/.exec(key);
     if (m) { var mk = L.property('ADBE Mask Parade').property(+m[1]); return mk ? mk.property(EFM.MASKP[m[2]]) : null; }
     if (key.indexOf('camera:') === 0) return EFM.find(L.property('ADBE Camera Options Group'), EFM.CAMP[key.substr(7)]);
-    if (key.indexOf('light:') === 0) return EFM.find(L.property('ADBE Light Options Group'), EFM.LIGHTP[key.substr(6)]);
+    if (key.indexOf('light:') === 0) { var lo = L.property('ADBE Light Options Group'), lk = key.substr(6); return EFM.find(lo, EFM.LIGHTP[lk]) || (lk === 'castsShadows' ? EFM.find(lo, 'Casts Shadows') : null); }
     return EFM.TPROP[key] ? EFM.tr(L, EFM.TPROP[key]) : null;
   } catch (eT) { return null; }
 };
@@ -1476,7 +1491,7 @@ EFMAPI.lightRig = function () {
     key.lightType = LightType.SPOT;
     EFM.tr(key, 'ADBE Position').setValue([c.width * 0.25, c.height * 0.15, -900]);
     var o = key.property('ADBE Light Options Group');
-    try { o.property('ADBE Light Intensity').setValue(110); o.property('ADBE Light Casts Shadows').setValue(1); o.property('ADBE Light Shadow Diffusion').setValue(40); o.property('ADBE Light Color').setValue([1, 0.93, 0.85, 1]); } catch (e) {}
+    try { o.property('ADBE Light Intensity').setValue(110); (o.property('ADBE Casts Shadows') || EFM.find(o, 'Casts Shadows')).setValue(1); o.property('ADBE Light Shadow Diffusion').setValue(40); o.property('ADBE Light Color').setValue([1, 0.93, 0.85, 1]); } catch (e) {}
     var amb = c.layers.addLight('EF Ambient', [c.width / 2, c.height / 2]);
     amb.lightType = LightType.AMBIENT;
     try { amb.property('ADBE Light Options Group').property('ADBE Light Intensity').setValue(35); } catch (e2) {}
@@ -1647,11 +1662,13 @@ EFMAPI.testPrep = function (a) {
     else { L = c.layers.addNull(c.duration); }
     if (it.name) L.name = it.name;
     if (it.position) EFM.tr(L, 'ADBE Position').setValue(it.position);
-    if (it.keys) { var po = EFM.tr(L, 'ADBE Position'), v = po.value; po.setValueAtTime(0, v); po.setValueAtTime(1, [v[0] + 300, v[1]]); try { po.selected = true; } catch (eS) {} }
+    if (it.keys) { var po = EFM.tr(L, 'ADBE Position'), v = po.value; po.setValueAtTime(0, v); po.setValueAtTime(1, [v[0] + 300, v[1]]); }
     made.push(L.name); refs.push(L);
   }
   for (i = 1; i <= c.numLayers; i++) c.layer(i).selected = false;
   for (i = 0; i < (a.setup || []).length; i++) if (a.setup[i].select !== false) { try { refs[i].selected = true; } catch (e1) {} }
+  // keyframed properties selected after the layers (deselecting a layer deselects its properties)
+  for (i = 0; i < (a.setup || []).length; i++) if (a.setup[i].keys) { try { EFM.tr(refs[i], 'ADBE Position').selected = true; } catch (e2) {} }
   return { comp: c.name, layers: made };
 };
 /** every comp made since the last check: layers, expressions, and the errors AE itself reports on them */

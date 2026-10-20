@@ -137,10 +137,10 @@ function rigPlan(layers, { ik = false, prefix = 'EF' } = {}) {
     const X = p.L, anchor = fromComp(p.joint, X);
     // keep the layer where it is: position moves by the anchor shift (in comp space it is exactly the joint)
     const e = {};
-    if (p.role === 'upperArm') e.rotation = S + `value+${sgn(p)}*W*Math.sin(ph)*S("Arm Swing")+Math.sin(time*1.2)*2`;
+    if (p.role === 'upperArm') e.rotation = S + `value+(${sgn(p)})*W*Math.sin(ph)*S("Arm Swing")+Math.sin(time*1.2)*2`;
     if (p.role === 'forearm') e.rotation = S + `value-W*Math.max(0,${sgn(p)}*Math.sin(ph+0.5))*S("Arm Swing")*0.7`;
-    if (p.role === 'thigh') e.rotation = S + `value-${sgn(p)}*W*Math.sin(ph)*S("Stride")`;
-    if (p.role === 'shin') e.rotation = S + `value+W*Math.max(0,-${sgn(p)}*Math.sin(ph+0.4))*S("Stride")*1.4`;
+    if (p.role === 'thigh') e.rotation = S + `value-(${sgn(p)})*W*Math.sin(ph)*S("Stride")`;
+    if (p.role === 'shin') e.rotation = S + `value+W*Math.max(0,-(${sgn(p)})*Math.sin(ph+0.4))*S("Stride")*1.4`;
     if (p.role === 'foot') e.rotation = S + `value+W*Math.sin(ph${p.side === 'R' ? '+Math.PI' : ''})*S("Stride")*0.3`;
     if (p === body) { e.position = S + `sub(value,[0,W*Math.abs(Math.sin(ph))*S("Bob")])`; e.scale = S + `add(value,[0,Math.sin(time*2)*S("Breath")])`; }
     if (p.role === 'head') e.rotation = S + `value+Math.sin(time*1.3)*1.5+W*Math.sin(ph*2)*1.5+S("Look")*6`;

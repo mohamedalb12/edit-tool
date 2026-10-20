@@ -54,8 +54,9 @@ test('counter in AE: a "Count" slider keyed from → to, the text formatted live
   assert.deepEqual(warnings, []);
   ae.call('buildScene', { spec: JSON.parse(JSON.stringify(spec)) });
   const c = ae.project.activeItem, L = byName(c, 'Sales');
-  assert.deepEqual(fxp(L, 'Count').property(1).keys.map(k => [k.t, k.v]), [[0, 0], [2, 2000000]]);
-  assert.match(L.property('ADBE Text Properties').property('ADBE Text Document').expression, /efFmt\(effect\("Count"\)/);
+  // AE's slider stops at ±1,000,000: 2M rides the slider ÷10 and the text multiplies back
+  assert.deepEqual(fxp(L, 'Count').property(1).keys.map(k => [k.t, k.v]), [[0, 0], [2, 200000]]);
+  assert.match(L.property('ADBE Text Properties').property('ADBE Text Document').expression, /efFmt\(effect\("Count"\)\("Slider"\)\*10,/);
   const sim = X.make(spec);
   assert.equal(sim.value('Sales', 'text', 1), '1M');
   assert.equal(sim.value('Sales', 'text', 2), '2M');
@@ -92,7 +93,9 @@ test('liquid shapes: every preset builds; blobs morph in a loop (last key = firs
   const L = kit.liquidLayers({ preset: 'blob-calm' })[0];
   const k = L.keys['shape:path.1'];
   assert.deepEqual(k[0][1], k[k.length - 1][1]);
-  assert.match(L.expressions['shape:path.1'], /loopOut/);
+  // AE 26 has no loopOut on Path properties: the cycle is written out with valueAtTime
+  assert.doesNotMatch(L.expressions['shape:path.1'], /loopOut/);
+  assert.match(L.expressions['shape:path.1'], /valueAtTime\(a\+\(time-a\)%d\)/);
   assert.ok(Object.keys(kit.LIQUID).length >= 20);
 });
 
@@ -108,7 +111,7 @@ test('transitions: one on every cut between the selected clips (adjustment moves
   assert.ok(Math.abs(adj[0].inPoint - 5.7) < 1e-6 || Math.abs(adj[0].inPoint - 2.7) < 1e-6);
   const tf = adj[0].property('ADBE Effect Parade').property('EF Transform');
   assert.equal(tf.property('Position').keys.length, 4);
-  assert.equal(tf.property("Use Composition's Shutter Angle").value, 0);
+  assert.equal(tf.property('Use Composition\u2019s Shutter Angle').value, 0);
   for (const kind of Object.keys(kit.TRANSITIONS)) { const rr = await A.transitionApply({ kind }); assert.equal(rr.cuts, 2, kind); assert.deepEqual(rr.skipped, [], kind); }
 });
 
