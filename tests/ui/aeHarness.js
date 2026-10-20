@@ -40,7 +40,7 @@
     cameraRig: function (o) { return rec('cameraRig', o, { camera: 'EF Camera' }); },
     parallax: function (o) { return rec('parallax', o, { layers: 3, depth: 600 }); },
     lightRig: function () { return rec('lightRig', null, { lights: 2, casting: 3 }); },
-    extrude: function (o) { return rec('extrude', o, { layers: 1, renderer: 'ADBE Advanced 3d' }); },
+    extrude: function (o) { return rec('extrude', o, { layers: 1, renderer: 'ADBE Calder' }); },
     render: function (o) { return rec('render', o, { path: '/p/EditFast Renders/Title Card.mp4', ame: !!o.ame }); },
     cleanup: function (o) { return rec('cleanup', o, { removed: 2, moved: 5 }); },
     paletteRead: function () { return rec('paletteRead', null, { colors: [{ hex: '#f97316', count: 3 }, { hex: '#ffffff', count: 1 }] }); },
@@ -95,7 +95,8 @@
     voiceAd: function (o) { return rec('voiceAd', { audio: o.audio, brief: o.brief, captions: o.captions }, { sentences: 4, say: '' }); },
     highlightPresets: function () { return [{ id: 'blue-rest', name: 'الباقي أزرق والمبنى طبيعي' }, { id: 'bw-rest', name: 'الباقي أبيض وأسود' }, { id: 'gold', name: 'ذهبي' }, { id: 'color-building', name: 'المبنى ملوّن' }, { id: 'focus', name: 'غامق ومبلّر' }]; },
     highlight: function (o) { o.onStep && o.onStep('بيتتبّع'); return rec('highlight', { n: o.points.length, mode: o.mode, preset: o.preset, look: o.look, label: o.label }, { frames: 50, controls: 'EF Highlight 1 Controls', mode: o.mode }); },
-    selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); }
+    selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); },
+    fullTest: function (o) { o.onStep('(1/2) لوجو · Logo PNG 3d'); return rec('fullTest', {}, { ok: 1, fail: 1, total: 2, report: 'EditFast Motion — اختبار كل الأدوات\n✗ لوجو · Logo PNG 3d → renderer', results: [] }); }
   };
   window.EF_TEST = { node: load, services: S, host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'After Effects (test)' } : {}); } };
 })();

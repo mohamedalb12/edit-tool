@@ -48,6 +48,7 @@ EFM.isArr = function (v) { return Object.prototype.toString.call(v) === '[object
 EFM.change = function (p, fn) { var i; if (p.numKeys > 0) { for (i = 1; i <= p.numKeys; i++) p.setValueAtKey(i, fn(p.keyValue(i))); } else p.setValue(fn(p.value)); };
 EFM.has = function (arr, v) { for (var i = 0; i < arr.length; i++) if (arr[i] === v) return true; return false; };
 EFM.comp = function () {
+  if (EFM.T && EFM.T.comp) { try { if (new Date().getTime() - EFM.T.at < 600000 && EFM.T.comp.id) return EFM.T.comp; } catch (eT) {} EFM.T.comp = null; }
   var c = app.project.activeItem;
   if (!c || !(c instanceof CompItem)) throw new Error('\u0627\u0641\u062a\u062d \u0643\u0648\u0645\u0628\u0648\u0632\u064a\u0634\u0646 \u0627\u0644\u0623\u0648\u0644 (\u062f\u0648\u0633 \u0639\u0644\u064a\u0647 \u0641\u064a \u0627\u0644\u062a\u0627\u064a\u0645\u0644\u0627\u064a\u0646)');
   return c;
@@ -73,6 +74,13 @@ EFM.layerType = function (L) {
   try { if (L.source && L.source.mainSource instanceof FileSource) return L.source.hasVideo ? 'footage' : 'audio'; } catch (e3) {}
   return 'other';
 };
+/** where a property is (its layer + index path), to fetch it again after AE rebuilt a group */
+EFM.locate = function (p) {
+  var path = [], q = p;
+  while (q && q.propertyDepth > 0) { path.unshift(q.propertyIndex); q = q.parentProperty; }
+  return { layer: p.propertyGroup(p.propertyDepth), path: path };
+};
+EFM.resolve = function (loc) { var q = loc.layer, i; for (i = 0; i < loc.path.length; i++) { q = q.property(loc.path[i]); if (!q) return null; } return q; };
 EFM.tr = function (L, name) { return L.property('ADBE Transform Group').property(name); };
 EFM.clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
 /** every property of a layer (walk the tree), calling fn(prop) on leaf properties */
@@ -203,7 +211,7 @@ EFMAPI.templateSave = function (a) {
             if (!/^ADBE Vector (Fill|Stroke) Color$/.test(p.matchName) && !/^ADBE (Fill|Tint|Change To Color)-/.test(p.matchName)) return;
             var k = EFM.colorKey(p.value);
             if (!groups[k]) { groups[k] = { value: p.value, props: [] }; order.push(k); }
-            groups[k].props.push(p);
+            groups[k].props.push(EFM.locate(p));
           } catch (e3) {}
         });
         // text colour: a Fill effect on the text layer, so its colour can be exposed without touching the words
@@ -214,20 +222,22 @@ EFMAPI.templateSave = function (a) {
             fill.property('ADBE Fill-0002').setValue([fc[0], fc[1], fc[2], 1]);
             var tk = EFM.colorKey(fc);
             if (!groups[tk]) { groups[tk] = { value: [fc[0], fc[1], fc[2], 1], props: [] }; order.push(tk); }
-            groups[tk].props.push(fill.property('ADBE Fill-0002'));
+            groups[tk].props.push(EFM.locate(EFM.effect(L, 'ADBE Fill', 'EF Text Color').property('ADBE Fill-0002')));
           } catch (e4) {}
         }
       }
       for (i = 0; i < order.length && i < 8; i++) {
-        var g = groups[order[i]], cc = EFM.effect(controls(), 'ADBE Color Control', 'EF Color ' + (i + 1));
-        cc.property('ADBE Color Control-0001').setValue(g.value);
-        for (var j = 0; j < g.props.length; j++) g.props[j].expression = 'thisComp.layer("EF Controls").effect("EF Color ' + (i + 1) + '")("ADBE Color Control-0001")';
-        if (EFM.expose(cc.property('ADBE Color Control-0001'), c, '\u0644\u0648\u0646 ' + (i + 1))) exposed.push('color');
+        var g = groups[order[i]], cname = 'EF Color ' + (i + 1);
+        EFM.effect(controls(), 'ADBE Color Control', cname);
+        EFM.effect(controls(), 'ADBE Color Control', cname).property('ADBE Color Control-0001').setValue(g.value);
+        for (var j = 0; j < g.props.length; j++) { var gp = EFM.resolve(g.props[j]); if (gp) { try { gp.expression = 'thisComp.layer("EF Controls").effect("' + cname + '")("ADBE Color Control-0001")'; } catch (e9) {} } }
+        if (EFM.expose(EFM.effect(controls(), 'ADBE Color Control', cname).property('ADBE Color Control-0001'), c, '\u0644\u0648\u0646 ' + (i + 1))) exposed.push('color');
       }
     }
     // 3) motion: one "speed" and one "strength" slider drive every keyframed property
     if (ed.motion) {
-      var sp = EFM.effect(controls(), 'ADBE Slider Control', 'EF Speed'), st = EFM.effect(controls(), 'ADBE Slider Control', 'EF Strength');
+      EFM.effect(controls(), 'ADBE Slider Control', 'EF Speed'); EFM.effect(controls(), 'ADBE Slider Control', 'EF Strength');
+      var sp = { property: function (m) { return EFM.effect(controls(), 'ADBE Slider Control', 'EF Speed').property(m); } }, st = { property: function (m) { return EFM.effect(controls(), 'ADBE Slider Control', 'EF Strength').property(m); } };
       sp.property('ADBE Slider Control-0001').setValue(100); st.property('ADBE Slider Control-0001').setValue(100);
       var expr = 'var c=thisComp.layer("EF Controls");var s=Math.max(1,c.effect("EF Speed")("ADBE Slider Control-0001"))/100;var k=c.effect("EF Strength")("ADBE Slider Control-0001")/100;' +
         'if(numKeys>1){var t0=key(1).time;var v=valueAtTime(t0+(time-t0)*s);var b=valueAtTime(t0);add(b,mul(sub(v,b),k));}else value';
@@ -374,7 +384,8 @@ EFM.easeSegment = function (p, ka, kb, bz) {
   var x1 = EFM.clamp(bz[0], 0.001, 1), y1 = bz[1], x2 = EFM.clamp(bz[2], 0, 0.999), y2 = bz[3];
   var outSpeed = avg * (y1 / x1), inSpeed = avg * ((1 - y2) / (1 - x2));
   var outInf = EFM.clamp(x1 * 100, 0.1, 100), inInf = EFM.clamp((1 - x2) * 100, 0.1, 100);
-  dims = (EFM.isArr(va) && !spatial) ? va.length : 1;
+  // one KeyframeEase per dimension only for TwoD / ThreeD values (spatial, colour, path\u2026 take one)
+  dims = (EFM.isArr(va) && (p.propertyValueType === PropertyValueType.TwoD || p.propertyValueType === PropertyValueType.ThreeD)) ? va.length : 1;
   function eases(sp, inf) { var arr = [], d; for (d = 0; d < dims; d++) arr.push(new KeyframeEase(sp, inf)); return arr; }
   p.setInterpolationTypeAtKey(ka, p.keyInInterpolationType(ka), KeyframeInterpolationType.BEZIER);
   p.setInterpolationTypeAtKey(kb, KeyframeInterpolationType.BEZIER, p.keyOutInterpolationType(kb));
@@ -486,11 +497,15 @@ EFMAPI.addExpression = function (a) {
     }
     if (!targets.length) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0623\u0648 \u062e\u0627\u0635\u064a\u0629 \u0627\u0644\u0623\u0648\u0644');
     var n = 0, skipped = 0;
-    for (i = 0; i < targets.length; i++) {
-      p = targets[i];
+    // adding the sliders rebuilds the layer's effects: remember where each target is and fetch it again after
+    var locs = []; for (i = 0; i < targets.length; i++) locs.push(EFM.locate(targets[i]));
+    for (i = 0; i < locs.length; i++) {
+      p = EFM.resolve(locs[i]);
+      if (!p) continue;
       if (X.keys && p.numKeys < 1) { skipped++; continue; }
-      L = p.propertyGroup(p.propertyDepth);
+      L = locs[i].layer;
       if (X.sliders) for (var s = 0; s < X.sliders.length; s++) { var e = EFM.effect(L, 'ADBE Slider Control', X.sliders[s][0]); if (!e.property('ADBE Slider Control-0001').expressionEnabled && e.property('ADBE Slider Control-0001').value === 0) e.property('ADBE Slider Control-0001').setValue(X.sliders[s][1]); }
+      p = EFM.resolve(locs[i]);
       var ex = X.expr;
       if (a.kind === 'float' && p.value && p.value.length > 2) ex = ex.replace('[0,Math.sin(time*s*2*Math.PI)*a]', '[0,Math.sin(time*s*2*Math.PI)*a,0]');
       p.expression = ex; n++;
@@ -507,30 +522,36 @@ EFMAPI.addExpression = function (a) {
  * In: the range offset sweeps 0 \u2192 100 (everything affected = hidden \u2192 none). Out: -100 \u2192 0 (none \u2192 everything).
  */
 EFM.textAnimOn = function (L, a, t0) {
-  var d = a.duration || 1;
-  var anims = L.property('ADBE Text Properties').property('ADBE Text Animators');
-  var an = anims.addProperty('ADBE Text Animator');
-  an.name = 'EF ' + (a.out ? 'out ' : '') + (a.preset || 'fadeUp');
-  var sel = an.property('ADBE Text Selectors').addProperty('ADBE Text Selector');
-  var adv = sel.property('ADBE Text Range Advanced');
-  try { adv.property('ADBE Text Range Units').setValue(1); } catch (e0) {}
-  try { adv.property('ADBE Text Range Type2').setValue(a.by === 'words' ? 3 : a.by === 'lines' ? 4 : 1); } catch (e1) {}
-  try { adv.property('ADBE Text Range Shape').setValue(a.preset === 'typewriter' ? 1 : 3); adv.property('ADBE Text Levels Max Ease').setValue(a.preset === 'typewriter' ? 0 : 60); } catch (e2) {}
-  var props = an.property('ADBE Text Animator Properties'), P = a.preset || 'fadeUp';
-  if (P !== 'tracking') props.addProperty('ADBE Text Opacity').setValue(0);
-  if (P === 'fadeUp') props.addProperty('ADBE Text Position 3D').setValue([0, 40, 0]);
-  if (P === 'slideIn') props.addProperty('ADBE Text Position 3D').setValue([-80, 0, 0]);
-  if (P === 'dropIn') props.addProperty('ADBE Text Position 3D').setValue([0, -90, 0]);
-  if (P === 'blurIn') props.addProperty('ADBE Text Blur').setValue([30, 30]);
-  if (P === 'scalePop') props.addProperty('ADBE Text Scale 3D').setValue([0, 0, 100]);
-  if (P === 'rotateIn') { try { props.addProperty('ADBE Text Rotation').setValue(-70); } catch (eR) {} props.addProperty('ADBE Text Scale 3D').setValue([60, 60, 100]); }
-  if (P === 'tracking') props.addProperty('ADBE Text Tracking Amount').setValue(-40);
-  var off = sel.property('ADBE Text Percent Offset');
+  // AE rebuilds a group when a property is added to it, so every reference is fetched fresh from the layer
+  var d = a.duration || 1, P = a.preset || 'fadeUp';
+  var anims = function () { return L.property('ADBE Text Properties').property('ADBE Text Animators'); };
+  anims().addProperty('ADBE Text Animator');
+  var ai = anims().numProperties;
+  var AN = function () { return anims().property(ai); };
+  AN().name = 'EF ' + (a.out ? 'out ' : '') + P;
+  AN().property('ADBE Text Selectors').addProperty('ADBE Text Selector');
+  var SEL = function () { return AN().property('ADBE Text Selectors').property(1); };
+  var ADV = function () { return SEL().property('ADBE Text Range Advanced'); };
+  try { ADV().property('ADBE Text Range Units').setValue(1); } catch (e0) {}
+  try { ADV().property('ADBE Text Range Type2').setValue(a.by === 'words' ? 3 : a.by === 'lines' ? 4 : 1); } catch (e1) {}
+  try { ADV().property('ADBE Text Range Shape').setValue(P === 'typewriter' ? 1 : 3); } catch (e2) {}
+  try { ADV().property('ADBE Text Levels Max Ease').setValue(P === 'typewriter' ? 0 : 60); } catch (e2b) {}
+  var add = function (match, v) { try { AN().property('ADBE Text Animator Properties').addProperty(match).setValue(v); } catch (eA) { EFM.warn.push(L.name + ': ' + match); } };
+  if (P !== 'tracking') add('ADBE Text Opacity', 0);
+  if (P === 'fadeUp') add('ADBE Text Position 3D', [0, 40, 0]);
+  if (P === 'slideIn') add('ADBE Text Position 3D', [-80, 0, 0]);
+  if (P === 'dropIn') add('ADBE Text Position 3D', [0, -90, 0]);
+  if (P === 'blurIn') add('ADBE Text Blur', [30, 30]);
+  if (P === 'scalePop') add('ADBE Text Scale 3D', [0, 0, 100]);
+  if (P === 'rotateIn') { add('ADBE Text Rotation', -70); add('ADBE Text Scale 3D', [60, 60, 100]); }
+  if (P === 'tracking') add('ADBE Text Tracking Amount', -40);
+  // the range offset sweeps 0 \u2192 100 % in (everything affected = hidden \u2192 none), -100 \u2192 0 out
+  var off = SEL().property('ADBE Text Percent Offset');
   if (a.out) { off.setValueAtTime(t0, -100); off.setValueAtTime(t0 + d, 0); }
   else { off.setValueAtTime(t0, 0); off.setValueAtTime(t0 + d, 100); }
-  if (P !== 'typewriter') { EFM.easeSegment(off, 1, 2, a.out ? [0.7, 0, 0.84, 0] : [0.16, 1, 0.3, 1]); }
-  try { sel.property('ADBE Text Percent Start').setValue(0); sel.property('ADBE Text Percent End').setValue(100); } catch (e3) {}
-  return an;
+  if (P !== 'typewriter') EFM.easeSegment(SEL().property('ADBE Text Percent Offset'), 1, 2, a.out ? [0.7, 0, 0.84, 0] : [0.16, 1, 0.3, 1]);
+  try { SEL().property('ADBE Text Percent Start').setValue(0); SEL().property('ADBE Text Percent End').setValue(100); } catch (e3) {}
+  return AN();
 };
 /**
  * Character / word / line reveals on the selected text layers.
@@ -580,11 +601,20 @@ EFM.findNth = function (group, match, n) {
   return found;
 };
 /** Advanced 3D (or Cinema 4D) renderer on a comp, for extrusion / 3D models */
+/* match names: 'ADBE Advanced 3d' is CLASSIC 3D (no extrusion) in shipping AE; Advanced 3D = 'ADBE Calder', Cinema 4D = 'ADBE Ernst'.
+   (A 2024 beta renamed them to 'ADBE Classic 3d' / 'ADBE Advanced 3d' / 'ADBE Cinema 4d' \u2014 then 'ADBE Advanced 3d' is the new one.) */
+EFM.pick3d = function (r) {
+  var has = function (n) { for (var i = 0; i < r.length; i++) if (r[i] === n) return true; return false; };
+  var order = ['ADBE Calder'];
+  if (has('ADBE Classic 3d')) order.push('ADBE Advanced 3d');
+  order.push('ADBE Ernst', 'ADBE Cinema 4d');
+  for (var k = 0; k < order.length; k++) if (has(order[k])) return order[k];
+  return null;
+};
 EFM.renderer3d = function (c) {
-  var r = c.renderers || [], i;
-  for (i = 0; i < r.length; i++) if (r[i] === 'ADBE Advanced 3d') { c.renderer = r[i]; return r[i]; }
-  for (i = 0; i < r.length; i++) if (r[i] === 'ADBE Ernst') { c.renderer = r[i]; return r[i]; }
-  EFM.warn.push('3D renderer'); return null;
+  var pick = EFM.pick3d(c.renderers || []);
+  if (pick) { if (c.renderer !== pick) c.renderer = pick; return pick; }
+  EFM.warn.push('3D renderer (Advanced 3D / Cinema 4D)'); return null;
 };
 /** the property a scene key targets: transform names, shape:\u2026, mask:n.\u2026, camera:\u2026, light:\u2026, "fx:<effect match>|<param>" */
 EFM.target = function (L, key) {
@@ -942,7 +972,7 @@ EFM.collectPaths = function (group, chain, out, look) {
     else if (m === 'ADBE Vector Graphic - Stroke' && !look.stroke) { look.stroke = EFM.toHex(p.property('ADBE Vector Stroke Color').value); look.strokeWidth = p.property('ADBE Vector Stroke Width').value; }
   }
 };
-/** a text layer → its outlines (AE's "Create Shapes from Text"), or null */
+/** a text layer \u2192 its outlines (AE's "Create Shapes from Text"), or null */
 EFM.textToShapes = function (c, L) {
   var id = 0, i, before = c.numLayers;
   try { id = app.findMenuCommandId('Create Shapes from Text'); } catch (e0) {}
@@ -959,7 +989,7 @@ EFM.textToShapes = function (c, L) {
 EFMAPI.readShapes = function () {
   var c = EFM.comp(), L = EFM.selected(c), out = [], i;
   var sel = L.slice(0);
-  return EFM.undo('قراية الأشكال', function () {
+  return EFM.undo('\u0642\u0631\u0627\u064a\u0629 \u0627\u0644\u0623\u0634\u0643\u0627\u0644', function () {
     for (i = 0; i < sel.length; i++) {
       var src = sel[i], tmp = null, S = src, look = {};
       if (src instanceof TextLayer) { tmp = EFM.textToShapes(c, src); S = tmp; try { look.fill = EFM.toHex(src.property('ADBE Text Properties').property('ADBE Text Document').value.fillColor); } catch (eF) {} }
@@ -970,7 +1000,7 @@ EFMAPI.readShapes = function () {
       if (tmp) { try { tmp.remove(); src.enabled = true; } catch (eR) {} }
     }
     for (i = 0; i < sel.length; i++) { try { sel[i].selected = true; } catch (eS) {} }
-    if (!out.length) throw new Error('اختار ليرز أشكال أو كلام الأول');
+    if (!out.length) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631\u0632 \u0623\u0634\u0643\u0627\u0644 \u0623\u0648 \u0643\u0644\u0627\u0645 \u0627\u0644\u0623\u0648\u0644');
     return { comp: { width: c.width, height: c.height, duration: c.duration, time: c.time }, layers: out };
   });
 };
@@ -981,19 +1011,19 @@ EFMAPI.trackSource = function () {
   var c = EFM.comp(), i, L = null, sel = c.selectedLayers, others = [];
   for (i = 0; i < sel.length; i++) { var s = sel[i]; try { if (!L && s.source && s.source.file && s.source.hasVideo) { L = s; continue; } } catch (e0) {} try { others.push({ name: s.name, anchor: EFM.tr(s, 'ADBE Anchor Point').value, position: EFM.tr(s, 'ADBE Position').value, scale: EFM.tr(s, 'ADBE Scale').value, rotation: EFM.tr(s, 'ADBE Rotate Z').value }); } catch (eO) { others.push({ name: s.name }); } }
   if (!L) for (i = 1; i <= c.numLayers; i++) { try { if (c.layer(i).source && c.layer(i).source.file && c.layer(i).source.hasVideo) { L = c.layer(i); break; } } catch (e1) {} }
-  if (!L) throw new Error('اختار لير الفيديو اللي هتتبّعه');
+  if (!L) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0627\u0644\u0644\u064a \u0647\u062a\u062a\u0628\u0651\u0639\u0647');
   var t = EFM.tr;
   return { comp: { name: c.name, width: c.width, height: c.height, fps: 1 / c.frameDuration, time: c.time, duration: c.duration },
     layer: { name: L.name, index: L.index, file: L.source.file.fsName, startTime: L.startTime, inPoint: L.inPoint, outPoint: L.outPoint, stretch: L.stretch, srcW: L.source.width, srcH: L.source.height,
       anchor: t(L, 'ADBE Anchor Point').value, position: t(L, 'ADBE Position').value, scale: t(L, 'ADBE Scale').value, rotation: t(L, 'ADBE Rotate Z').value }, others: others };
 };
 /**
- * Write a track. a = { name, times: [comp t], position: [[x,y]], scale?: [%], rotation?: [deg], corners?: [[4 × [x,y]]],
+ * Write a track. a = { name, times: [comp t], position: [[x,y]], scale?: [%], rotation?: [deg], corners?: [[4 \u00d7 [x,y]]],
  *   attach: [layer names] (parented to the track null), pin: layer name (Corner Pin), stabilize: layer name, anchor: [[x,y]] }
  */
 EFMAPI.applyTrack = function (a) {
   var c = EFM.comp(), i, k;
-  return EFM.undo('تراكينج', function () {
+  return EFM.undo('\u062a\u0631\u0627\u0643\u064a\u0646\u062c', function () {
     var lin = function (vals) { var ks = []; for (var j = 0; j < a.times.length; j++) ks.push({ t: a.times[j], v: vals[j], bz: null, hold: false }); return ks; };
     var out = { keys: 0 };
     if (a.position) {
@@ -1011,7 +1041,7 @@ EFMAPI.applyTrack = function (a) {
     }
     if (a.corners && a.pin) {
       var T = EFM.layerByName(c, a.pin);
-      if (!T) throw new Error('مش لاقي اللير: ' + a.pin);
+      if (!T) throw new Error('\u0645\u0634 \u0644\u0627\u0642\u064a \u0627\u0644\u0644\u064a\u0631: ' + a.pin);
       var cp = T.property('ADBE Effect Parade').addProperty('ADBE Corner Pin');
       var names = ['ADBE Corner Pin-0001', 'ADBE Corner Pin-0002', 'ADBE Corner Pin-0003', 'ADBE Corner Pin-0004'];
       for (k = 0; k < 4; k++) { var vals = []; for (i = 0; i < a.corners.length; i++) vals.push(a.corners[i][k]); out.keys += EFM.writeKeys(cp.property(names[k]), lin(vals), 0); }
@@ -1047,7 +1077,7 @@ EFMAPI.rigInfo = function () {
 /** apply a rig plan: anchors at the joints (layer stays put), parents, the controller with sliders, IK nulls, expressions */
 EFMAPI.rigApply = function (a) {
   var c = EFM.comp(), P = a.plan, i, k, n = 0;
-  return EFM.undo('ريج كاراكتر', function () {
+  return EFM.undo('\u0631\u064a\u062c \u0643\u0627\u0631\u0627\u0643\u062a\u0631', function () {
     for (i = 0; i < P.layers.length; i++) {
       var L = EFM.layerByName(c, P.layers[i].name); if (!L) continue;
       var an = EFM.tr(L, 'ADBE Anchor Point'), po = EFM.tr(L, 'ADBE Position');
@@ -1075,22 +1105,22 @@ EFMAPI.rigApply = function (a) {
 };
 
 /* ---------------- workflow tools (Explode Shape Layers, Motion Tools, Ray Dynamic Color-style) ---------------- */
-/** every top-level group of the selected shape layers → its own layer (the original is hidden) */
+/** every top-level group of the selected shape layers \u2192 its own layer (the original is hidden) */
 EFMAPI.explodeShapes = function () {
   var c = EFM.comp(), L = EFM.selected(c), made = 0, i, j, k;
-  return EFM.undo('فصل الأشكال', function () {
+  return EFM.undo('\u0641\u0635\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644', function () {
     for (i = 0; i < L.length; i++) {
       if (!(L[i] instanceof ShapeLayer)) continue;
       var root = L[i].property('ADBE Root Vectors Group'), n = root.numProperties;
       if (n < 2) continue;
       for (j = 1; j <= n; j++) {
-        var d = L[i].duplicate(), dr = d.property('ADBE Root Vectors Group');
-        for (k = dr.numProperties; k >= 1; k--) if (k !== j) dr.property(k).remove();
-        d.name = L[i].name + ' • ' + root.property(j).name; d.enabled = true; made++;
+        var d = L[i].duplicate(), gname = root.property(j).name;
+        for (k = d.property('ADBE Root Vectors Group').numProperties; k >= 1; k--) if (k !== j) d.property('ADBE Root Vectors Group').property(k).remove();
+        d.name = L[i].name + ' \u2022 ' + gname; d.enabled = true; made++;
       }
       L[i].enabled = false;
     }
-    if (!made) throw new Error('اختار لير شيب فيه أكتر من جروب');
+    if (!made) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0634\u064a\u0628 \u0641\u064a\u0647 \u0623\u0643\u062a\u0631 \u0645\u0646 \u062c\u0631\u0648\u0628');
     return { layers: made };
   });
 };
@@ -1104,9 +1134,9 @@ EFM.moveBy = function (L, dx, dy) { EFM.change(EFM.tr(L, 'ADBE Position'), funct
 /** align / distribute the selected layers. a = { mode: left|hcenter|right|top|vcenter|bottom|distH|distV, to: comp|selection } */
 EFMAPI.alignLayers = function (a) {
   var c = EFM.comp(), L = EFM.selected(c), i, B = [], t = c.time;
-  return EFM.undo('محاذاة', function () {
+  return EFM.undo('\u0645\u062d\u0627\u0630\u0627\u0629', function () {
     for (i = 0; i < L.length; i++) { try { B.push({ L: L[i], b: EFM.box(L[i], t) }); } catch (e) {} }
-    if (!B.length) throw new Error('اختار ليرز');
+    if (!B.length) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631\u0632');
     var R = { x0: 0, y0: 0, x1: c.width, y1: c.height };
     if (a.to === 'selection' && B.length > 1) { R = { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 }; for (i = 0; i < B.length; i++) { R.x0 = Math.min(R.x0, B[i].b.x0); R.y0 = Math.min(R.y0, B[i].b.y0); R.x1 = Math.max(R.x1, B[i].b.x1); R.y1 = Math.max(R.y1, B[i].b.y1); } }
     var m = a.mode;
@@ -1129,8 +1159,8 @@ EFMAPI.alignLayers = function (a) {
 /** the selected layers one after another in time (selection order), `gap` frames apart (negative = overlap) */
 EFMAPI.sequenceLayers = function (a) {
   var c = EFM.comp(), L = EFM.selected(c), i, t;
-  return EFM.undo('ورا بعض', function () {
-    if (L.length < 2) throw new Error('اختار ليرين أو أكتر');
+  return EFM.undo('\u0648\u0631\u0627 \u0628\u0639\u0636', function () {
+    if (L.length < 2) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631\u064a\u0646 \u0623\u0648 \u0623\u0643\u062a\u0631');
     t = L[0].outPoint + (a.gap || 0) * c.frameDuration;
     for (i = 1; i < L.length; i++) { var shift = t - L[i].inPoint; L[i].startTime += shift; t = L[i].outPoint + (a.gap || 0) * c.frameDuration; }
     return { layers: L.length };
@@ -1139,7 +1169,7 @@ EFMAPI.sequenceLayers = function (a) {
 /** one controller for every colour of the comp: "EF Colors" with a Color Control per colour, every fill / stroke linked */
 EFMAPI.colorRig = function () {
   var c = EFM.comp(), map = {}, list = [], i, n = 0;
-  return EFM.undo('كنترول الألوان', function () {
+  return EFM.undo('\u0643\u0646\u062a\u0631\u0648\u0644 \u0627\u0644\u0623\u0644\u0648\u0627\u0646', function () {
     var ctrl = EFM.layerByName(c, 'EF Colors');
     if (!ctrl) { ctrl = c.layers.addNull(c.duration); ctrl.name = 'EF Colors'; ctrl.guideLayer = true; try { ctrl.label = 11; } catch (eL) {} }
     for (i = 1; i <= c.numLayers; i++) {
@@ -1152,17 +1182,17 @@ EFMAPI.colorRig = function () {
         p.expression = 'thisComp.layer("EF Colors").effect("' + map[k] + '")(1)'; n++;
       });
     }
-    if (!n) throw new Error('مفيش ألوان أشكال أو Fill في الكومب');
+    if (!n) throw new Error('\u0645\u0641\u064a\u0634 \u0623\u0644\u0648\u0627\u0646 \u0623\u0634\u0643\u0627\u0644 \u0623\u0648 Fill \u0641\u064a \u0627\u0644\u0643\u0648\u0645\u0628');
     return { colors: list, linked: n };
   });
 };
 
 /* ---------------- roto / keying / camera tracking ---------------- */
-/** the AI matte (a black / white video) under a copy of the footage as its luma matte → the person cut out on top */
+/** the AI matte (a black / white video) under a copy of the footage as its luma matte \u2192 the person cut out on top */
 EFMAPI.rotoApply = function (a) {
   var c = EFM.comp(), L = EFM.layerByName(c, a.layer);
-  if (!L) throw new Error('مش لاقي اللير: ' + a.layer);
-  return EFM.undo('روتو', function () {
+  if (!L) throw new Error('\u0645\u0634 \u0644\u0627\u0642\u064a \u0627\u0644\u0644\u064a\u0631: ' + a.layer);
+  return EFM.undo('\u0631\u0648\u062a\u0648', function () {
     var cut = L.duplicate(); cut.name = L.name + ' (EF Cutout)';
     var item = app.project.importFile(new ImportOptions(new File(a.matte)));
     try { item.parentFolder = EFM.folder('EditFast Roto'); } catch (eF) {}
@@ -1182,11 +1212,11 @@ EFMAPI.rotoApply = function (a) {
 /** green / blue screen: Keylight on the footage (+ a little choke and spill clean-up) */
 EFMAPI.keyApply = function (a) {
   var c = EFM.comp(), L = EFM.layerByName(c, a.layer);
-  if (!L) throw new Error('مش لاقي اللير: ' + a.layer);
-  return EFM.undo('كيينج', function () {
+  if (!L) throw new Error('\u0645\u0634 \u0644\u0627\u0642\u064a \u0627\u0644\u0644\u064a\u0631: ' + a.layer);
+  return EFM.undo('\u0643\u064a\u064a\u0646\u062c', function () {
     var fx = L.property('ADBE Effect Parade'), k = null;
     try { k = fx.addProperty('Keylight 906'); } catch (e) {}
-    if (!k) throw new Error('Keylight مش موجود في الأفتر ده');
+    if (!k) throw new Error('Keylight \u0645\u0634 \u0645\u0648\u062c\u0648\u062f \u0641\u064a \u0627\u0644\u0623\u0641\u062a\u0631 \u062f\u0647');
     var col = a.color === 'blue' ? [0, 0.28, 1, 1] : [0, 0.85, 0.2, 1];
     var p = EFM.find(k, 'Screen Colour'); if (p) p.setValue(col);
     try { var g = EFM.find(k, 'Screen Gain'); if (g) g.setValue(105); } catch (e2) {}
@@ -1197,7 +1227,7 @@ EFMAPI.keyApply = function (a) {
 /** AE's own 3D Camera Tracker on the footage (analysis runs in the background) */
 EFMAPI.trackCamera = function (a) {
   var c = EFM.comp(), L = EFM.layerByName(c, a.layer), id = 0, i;
-  if (!L) throw new Error('اختار لير الفيديو');
+  if (!L) throw new Error('\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0627\u0644\u0641\u064a\u062f\u064a\u0648');
   for (i = 1; i <= c.numLayers; i++) c.layer(i).selected = false;
   L.selected = true;
   try { id = app.findMenuCommandId('Track Camera'); } catch (e0) {}
@@ -1206,12 +1236,12 @@ EFMAPI.trackCamera = function (a) {
   return { layer: L.name, command: id };
 };
 
-/* ---------------- one comp → every size ---------------- */
+/* ---------------- one comp \u2192 every size ---------------- */
 /** new comps 16:9 / 9:16 / 1:1 / 4:5 holding the active comp (fill, fit, or fit over a blurred fill), optionally rendered */
 EFMAPI.multiFormat = function (a) {
   var src = EFM.comp(), out = [], i;
   if (a.render) EFM.needWrite();
-  return EFM.undo('مقاسات', function () {
+  return EFM.undo('\u0645\u0642\u0627\u0633\u0627\u062a', function () {
     for (i = 0; i < a.sizes.length; i++) {
       var z = a.sizes[i], c = app.project.items.addComp(src.name + ' ' + z.label, z.w, z.h, 1, src.duration, 1 / src.frameDuration);
       try { c.parentFolder = EFM.folder('EditFast Formats'); } catch (eF) {}
@@ -1264,15 +1294,15 @@ EFMAPI.scenePreview = function (a) {
 /* ---------------- real-estate highlight ---------------- */
 /**
  * Highlight a building / plot on a footage layer:
- *   [extra: outline, pin, card] → building (copy of the footage, masked or matted, its own tint) → "rest" adjustment
- *   (tint / dim / blur everything else) → the original footage. Every look value is a slider on "<name> Controls".
+ *   [extra: outline, pin, card] \u2192 building (copy of the footage, masked or matted, its own tint) \u2192 "rest" adjustment
+ *   (tint / dim / blur everything else) \u2192 the original footage. Every look value is a slider on "<name> Controls".
  * a = { layer, name, look, mode: 'mask'|'matte', mask: { keys: [{t, v}] (footage layer space) }, matte: { file, start }, extra: [scene layers] }
  */
 EFMAPI.highlightBuild = function (a) {
   var c = EFM.comp(), F = EFM.layerByName(c, a.layer), N = a.name, k;
-  if (!F) throw new Error('مش لاقي اللير: ' + a.layer);
+  if (!F) throw new Error('\u0645\u0634 \u0644\u0627\u0642\u064a \u0627\u0644\u0644\u064a\u0631: ' + a.layer);
   EFM.warn = [];
-  return EFM.undo('إبراز مبنى', function () {
+  return EFM.undo('\u0625\u0628\u0631\u0627\u0632 \u0645\u0628\u0646\u0649', function () {
     var lk = a.look, q = function (s) { return 'thisComp.layer("' + N + ' Controls").effect("' + s + '")(1)'; };
     // controls
     var C = c.layers.addNull(c.duration); C.name = N + ' Controls'; try { C.label = 11; } catch (eL) {}
@@ -1282,7 +1312,7 @@ EFMAPI.highlightBuild = function (a) {
     setC('Rest Dim', 'ADBE Slider Control', lk.rest.dim || 0); setC('Rest Blur', 'ADBE Slider Control', lk.rest.blur || 0);
     setC('Feather', 'ADBE Slider Control', lk.feather === undefined ? 6 : lk.feather);
     setC('Outline Color', 'ADBE Color Control', EFM.fromHex(lk.outline.color)); setC('Outline Width', 'ADBE Slider Control', lk.outline.width); setC('Glow', 'ADBE Slider Control', lk.outline.glow);
-    // everything else: tint (keeps the detail), dim, blur — mixed by the sliders
+    // everything else: tint (keeps the detail), dim, blur \u2014 mixed by the sliders
     var R = c.layers.addSolid([1, 1, 1], N + ' Rest', c.width, c.height, 1, c.duration); R.adjustmentLayer = true; R.moveBefore(F);
     try { R.inPoint = F.inPoint; R.outPoint = F.outPoint; } catch (eT) {}
     var fx = R.property('ADBE Effect Parade'), t = fx.addProperty('ADBE Tint');
@@ -1459,11 +1489,9 @@ EFMAPI.lightRig = function () {
 EFMAPI.extrude = function (a) {
   var c = EFM.comp(), L = EFM.selected(c), n = 0, i;
   return EFM.undo('\u062b\u0631\u064a \u062f\u064a', function () {
-    var renderers = c.renderers || [], pick = null;
-    for (i = 0; i < renderers.length; i++) if (renderers[i] === 'ADBE Advanced 3d') pick = renderers[i];
-    if (!pick) for (i = 0; i < renderers.length; i++) if (renderers[i] === 'ADBE Ernst') pick = renderers[i];
+    var pick = EFM.pick3d(c.renderers || []);
     if (!pick) throw new Error('\u0646\u0633\u062e\u0629 \u0627\u0644\u0623\u0641\u062a\u0631 \u062f\u064a \u0645\u0641\u064a\u0647\u0627\u0634 Advanced 3D \u0648\u0644\u0627 Cinema 4D renderer');
-    c.renderer = pick;
+    if (c.renderer !== pick) c.renderer = pick;
     for (i = 0; i < L.length; i++) {
       if (!(L[i] instanceof TextLayer) && !(L[i] instanceof ShapeLayer)) continue;
       L[i].threeDLayer = true;
@@ -1568,6 +1596,106 @@ EFMAPI.selfTest = function () {
   try { r.mogrtExport = typeof CompItem.prototype.exportAsMotionGraphicsTemplate === 'function' || !!(app.project.activeItem && app.project.activeItem.exportAsMotionGraphicsTemplate); } catch (e) { r.mogrtExport = false; }
   try { r.renderers = app.project.activeItem ? app.project.activeItem.renderers : []; } catch (e2) { r.renderers = []; }
   return r;
+};
+
+/* ---------------- "test every tool": scratch comps, AE's own expression check, clean-up ---------------- */
+EFM.T = null;
+/** remember what the project had, so the test only ever checks / removes what it made */
+EFMAPI.testBegin = function () {
+  var keep = {}, i;
+  for (i = 1; i <= app.project.numItems; i++) keep[app.project.item(i).id] = true;
+  EFM.T = { keep: keep, seen: {}, back: app.project.activeItem, comp: null, media: {} };
+  var r = [];
+  try { var tmp = app.project.items.addComp('EF Test Renderers', 100, 100, 1, 1, 25); r = tmp.renderers; tmp.remove(); } catch (e) {}
+  var cam = 0; try { cam = app.findMenuCommandId('Track Camera'); } catch (e2) {}
+  var kinds = []; for (var k in EFM.EXPR) if (EFM.EXPR.hasOwnProperty(k)) kinds.push(k);
+  return { version: app.version, renderers: r, pick3d: EFM.pick3d(r || []), canWrite: EFM.canWrite(), trackCameraMenu: cam, exprKinds: kinds };
+};
+EFM.testMedia = function (file) {
+  if (!EFM.T.media[file]) {
+    var it = app.project.importFile(new ImportOptions(new File(file)));
+    EFM.T.media[file] = it;
+  }
+  return EFM.T.media[file];
+};
+/**
+ * A fresh comp for one tool with what it needs, selected. a = { name, duration, setup: [{ kind: text|shape|footage|solid|null,
+ *   name, text, groups, file, keys (position keys), select }] }
+ */
+EFMAPI.testPrep = function (a) {
+  if (!EFM.T) throw new Error('testBegin first');
+  var c = app.project.items.addComp('EF Test ' + a.name, a.width || 1920, a.height || 1080, 1, a.duration || 6, 25), i, k, L, it, made = [], refs = [];
+  EFM.T.comp = c; EFM.T.at = new Date().getTime();
+  try { c.openInViewer(); } catch (e0) {}
+  c.time = 0;
+  for (i = 0; i < (a.setup || []).length; i++) {
+    it = a.setup[i];
+    if (it.kind === 'text') { L = c.layers.addText(it.text || 'EditFast'); }
+    else if (it.kind === 'shape') {
+      L = c.layers.addShape();
+      for (k = 0; k < (it.groups || 1); k++) {
+        var g = L.property('ADBE Root Vectors Group').addProperty('ADBE Vector Group');
+        g.name = 'Part ' + (k + 1);
+        L.property('ADBE Root Vectors Group').property(k + 1).property('ADBE Vectors Group').addProperty(k % 2 ? 'ADBE Vector Shape - Ellipse' : 'ADBE Vector Shape - Rect');
+        L.property('ADBE Root Vectors Group').property(k + 1).property('ADBE Vectors Group').addProperty('ADBE Vector Graphic - Fill').property('ADBE Vector Fill Color').setValue(k % 2 ? [0.15, 0.39, 0.92, 1] : [0.98, 0.45, 0.09, 1]);
+        L.property('ADBE Root Vectors Group').property(k + 1).property('ADBE Vector Transform Group').property('ADBE Vector Position').setValue([k * 260 - 260, 0]);
+      }
+      EFM.tr(L, 'ADBE Position').setValue([c.width / 2, c.height / 2]);
+    }
+    else if (it.kind === 'footage') { L = c.layers.add(EFM.testMedia(it.file)); }
+    else if (it.kind === 'solid') { L = c.layers.addSolid([0.2, 0.2, 0.2], it.name || 'Solid', 400, 300, 1, c.duration); }
+    else { L = c.layers.addNull(c.duration); }
+    if (it.name) L.name = it.name;
+    if (it.position) EFM.tr(L, 'ADBE Position').setValue(it.position);
+    if (it.keys) { var po = EFM.tr(L, 'ADBE Position'), v = po.value; po.setValueAtTime(0, v); po.setValueAtTime(1, [v[0] + 300, v[1]]); try { po.selected = true; } catch (eS) {} }
+    made.push(L.name); refs.push(L);
+  }
+  for (i = 1; i <= c.numLayers; i++) c.layer(i).selected = false;
+  for (i = 0; i < (a.setup || []).length; i++) if (a.setup[i].select !== false) { try { refs[i].selected = true; } catch (e1) {} }
+  return { comp: c.name, layers: made };
+};
+/** every comp made since the last check: layers, expressions, and the errors AE itself reports on them */
+EFMAPI.testCheck = function () {
+  if (!EFM.T) throw new Error('testBegin first');
+  var out = { comps: 0, layers: 0, expressions: 0, errors: [] }, i, c;
+  for (i = 1; i <= app.project.numItems; i++) {
+    c = app.project.item(i);
+    if (!(c instanceof CompItem) || EFM.T.keep[c.id] || EFM.T.seen[c.id]) continue;
+    EFM.T.seen[c.id] = true; out.comps++;
+    var t = Math.min(c.duration * 0.5, 1.5), j;
+    for (j = 1; j <= c.numLayers; j++) {
+      var L = c.layer(j); out.layers++;
+      EFM.walk(L, function (p) {
+        try {
+          if (!p.canSetExpression || !p.expression) return;
+          out.expressions++;
+          try { p.valueAtTime(t, false); } catch (eV) {}
+          var err = p.expressionError;
+          if (err || !p.expressionEnabled) out.errors.push(c.name + ' / ' + L.name + ' / ' + p.name + ': ' + String(err || 'disabled').substr(0, 200));
+        } catch (eP) {}
+      });
+    }
+  }
+  out.errors = out.errors.slice(0, 15);
+  return out;
+};
+/** remove everything the test made, back to the comp you had open */
+EFMAPI.testEnd = function () {
+  if (!EFM.T) return { removed: 0 };
+  var n = 0, i, it, pass;
+  EFM.T.comp = null;
+  for (pass = 0; pass < 3; pass++) {
+    for (i = app.project.numItems; i >= 1; i--) {
+      it = app.project.item(i);
+      if (EFM.T.keep[it.id]) continue;
+      if (pass < 2 && it instanceof FolderItem && it.numItems > 0) continue;
+      if (pass === 0 && !(it instanceof CompItem)) continue;
+      try { it.remove(); n++; } catch (e) {}
+    }
+  }
+  try { if (EFM.T.back && EFM.T.back.openInViewer) EFM.T.back.openInViewer(); } catch (e2) {}
+  EFM.T = null;
+  return { removed: n };
 };
 
 function efm_call(name, jsonArgs) {

@@ -289,4 +289,13 @@ test('⌘K in After Effects lists AE tools (motion, curves, expressions, cameras
   assert.equal((await call('cameraRig')).kind, 'orbit');
 });
 
+test('settings: "test every tool" runs the self-test and shows a copyable report', async () => {
+  await open('settings');
+  await page.locator('button', { hasText: 'اختبر كل الأدوات' }).first().click(); await page.waitForTimeout(250);
+  assert.ok(await call('fullTest'));
+  assert.match(await page.locator('.ft-report').inputValue(), /Logo PNG 3d/);
+  assert.ok(await page.locator('button', { hasText: 'انسخ التقرير' }).isVisible());
+  assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
+});
+
 test('no page errors in the After Effects panel', () => { assert.deepEqual(errors, []); });

@@ -161,7 +161,7 @@ test('3D: camera rig on a null, parallax keeps the on-screen size, lights, extru
   assert.equal(lr.lights, 2); assert.equal(lr.casting, 3);
   c.selectedLayers = [txt];
   const ex = ae.call('extrude', { depth: 60 });
-  assert.equal(ex.renderer, 'ADBE Advanced 3d'); assert.equal(c.renderer, 'ADBE Advanced 3d');
+  assert.equal(ex.renderer, 'ADBE Calder'); assert.equal(c.renderer, 'ADBE Calder');
   assert.equal(txt.property('ADBE Extrsn Options Group').property('ADBE Extrsn Depth').value, 60);
 });
 

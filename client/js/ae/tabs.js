@@ -690,6 +690,16 @@
       drawConn();
       view.appendChild(UI.card('الاتصال بالأفتر', conn, UI.row(action('اتصل تاني', 'بيتصل', function () { return EF.connect().then(drawConn); })),
         UI.hint('لو مش متصل: اقفل اللوحة وافتحها، واتأكد إن Settings ← Scripting & Expressions ← "Allow Scripts to Write Files and Access Network" متعلّمة.')));
+      var ftStep = h('div', { class: 'hint' }), ftRep = h('textarea', { class: 'ltr ft-report', rows: 10, readonly: 'readonly', style: 'display:none' }), ftCopy = h('div', { style: 'display:none' });
+      ftCopy.appendChild(UI.row(action('انسخ التقرير', 'بينسخ', function () { ftRep.select(); try { document.execCommand('copy'); ok('اتنسخ ✓ — ابعته في الشات'); } catch (e) {} return Promise.resolve(); })));
+      view.insertBefore(UI.card('اختبر كل الأدوات', UI.row(action('اختبر كل الأدوات', 'بيختبر كل أداة', function () {
+        ftStep.textContent = 'بيبدأ…';
+        return S().fullTest({ onStep: function (m) { ftStep.textContent = m; } }).then(function (r) {
+          ftStep.textContent = r.fail ? '✗ ' + r.fail + ' من ' + r.total + ' فيهم مشكلة — انسخ التقرير وابعته' : '✓ كل الأدوات شغالة (' + r.total + ')';
+          ftRep.value = r.report; ftRep.style.display = ''; ftCopy.style.display = '';
+        });
+      }, 'primary')), ftStep, ftRep, ftCopy,
+        UI.hint('بيشغّل كل أداة بجد في الأفتر ده على كومبات تجربة (لوجو، صورة، فيديو، صوت بيتعملوا لوحدهم)، والأفتر نفسه بيفحص كل إكسبريشن، وبعدين بيمسح كل اللي عمله ويرجّعك للكومب بتاعك. مفيش AI ولا فلوس بتتصرف. بياخد دقيقة أو اتنين.')), view.firstChild);
       view.appendChild(UI.card('فحص الأفتر', UI.row(action('افحص', 'بيفحص', function () { return S().selfTest().then(function (r) { out.textContent = JSON.stringify(r, null, 1); }); })), out,
         UI.hint('فولدر القوالب: ' + S().templatesDir())));
     }

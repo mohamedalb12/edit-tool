@@ -511,7 +511,7 @@ class AEServices {
    * A photo → a 3D parallax shot: depth (depth file | fal.ai | estimate with the subject from the vision model) →
    * depth slices as 3D layers + a moving camera. move: push | orbit | rise | float
    */
-  async photo3D({ file, depthFile = null, depth = 'auto', slices = 5, move = 'push', strength = 1, duration = 6, onStep } = {}) {
+  async photo3D({ file, depthFile = null, depth = 'auto', slices = 5, move = 'push', strength = 1, duration = 6, ai = true, onStep } = {}) {
     const step = m => { try { onStep && onStep(m); } catch (_) {} };
     if (!file) throw new Error('اختار الصورة');
     const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe;
@@ -522,7 +522,7 @@ class AEServices {
     let d, how;
     const tmpDir = path.join(config.dataDir(), '3d-photo');
     if (depthFile) { d = photo3d.fromGray(await photo3d.decodeExact(ffmpeg, depthFile, w, h, { gray: true }), w, h); how = 'ملف العمق'; }
-    else if ((depth === 'fal' || depth === 'auto') && this.settings.keys.fal) {
+    else if (ai && (depth === 'fal' || depth === 'auto') && this.settings.keys.fal) {
       step('بيحسب العمق (fal.ai)…');
       const r = await this.falRun('fal-ai/imageutils/depth', { image_url: this.dataUri(file) });
       const url = AEServices.findUrl(r, /^https?:|^data:image/);
@@ -532,7 +532,7 @@ class AEServices {
       d = photo3d.fromGray(await photo3d.decodeExact(ffmpeg, df, w, h, { gray: true }), w, h); how = 'fal.ai';
     } else {
       let subject = null;
-      if (this.settings.keys.openrouter) {
+      if (ai && this.settings.keys.openrouter) {
         step('بيدوّر على الموضوع الأساسي…');
         try {
           const b64 = await vision.frameJpeg(ffmpeg, file, 0, { width: 512 });
@@ -997,6 +997,8 @@ class AEServices {
   }
 
   async selfTest() { return this.host('selfTest', {}); }
+  /** every tool, for real, on scratch comps in this AE (nothing paid / AI): → report */
+  fullTest(o = {}) { return require('./aeSelfTest').run(this, o); }
 }
 
 module.exports = { AEServices, AI_ACTIONS, styleSummary };

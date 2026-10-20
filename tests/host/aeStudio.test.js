@@ -92,7 +92,7 @@ test('logo animator: draw (stroke trim then fill), neon (glow + flicker), build 
   assert.ok(p3.threeDLayer); assert.ok(p3.property('ADBE Extrsn Options Group').property('ADBE Extrsn Depth').value >= 20);
   assert.equal(p3.property('ADBE Extrsn Options Group').property('ADBE Bevel Styles').value, 4);
   assert.ok(byName(c, 'Camera') && byName(c, 'Key Light'));
-  assert.equal(c.renderer, 'ADBE Advanced 3d');
+  assert.equal(c.renderer, 'ADBE Calder');
 });
 
 test('SVG import as editable layers into the open comp; morph from SVG files keeps colours and loops', async () => {

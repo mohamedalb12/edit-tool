@@ -13,17 +13,62 @@ let IDS = 100;
 
 class KeyframeEase { constructor(speed, influence) { this.speed = speed; this.influence = influence; } }
 
+/*
+ * Real AE: adding a property to an indexed group (effects, masks, shape contents, text animators…) rebuilds the
+ * group, so every reference held to its children goes stale ("Object is invalid"); removing one does the same to
+ * its siblings. The simulator does exactly that: old objects throw, the group holds fresh copies.
+ */
+function guard(obj) {
+  return new Proxy(obj, {
+    get(t, k, r) { if (k === '__raw') return t; if (t._invalid && k !== '_invalid') throw new Error('Object is invalid (' + t.matchName + ')'); return Reflect.get(t, k, r); },
+    set(t, k, v, r) { if (t._invalid && k !== '_invalid') throw new Error('Object is invalid (' + t.matchName + ')'); return Reflect.set(t, k, v, r); }
+  });
+}
+const SKIP = new Set(['children', 'parentProperty', '_invalid', 'keys', '_v']);
+function cloneNode(n, parent) {
+  const raw = n.__raw;
+  let c;
+  if (raw instanceof Prop) {
+    c = new Prop(raw.matchName, raw.name, clone(raw._v), raw.propertyValueType);
+    c.keys = raw.keys.map(k => Object.assign({}, k, { v: clone(k.v) }));
+  } else {
+    c = new Group(raw.matchName, raw.name, raw.propertyType, raw.factory);
+    c.__raw.children = raw.children.map(ch => cloneNode(ch, c));
+  }
+  for (const k of Object.keys(raw)) if (!SKIP.has(k) && !(k in { matchName: 1, name: 1, propertyValueType: 1, propertyType: 1, factory: 1 })) c.__raw[k] = raw[k];
+  c.__raw.parentProperty = parent;
+  return c;
+}
+function invalidate(n) { const raw = n.__raw; raw._invalid = true; if (raw.children) raw.children.forEach(invalidate); }
+function renew(g) { const raw = g.__raw; const fresh = raw.children.map(ch => cloneNode(ch, g)); raw.children.forEach(invalidate); raw.children = fresh; }
+/** the pessimistic model: every group in the layer, except `g` and the groups above it, is rebuilt too */
+function renewLayer(g) {
+  const keep = new Set(); let top = g;
+  while (top && top.__raw) { keep.add(top.__raw); if (!top.__raw.parentProperty || !top.__raw.parentProperty.__raw) break; top = top.__raw.parentProperty; }
+  (function walk(n) {
+    const raw = n.__raw;
+    if (!raw.children) return;
+    if (keep.has(raw)) { raw.children.forEach(walk); return; }
+    renew(n);
+  })(top);
+}
+
 class Prop {
   constructor(matchName, name, value, type, opts = {}) {
     this.matchName = matchName; this.name = name; this.value = value; this.propertyValueType = type;
     this.propertyType = PropertyType.PROPERTY; this.keys = []; this.expression = ''; this.canSetExpression = type !== PVT.NO_VALUE;
     this.isSpatial = type === PVT.TwoD_SPATIAL || type === PVT.ThreeD_SPATIAL; this.dimensionsSeparated = false; this.selectedKeys = [];
     this.parentProperty = null; Object.assign(this, opts);
+    return guard(this);
   }
   get expressionEnabled() { return !!this.expression; }
+  get selected() { const L = this.propertyGroup(this.propertyDepth); return !!(L && L.containingComp && L.containingComp.selectedProperties.includes(this)); }
+  set selected(v) { const L = this.propertyGroup(this.propertyDepth), S = L.containingComp.selectedProperties, i = S.indexOf(this); if (v && i < 0) S.push(this); if (!v && i >= 0) S.splice(i, 1); }
   get numKeys() { return this.keys.length; }
-  get propertyDepth() { let d = 0, p = this.parentProperty; while (p) { d++; p = p.parentProperty; } return d; }
-  propertyGroup(n = 1) { let p = this; for (let i = 0; i < n && p; i++) p = p.parentProperty; return p; }
+  get propertyIndex() { const par = this.parentProperty; const list = par && (par.__raw ? par.__raw.children : par.children); return list ? list.indexOf(this) + 1 : 0; }
+  // like AE: the layer is depth 0 (the simulator's root group is not a level)
+  get propertyDepth() { let d = 0, p = this.parentProperty; while (p && !(p instanceof Layer)) { d++; p = p.parentProperty; } return d; }
+  propertyGroup(n = 1) { let p = this; for (let i = 0; i < n && p; i++) { p = p.parentProperty; if (p && p.parentProperty instanceof Layer) p = p.parentProperty; } return p; }
   setValue(v) { if (this.keys.length) throw new Error('setValue on keyframed property'); this.value = clone(v); }
   get value() { return this._v; }
   set value(v) { this._v = clone(v); }
@@ -43,7 +88,8 @@ class Prop {
   setInterpolationTypeAtKey(i, a, b) { this.keys[i - 1].inI = a; this.keys[i - 1].outI = b === undefined ? a : b; }
   keyInInterpolationType(i) { return this.keys[i - 1].inI; }
   keyOutInterpolationType(i) { return this.keys[i - 1].outI; }
-  dims() { const v = this.value; return v && typeof v === 'object' && typeof v.length === 'number' && !this.isSpatial ? v.length : 1; }
+  // AE: one KeyframeEase per dimension only for TwoD / ThreeD values; everything else (spatial, colour, path…) takes one
+  dims() { const v = this.value; return (this.propertyValueType === PVT.TwoD || this.propertyValueType === PVT.ThreeD) && v && typeof v.length === 'number' ? v.length : 1; }
   setTemporalEaseAtKey(i, inE, outE) {
     const n = this.dims();
     if (inE.length !== n || outE.length !== n) throw new Error(`ease array of ${inE.length}/${outE.length} for ${n} dims`);
@@ -52,7 +98,7 @@ class Prop {
   keyInTemporalEase(i) { return this.keys[i - 1].inE || Array.from({ length: this.dims() }, () => new KeyframeEase(0, 16.67)); }
   keyOutTemporalEase(i) { return this.keys[i - 1].outE || Array.from({ length: this.dims() }, () => new KeyframeEase(0, 16.67)); }
   canAddToMotionGraphicsTemplate(comp) { return this.propertyValueType !== PVT.NO_VALUE && this.propertyValueType !== PVT.SHAPE && layerOf(this).containingComp === comp; }
-  addToMotionGraphicsTemplateAs(comp, name) { if (!this.canAddToMotionGraphicsTemplate(comp)) return false; comp._egp.push({ name, prop: this }); return true; }
+  addToMotionGraphicsTemplateAs(comp, name) { if (!this.canAddToMotionGraphicsTemplate(comp)) return false; const path = []; let q = this; while (q && q.propertyDepth > 0) { path.unshift(q.propertyIndex); q = q.parentProperty; } const layer = this.propertyGroup(this.propertyDepth); comp._egp.push({ name, layer, path, get prop() { let r = layer; for (const i of path) r = r.property(i); return r; } }); return true; }
   addToMotionGraphicsTemplate(comp) { return this.addToMotionGraphicsTemplateAs(comp, this.name); }
 }
 // arrays always come back as this realm's arrays (the host runs in its own vm context)
@@ -61,13 +107,16 @@ function lerp(a, b, u) { return a && typeof a === 'object' && typeof a.length ==
 function layerOf(p) { while (p && !(p instanceof Layer)) p = p.parentProperty; return p; }
 
 class Group {
-  constructor(matchName, name, kind = PropertyType.NAMED_GROUP, factory = null) { this.matchName = matchName; this.name = name; this.propertyType = kind; this.children = []; this.factory = factory; this.parentProperty = null; this.enabled = true; }
+  constructor(matchName, name, kind = PropertyType.NAMED_GROUP, factory = null) { this.matchName = matchName; this.name = name; this.propertyType = kind; this.children = []; this.factory = factory; this.parentProperty = null; this.enabled = true; return guard(this); }
   get numProperties() { return this.children.length; }
+  get propertyIndex() { const par = this.parentProperty; const list = par && (par.__raw ? par.__raw.children : par.children); return list ? list.indexOf(this) + 1 : 0; }
+  get propertyDepth() { let d = 0, p = this.parentProperty; while (p && !(p instanceof Layer)) { d++; p = p.parentProperty; } return d; }
+  propertyGroup(n = 1) { let p = this; for (let i = 0; i < n && p; i++) { p = p.parentProperty; if (p && p.parentProperty instanceof Layer) p = p.parentProperty; } return p; }
   property(k) { if (typeof k === 'number') return this.children[k - 1] || null; return this.children.find(c => c.matchName === k || c.name === k) || null; }
   add(child) { child.parentProperty = this; this.children.push(child); return child; }
-  addProperty(matchName) { if (!this.factory) throw new Error('cannot add to ' + this.matchName); const c = this.factory(matchName); if (!c) throw new Error('unknown ' + matchName); return this.add(c); }
+  addProperty(matchName) { if (!this.factory) throw new Error('cannot add to ' + this.matchName); const c = this.factory(matchName); if (!c) throw new Error('unknown ' + matchName); renewLayer(this); return this.add(c); }
   canAddProperty(m) { return !!this.factory && !!this.factory(m); }
-  remove() { const c = this.parentProperty.children; c.splice(c.indexOf(this), 1); }
+  remove() { const par = this.parentProperty, c = par.__raw ? par.__raw.children : par.children, i = c.indexOf(this); c.splice(i, 1); invalidate(this); if (par.__raw) renewLayer(par); }
 }
 class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
 
@@ -206,6 +255,9 @@ function loadAE({ dir } = {}) {
     removeUnusedFootage() { const before = items.length; for (let i = items.length - 1; i >= 0; i--) if (items[i] instanceof K.FootageItem && !items[i].usedIn.length) items.splice(i, 1); return before - items.length; }
   };
   project.rootFolder = Object.assign(new K.FolderItem(), { name: 'root', id: 0 });
+  // every item can be removed; a folder knows how many items it holds
+  for (const C of [K.FootageItem, K.FolderItem]) if (!Object.getOwnPropertyDescriptor(C.prototype, 'remove')) C.prototype.remove = function () { const i = items.indexOf(this); if (i >= 0) items.splice(i, 1); this.removed = true; };
+  Object.defineProperty(K.FolderItem.prototype, 'numItems', { configurable: true, get() { return items.filter(x => x.parentFolder === this).length; } });
   const rendered = [];
   project.renderQueue = {
     items: { add(comp) { const om = { templates: ['Lossless', 'High Quality with Alpha', 'H.264 - Match Render Settings - 15 Mbps', 'Apple ProRes 422 HQ', '_HIDDEN X'], applied: null, file: null, applyTemplate(n) { this.applied = n; } }; const it = { comp, om, outputModule() { return om; } }; rendered.push(it); return it; } },
@@ -221,8 +273,8 @@ function loadAE({ dir } = {}) {
   class ImportOptions { constructor(f) { this.file = f; } }
 
   function newComp(name, { width = 1920, height = 1080, fps = 25, duration = 10 } = {}) {
-    const c = Object.assign(new K.CompItem(), { name, id: IDS++, width, height, frameDuration: 1 / fps, duration, time: 0, layerList: [], selectedLayers: [], selectedProperties: [], _egp: [], motionGraphicsTemplateName: '', renderer: 'ADBE Advanced 3d', renderers: ['ADBE Advanced 3d', 'ADBE Ernst', 'ADBE Picasso'], parentFolder: project.rootFolder });
-    c.layer = i => c.layerList[i - 1];
+    const c = Object.assign(new K.CompItem(), { name, id: IDS++, width, height, frameDuration: 1 / fps, duration, time: 0, layerList: [], selectedLayers: [], selectedProperties: [], _egp: [], motionGraphicsTemplateName: '', renderer: 'ADBE Advanced 3d', renderers: ['ADBE Advanced 3d', 'ADBE Calder', 'ADBE Ernst', 'ADBE Picasso'], parentFolder: project.rootFolder });
+    c.layer = i => typeof i === 'string' ? c.layerList.find(L => L.name === i) : c.layerList[i - 1];
     Object.defineProperty(c, 'numLayers', { get: () => c.layerList.length });
     const push = (L, twoDim = true) => { if (twoDim) twoD(L); c.layerList.unshift(L); return L; };
     c.layers = {
@@ -317,6 +369,7 @@ function loadAE({ dir } = {}) {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'ae.jsx'), 'utf8'), ctx);
   const call = (name, args) => { const r = JSON.parse(ctx.efm_call(name, JSON.stringify(args || {}))); if (!r.ok) { const e = new Error(r.error); e.line = r.line; throw e; } return r.data; };
+  project._items = items;
   return { app, project, K, newComp, call, ctx, File, rendered, Prop, Group, PVT, Shape };
 }
 
