@@ -19,6 +19,9 @@ const logoFx = require('./logoFx');
 const photo3d = require('./photo3d');
 const track = require('./track');
 const character = require('./character');
+const motionKit = require('./motionKit');
+const physics = require('./physics');
+const kinetic = require('./kinetic');
 const STILL = /\.(png|jpe?g|webp|bmp|tiff?|gif|psd)$/i;
 
 /** AI steps the motion assistant may run (name → what it does, for the prompt) */
@@ -37,6 +40,23 @@ const AI_ACTIONS = {
   lightRig: 'إضاءة: {}',
   extrude: 'ثري دي للكلام/الأشكال: {depth}'
 };
+
+/** a short description of a scene's look (colours, fonts, eases, effects, kinds of layers) for the director's prompt */
+function styleSummary(scene) {
+  const colors = new Map(), fonts = new Set(), eases = new Map(), fx = new Set(), types = new Map();
+  const walk = list => (list || []).forEach(L => {
+    if (!L) return;
+    types.set(L.type, (types.get(L.type) || 0) + 1);
+    for (const c of [L.color, L.shape && L.shape.fill, L.shape && L.shape.stroke, L.accent].filter(x => typeof x === 'string' && /^#/.test(x))) colors.set(c.toLowerCase(), (colors.get(c.toLowerCase()) || 0) + 1);
+    if (L.font) fonts.add(L.font);
+    for (const k of Object.keys(L.keys || {})) for (const key of L.keys[k] || []) { const e = Array.isArray(key) ? key[2] : key && key.ease; if (typeof e === 'string') eases.set(e, (eases.get(e) || 0) + 1); }
+    for (const e of L.effects || []) fx.add(e.name || e.match);
+    if (L.layers) walk(L.layers);
+  });
+  walk(scene && scene.layers);
+  const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(x => x[0]);
+  return ['ألوان: ' + (top(colors, 5).join(' ') || '-'), scene && scene.comp && scene.comp.bg ? 'خلفية ' + scene.comp.bg : '', fonts.size ? 'خطوط: ' + [...fonts].slice(0, 3).join('، ') : '', 'منحنيات: ' + (top(eases, 3).join('، ') || '-'), fx.size ? 'إفكتات: ' + [...fx].slice(0, 6).join('، ') : '', 'ليرز: ' + top(types, 6).join('، ')].filter(Boolean).join(' · ');
+}
 
 class AEServices {
   constructor({ host, fetchImpl, log } = {}) {
@@ -222,6 +242,7 @@ class AEServices {
     if (where === 'new') r.comp.create = true;
     if (where === 'here' && comp.width) r.comp.create = false;
     const { spec, warnings } = aeScene.normalize(r, comp);
+    this.lastScene = r;
     if (!spec.layers.length) throw new Error('المشهد طلع فاضي' + (warnings.length ? ': ' + warnings.slice(0, 3).join('، ') : ''));
     const res = await this.host('buildScene', { spec });
     return Object.assign({}, res, { warnings });
@@ -262,9 +283,16 @@ class AEServices {
   async refFrames(files, { width = 512, perVideo = 8, max = 14 } = {}) {
     const ffmpeg = this.ffmpeg(), probe = this.tools().ffprobe, frames = [], notes = [];
     const list = (files || []).slice(0, 6), per = Math.max(2, Math.min(perVideo, Math.floor(max / Math.max(1, list.length))));
-    for (const f of list) {
+    for (let f of list) {
       if (frames.length >= max) break;
-      const name = path.basename(f);
+      let name = path.basename(f);
+      if (/^https?:\/\//i.test(f)) {
+        // a YouTube / Instagram / TikTok link: frames straight from the stream (nothing downloaded)
+        const Y = require('./ytdlp'), bin = this.ytdlpBin();
+        if (!bin) throw new Error('yt-dlp مش متثبّت — ثبّته من EditFast في بريمير (تحميل)');
+        name = require('url').URL ? new (require('url').URL)(f).hostname.replace(/^www\./, '') : 'link';
+        f = await Y.streamUrl(bin, f);
+      }
       if (STILL.test(f)) { frames.push({ label: name, time: 0, b64: await vision.frameJpeg(ffmpeg, f, 0, { width }) }); continue; }
       let dur = 0; try { dur = probe ? (await ff.probe(probe, f)).duration : 0; } catch (_) {}
       if (dur > 0) {
@@ -322,6 +350,7 @@ class AEServices {
       '   {"op":"retime","factor":1.5 (أكبر من 1 = أبطأ)}, {"op":"comp","duration":10}]}',
       '3) مشهد جاهز من المكتبة لو مناسب بالظبط: {"action":"library","say":"…","use":"id","params":{"title":"…","subtitle":"…","color":"#hex"}} — المكتبة: ' + aeScene.SCENES.map(s => s.id + ' (' + s.name + ')').join('، '),
       aeScene.promptDoc(),
+      this.favPrompt(),
       plugins && plugins.length ? 'بلاجنز متسطبة عند المستخدم (استخدمها بالـ match لو هتفرق، الباراميترز بأساميها الإنجليزي): ' + plugins.slice(0, 80).map(p => p.name + ' = ' + p.match).join('، ') : '',
       where === 'new' ? 'المستخدم عايز مشهد جديد في كومب جديد (build).' : where === 'here' ? 'المستخدم عايز المشهد جوه الكومب المفتوح: build مع comp.create=false، أو edit.' : 'لو بيطلب تغيير في اللي موجود استخدم edit، ولو حاجة جديدة build.',
       refCount ? 'المستخدم بعت ريفرانس (الصور تحت، بتوقيتها). حلّل: الألوان بالظبط (#hex)، الخط ووزنه وحجمه، التكوين والمسافات، الإيقاع (من التوقيتات وعدد القطعات)، شكل الحركة بين الفريمات، الإفكتات (جلو، بلور، جرين، particles…). واعمل مشهد قريب منه جداً بنفس الإحساس — لو فيه حاجة مش متاحة اعمل أقرب بديل. اكتب التحليل في "reference" بالمصري في سطرين.' : ''
@@ -336,6 +365,7 @@ class AEServices {
     const step = m => { try { onStep && onStep(m); } catch (_) {} };
     if (!this.settings.keys.openrouter) throw new Error('حط مفتاح OpenRouter من الإعدادات الأول');
     if (!String(message || '').trim() && !refs.length) throw new Error('اكتب المشهد اللي عايزه');
+    this.lastPrompt = String(message || '');
     const state = await this.host('sceneState', {}).catch(() => ({ comp: null, layers: [] }));
     if (refs.length) step('بيحلّل الريفرانس…');
     const frames = refs.length ? await this.refFrames(refs) : [];
@@ -413,6 +443,13 @@ class AEServices {
     return Object.assign({}, r, { cuts: cuts.length, bpm, note: plan.note ? String(plan.note).slice(0, 200) : '' });
   }
 
+  ytdlpBin() {
+    const Y = require('./ytdlp');
+    if (this.settings.paths.ytdlp && fs.existsSync(this.settings.paths.ytdlp)) return this.settings.paths.ytdlp;
+    const managed = Y.managedPath(config.dataDir());
+    if (fs.existsSync(managed)) return managed;
+    return ff.findBinary(['yt-dlp', 'yt-dlp_macos'], null, []);
+  }
   /* ---------- لوجوهات، فيكتور، مورف ---------- */
   logoStyles() { return Object.keys(logoFx.STYLES).map(id => ({ id, name: logoFx.STYLES[id] })); }
   async art(file, o = {}) { const t = this.tools(); return logoFx.loadArt(file, { ffmpeg: t.ffmpeg, ffprobe: t.ffprobe, colors: o.colors || 0, detail: o.detail || 3 }); }
@@ -556,7 +593,7 @@ class AEServices {
    * Track from the comp time. points: normalised [x,y] on the frame (1 = position, 2 = + scale & rotation, 4 = corner pin).
    * mode: attach (null + parent the other selected layers / a new text) | pin (Corner Pin on a selected layer) | stabilize
    */
-  async track({ points = [], mode = 'attach', duration = 0, text = '', onStep } = {}) {
+  async track({ points = [], mode = 'attach', duration = 0, text = '', onStep, pinTarget = null } = {}) {
     const step = m => { try { onStep && onStep(m); } catch (_) {} };
     if (!points.length) throw new Error('حط نقطة (أو أكتر) على الفريم الأول');
     if (mode === 'pin' && points.length !== 4) throw new Error('الـ Corner Pin محتاج 4 نقط (الأركان)');
@@ -578,7 +615,7 @@ class AEServices {
       a.anchor = times.map((_, i) => src2(i)[0]);
       if (points.length >= 2) { const sim = track.similarity(tracks[0].slice(0, n), tracks[1].slice(0, n)); const s0 = (L.scale || [100])[0]; a.anchor = sim.map(q => [q.x / fr.scale, q.y / fr.scale]); a.stabScale = sim.map(q => s0 * 100 / q.scale); a.stabRotation = sim.map(q => (L.rotation || 0) - q.rotation); }
     } else if (mode === 'pin') {
-      const target = (src.others || [])[0];
+      const target = pinTarget || (src.others || [])[0];
       if (!target) throw new Error('اختار مع الفيديو اللير اللي هيتحط على الشاشة (الصورة / الفيديو الجديد)');
       const inv = q => { const an = target.anchor || [0, 0], po = target.position || [0, 0], sc = target.scale || [100, 100], r = -(target.rotation || 0) * Math.PI / 180; const x = q[0] - po[0], y = q[1] - po[1]; return [(x * Math.cos(r) - y * Math.sin(r)) * 100 / sc[0] + an[0], (x * Math.sin(r) + y * Math.cos(r)) * 100 / sc[1] + an[1]]; };
       a.pin = target.name;
@@ -655,7 +692,225 @@ class AEServices {
     return Object.assign({}, r, { frames: keys.length, linked: Math.max(0, ops.length - 2) });
   }
 
+  /* ---------- عدة الموشن: عدّاد، إنفوجرافيك، سايل، ترانزيشنز ---------- */
+  kitInfo() {
+    const n = o => Object.keys(o).map(id => ({ id, name: o[id].name || o[id] }));
+    return { formats: n(motionKit.FORMATS), currencies: Object.keys(motionKit.CURRENCIES), counterStyles: n(motionKit.COUNTER_STYLES), charts: n(motionKit.CHARTS), liquid: n(motionKit.LIQUID), transitions: n(motionKit.TRANSITIONS), physics: n(physics.MODES), kinetic: n(kinetic.STYLES) };
+  }
+  formatNumber(v, o) { return motionKit.formatNumber(v, o); }
+  /** into the open comp (or a new one when none is open) */
+  async buildHere(layers, { name = 'EditFast', duration = 6, bg = '#0b0806' } = {}) {
+    const comp = await this.compSize();
+    return this.sceneBuild({ comp: { create: !comp.width, name, duration, bg }, layers }, { where: comp.width ? 'here' : 'new' });
+  }
+  async counterAdd(o = {}) { const comp = await this.compSize(); return this.buildHere(motionKit.counterLayers(o, { width: comp.width || 1920, height: comp.height || 1080 }), { name: o.name || 'Counter', duration: Math.max(4, (+o.duration || 2) + 2) }); }
+  async chartAdd(o = {}) { const comp = await this.compSize(); return this.sceneBuild(motionKit.chartScene(o, { width: comp.width || 1920, height: comp.height || 1080 }), { where: 'new' }); }
+  async liquidAdd(o = {}) { const comp = await this.compSize(); return this.buildHere(motionKit.liquidLayers(o, { width: comp.width || 1920, height: comp.height || 1080, duration: comp.duration || 8 }), { name: 'Liquid', duration: 8, bg: '#fff7ed' }); }
+  /** a transition on every cut between the selected clips (by time), or at the comp time */
+  async transitionApply({ kind = 'zoomIn', duration = 0.6, color = '#f97316', color2 = '#fbbf24' } = {}) {
+    const info = await this.compInfo();
+    if (!info.comp) throw new Error('افتح الكومب الأول');
+    const C = info.comp, sel = new Set((C.selected || []).map(s => s.name));
+    const clips = C.layers.filter(l => sel.has(l.name)).sort((a, b) => a.inPoint - b.inPoint);
+    const cuts = clips.length >= 2 ? clips.slice(1).map(l => l.inPoint) : [C.time];
+    const st = { comp: { width: C.width, height: C.height, duration: C.duration, fps: C.fps }, layers: [] };
+    const ops = [];
+    cuts.forEach((t, i) => { for (const L of motionKit.transitionLayers(kind, t, { d: duration, comp: C, color, color2, index: i + 1 })) ops.push({ op: 'add', layer: L }); });
+    const r = await this.sceneEdit(ops, st);
+    return Object.assign({}, r, { cuts: cuts.length });
+  }
+
+  /* ---------- فيزيا ---------- */
+  async physics({ mode = 'drop', gravity = 1, bounce = 0.5, friction = 0.35, duration = 4, walls = true } = {}) {
+    const info = await this.host('rigInfo', {}), C = (await this.compInfo()).comp;
+    const sel = new Set((C.selected || []).map(s => s.name));
+    const ls = info.layers.filter(l => sel.size ? sel.has(l.name) : true).filter(l => !l.threeD).slice(0, 40);
+    if (!ls.length) throw new Error('اختار الليرز اللي هتقع');
+    const bodies = ls.map(l => {
+      const rc = [l.rect.left + l.rect.width / 2, l.rect.top + l.rect.height / 2], c = character.toComp(rc, l);
+      return { name: l.name, x: c[0], y: c[1], w: l.rect.width * l.scale[0] / 100, h: l.rect.height * l.scale[1] / 100, rot: l.rotation, round: /circle|ball|dot|bubble|coin|كور|دايرة|دائرة|نقطة|عملة/i.test(l.name), rc };
+    });
+    const sim = physics.simulate(bodies, { width: C.width, height: C.height, fps: Math.round(C.fps) || 30, duration, mode, gravity, bounce, friction, walls });
+    const ops = bodies.map(b => {
+      const L = ls.find(l => l.name === b.name), tr = sim.tracks[b.name], s = L.scale;
+      const off = [(b.rc[0] - L.anchor[0]) * s[0] / 100, (b.rc[1] - L.anchor[1]) * s[1] / 100];
+      const pos = [], rot = [];
+      tr.forEach((p, i) => {
+        const t = +(C.time - (L.inPoint || 0) + i / sim.fps).toFixed(4), a = p.rot * Math.PI / 180;
+        pos.push({ t, v: [p.x - (off[0] * Math.cos(a) - off[1] * Math.sin(a)), p.y - (off[0] * Math.sin(a) + off[1] * Math.cos(a))], ease: 'linear' });
+        rot.push({ t, v: p.rot, ease: 'linear' });
+      });
+      return { op: 'set', layer: b.name, look: { keys: { position: pos, rotation: rot } } };
+    });
+    const r = await this.sceneEdit(ops);
+    return Object.assign({}, r, { bodies: bodies.length, frames: sim.frames });
+  }
+
+  /* ---------- روتو، كاميرا، سطح، مقاسات ---------- */
+  /** cut the person out: AI matte per frame (fal.ai), or Keylight for a green / blue screen */
+  async roto({ mode = 'ai', seconds = 0, onStep } = {}) {
+    const step = m => { try { onStep && onStep(m); } catch (_) {} };
+    if (mode === 'ai' && !this.settings.keys.fal) throw new Error('الروتو بالـ AI محتاج مفتاح fal.ai (الإعدادات) — أو استخدم Green Screen');
+    const src = await this.host('trackSource', {}), L = src.layer, C = src.comp;
+    if (mode === 'green' || mode === 'blue') return this.host('keyApply', { layer: L.name, color: mode });
+    const start = Math.max(0, C.time - L.startTime), dur = Math.max(0.1, Math.min(seconds || 20, L.outPoint - C.time, 60));
+    const fps = Math.round(C.fps) || 25, dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'editfast-roto-'));
+    step('بيطلّع الفريمات…');
+    await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-nostdin', '-ss', String(start), '-i', L.file, '-t', String(dur), '-vf', `fps=${fps},scale='min(1024,iw)':-2`, path.join(dir, 'f_%05d.png')]);
+    const frames = fs.readdirSync(dir).filter(f => /^f_\d+\.png$/.test(f)).sort();
+    if (!frames.length) throw new Error('مقدرتش أطلّع فريمات');
+    let done = 0;
+    const one = async f => {
+      const r = await this.falRun('fal-ai/birefnet', { image_url: this.dataUri(path.join(dir, f)), output_mask: true });
+      const mask = (r.mask_image && r.mask_image.url) || null, img = (r.image && r.image.url) || AEServices.findUrl(r, /^https?:|^data:image/);
+      const out = path.join(dir, (mask ? 'm_' : 'c_') + f.slice(2));
+      if (/^data:/.test(mask || img)) fs.writeFileSync(out, Buffer.from((mask || img).split(',')[1], 'base64')); else await this.download(mask || img, out);
+      step('روتو ' + (++done) + ' / ' + frames.length);
+    };
+    for (let i = 0; i < frames.length; i += 4) await Promise.all(frames.slice(i, i + 4).map(one));
+    const masks = fs.readdirSync(dir).some(f => /^m_/.test(f));
+    const matte = path.join(config.dataDir(), 'roto', mogrt.safeName(L.name) + '-' + Date.now().toString(36) + '.mp4');
+    fs.mkdirSync(path.dirname(matte), { recursive: true });
+    step('بيجمّع الماسك…');
+    await ff.run(this.ffmpeg(), ['-hide_banner', '-loglevel', 'error', '-y', '-framerate', String(fps), '-i', path.join(dir, (masks ? 'm_' : 'c_') + '%05d.png'), '-vf', masks ? 'format=gray' : 'format=rgba,alphaextract,format=gray', '-c:v', 'libx264', '-crf', '10', '-pix_fmt', 'yuv420p', matte]);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    const r = await this.host('rotoApply', { layer: L.name, matte, start: C.time });
+    return Object.assign({}, r, { frames: frames.length, file: matte });
+  }
+  trackCamera() { return this.host('trackSource', {}).then(s => this.host('trackCamera', { layer: s.layer.name })); }
+  /** stick a picture / text on a floor, wall or screen: 4 corners tracked → Corner Pin on a precomp of the content */
+  async surfacePlace({ points = [], file = null, text = '', onStep } = {}) {
+    if (points.length !== 4) throw new Error('حط 4 نقط على أركان السطح');
+    if (!file && !text) throw new Error('اختار صورة أو اكتب كلام يتحط على السطح');
+    const C = (await this.compInfo()).comp, W = 1600, H = 900, name = 'EF Surface ' + Date.now().toString(36).slice(-4);
+    const inner = file ? [{ type: 'footage', name: 'Content', file, cover: true, transform: { position: [W / 2, H / 2] } }] : [{ type: 'text', name: 'Content', text, size: 220, color: '#ffffff', transform: { position: [W / 2, H / 2 + 70] } }];
+    await this.sceneEdit([{ op: 'add', layer: { type: 'precomp', name, comp: { width: W, height: H, duration: C.duration }, layers: inner, transform: { position: [C.width / 2, C.height / 2] } } }]);
+    return this.track({ points, mode: 'pin', onStep, pinTarget: { name, anchor: [W / 2, H / 2], position: [C.width / 2, C.height / 2], scale: [100, 100], rotation: 0 } });
+  }
+  /** the open comp as 16:9 / 9:16 / 1:1 / 4:5 comps (fill / fit / fit over blur), rendered in one go */
+  async multiFormat({ sizes = ['16:9', '9:16', '1:1'], fit = 'blur', render = true, ame = false } = {}) {
+    const info = await this.compInfo();
+    if (!info.comp) throw new Error('افتح الكومب الأول');
+    const S = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080], '4:5': [1080, 1350], '4:3': [1440, 1080] };
+    const list = sizes.filter(z => S[z]).map(z => ({ label: z, w: S[z][0], h: S[z][1] }));
+    if (!list.length) throw new Error('اختار مقاس');
+    const dir = info.project ? path.join(path.dirname(info.project), 'EditFast Renders') : config.cacheDir('renders');
+    if (render) fs.mkdirSync(dir, { recursive: true });
+    const r = await this.host('multiFormat', { sizes: list, fit, render, ame, dir });
+    if (render) for (const c of r.comps) if (c.path) this.handoff({ file: c.path, name: c.comp, ame });
+    return r;
+  }
+
+  /* ---------- كلام مع الصوت، وصوت → أنيميشن ---------- */
+  async transcribeAudio(file, onStep) {
+    const t = this.tools(), model = this.settings.paths.whisperModel;
+    const r = await require('./transcribe').transcribe({ ffmpeg: this.ffmpeg(), whisper: t.whisper, model, file, dialectId: this.settings.dialect || 'egyptian', cacheDir: config.cacheDir('transcripts'), onProgress: onStep });
+    if (!r.words.length) throw new Error('مفيش كلام اتسمع في الملف');
+    return r;
+  }
+  /** kinetic typography: every word appears the moment it's said (whisper on this machine) + the audio in the comp */
+  async kinetic({ audio, style = 'pop', color, accent, font, upper = false, onStep } = {}) {
+    if (!audio) throw new Error('اختار ملف الصوت / الفيديو');
+    const tr = await this.transcribeAudio(audio, onStep);
+    const comp = await this.compSize(), cw = comp.width || 1920, ch = comp.height || 1080;
+    const words = tr.words.map(w => ({ text: w.text, start: w.start + (comp.time || 0), end: w.end + (comp.time || 0) }));
+    const L = kinetic.layers(words, { style, color, accent, font, upper, comp: { width: cw, height: ch } });
+    L.push({ type: 'footage', name: 'Voice', file: audio, start: comp.time || 0, cover: false });
+    const dur = Math.max(4, Math.ceil(words[words.length - 1].end + 1));
+    const r = await this.buildHere(L, { name: 'Kinetic Type', duration: dur, bg: '#0b0806' });
+    return Object.assign({}, r, { words: words.length });
+  }
+  /** an ad in your voice → script read from it → scenes timed to what you say, captions with it, the voice under it */
+  async voiceAd({ audio, brief = '', captions = 'highlight', onStep } = {}) {
+    if (!this.settings.keys.openrouter) throw new Error('حط مفتاح OpenRouter الأول');
+    const tr = await this.transcribeAudio(audio, onStep);
+    const sents = require('./transcribe').sentences(tr.words, { pause: 0.5, maxWords: 14 });
+    const end = tr.words[tr.words.length - 1].end, comp = await this.compSize(), cw = comp.width || 1920, ch = comp.height || 1080;
+    onStep && onStep('بيصمّم المشاهد على كلامك…');
+    const lines = sents.map(s => `[${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text || s.words.map(w => w.text).join(' ')}`).join('\n');
+    const res = await this.askJson(this.sceneSystem('new', 0, await this.plugins()) + '\nالمستخدم سجّل صوته لإعلان/فيديو. اعمل مشهد واحد (build) طوله ' + end.toFixed(1) + ' ثانية: لكل جملة لقطة بصرية (precomp أو ليرز بـ start/end على توقيت الجملة بالظبط) بتوضّح المعنى — أيقونات، أرقام (counter)، charts، أشكال، particles، كاراكتر لو مناسب. من غير كلام مكتوب للجمل نفسها (الكابشن بيتحط لوحده تحت). سيب الثلث اللي تحت فاضي للكابشن.',
+      `الكومب: ${cw}x${ch}\n${brief ? 'البريف: ' + brief + '\n' : ''}الكلام بتوقيته:\n${lines}`, 16000, { history: false });
+    if (!res.scene) throw new Error('الموديل مارجّعش مشاهد' + (res.say ? ': ' + res.say : ''));
+    const raw = res.scene;
+    raw.comp = Object.assign({}, raw.comp, { create: true, width: cw, height: ch, duration: Math.max(+(raw.comp && raw.comp.duration) || 0, end + 0.8) });
+    raw.layers = (captions ? kinetic.layers(tr.words, { style: captions, comp: { width: cw, height: ch } }) : []).concat(raw.layers || [], [{ type: 'footage', name: 'Voice', file: audio, start: 0, cover: false }]);
+    onStep && onStep('بيبني…');
+    const r = await this.sceneBuild(raw, { where: 'new' });
+    return Object.assign({}, r, { say: String(res.say || '').slice(0, 300), sentences: sents.length });
+  }
+
+  /* ---------- ستايلك: مشاهد عجبتك ---------- */
+  favFile() { return path.join(config.dataDir(), 'ae-style.json'); }
+  favList() { try { return JSON.parse(fs.readFileSync(this.favFile(), 'utf8')); } catch (_) { return []; } }
+  favSave({ name = '', prompt = '' } = {}) {
+    if (!this.lastScene) throw new Error('اعمل مشهد الأول');
+    const list = this.favList(), id = Date.now().toString(36);
+    list.unshift({ id, name: String(name || prompt || this.lastScene.comp && this.lastScene.comp.name || 'مشهد').slice(0, 60), prompt: String(prompt || this.lastPrompt || '').slice(0, 300), at: new Date().toISOString(), scene: this.lastScene, summary: styleSummary(this.lastScene) });
+    fs.writeFileSync(this.favFile(), JSON.stringify(list.slice(0, 40)), 'utf8');
+    return { id, count: Math.min(40, list.length) };
+  }
+  favRemove(id) { const list = this.favList().filter(f => f.id !== id); fs.writeFileSync(this.favFile(), JSON.stringify(list), 'utf8'); return { count: list.length }; }
+  async favUse(id) { const f = this.favList().find(x => x.id === id); if (!f) throw new Error('المشهد مش موجود'); return this.sceneBuild(f.scene, { where: 'new' }); }
+  favPrompt() {
+    const list = this.favList().slice(0, 5);
+    if (!list.length) return '';
+    return 'ستايل المستخدم — مشاهد عجبته قبل كده (قلّد إحساسها: الألوان، الخطوط، الإيقاع، نوع الحركة، الإفكتات):\n' + list.map(f => '- ' + f.name + (f.prompt ? ' (طلب: ' + f.prompt.slice(0, 80) + ')' : '') + ': ' + f.summary).join('\n');
+  }
+
+  /* ---------- توليد صور / فيديو (fal.ai) ---------- */
+  async genMedia({ prompt, kind = 'image', ratio = '16:9', removeBg = false, background = true, onStep } = {}) {
+    if (!String(prompt || '').trim()) throw new Error('اكتب وصف الصورة / الفيديو');
+    const models = this.settings.falModels || {};
+    onStep && onStep(kind === 'video' ? 'بيعمل الفيديو (دقيقة أو اتنين)…' : 'بيعمل الصورة…');
+    const size = { '16:9': 'landscape_16_9', '9:16': 'portrait_16_9', '1:1': 'square_hd', '4:5': 'portrait_4_3' }[ratio] || 'landscape_16_9';
+    const r = kind === 'video'
+      ? await this.falRun(models.video || 'fal-ai/kling-video/v1.6/standard/text-to-video', { prompt, duration: '5', aspect_ratio: ratio === '4:5' ? '1:1' : ratio })
+      : await this.falRun(models.image || 'fal-ai/flux/schnell', { prompt, image_size: size, num_images: 1 });
+    const url = AEServices.findUrl(r, kind === 'video' ? /\.(mp4|mov|webm)(\?|$)/i : /^https?:|^data:image/);
+    if (!url) throw new Error('fal.ai مارجّعش ' + (kind === 'video' ? 'فيديو' : 'صورة'));
+    const ext = kind === 'video' ? '.mp4' : /\.png/i.test(url) ? '.png' : '.jpg';
+    let file = path.join(config.dataDir(), 'generated', mogrt.safeName(prompt.slice(0, 30)) + '-' + Date.now().toString(36) + ext);
+    if (/^data:/.test(url)) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, Buffer.from(url.split(',')[1], 'base64')); } else await this.download(url, file);
+    if (kind === 'image' && removeBg) {
+      onStep && onStep('بيشيل الخلفية…');
+      const b = await this.falRun('fal-ai/birefnet', { image_url: this.dataUri(file) });
+      const u = (b.image && b.image.url) || AEServices.findUrl(b, /^https?:/);
+      if (u) { file = file.replace(/\.\w+$/, '-cutout.png'); await this.download(u, file); }
+    }
+    const r2 = await this.buildHere([{ type: 'footage', name: (kind === 'video' ? 'AI Video ' : 'AI Image ') + prompt.slice(0, 24), file, cover: background && !removeBg, transform: { position: ['50%', '50%'] } }], { name: 'AI ' + kind });
+    return Object.assign({}, r2, { file });
+  }
+
+  /* ---------- معاينات متحركة (بتترندر في الأفتر مرة وتتحفظ) ---------- */
+  previewDir(kind, id) { return path.join(config.dataDir(), 'previews', kind + '-' + String(id).replace(/[^\w-]/g, '_')); }
+  previewList(kind, id) { const d = this.previewDir(kind, id); try { return fs.readdirSync(d).filter(f => /^\d+\.png$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b)).map(f => path.join(d, f)); } catch (_) { return []; } }
+  previewSpec(kind, id) {
+    const c = { width: 640, height: 360 };
+    if (kind === 'scene') return aeScene.buildLibrary(id, {}, c);
+    if (kind === 'liquid') return { comp: { name: id, duration: 6, bg: '#fff7ed', width: 640, height: 360 }, layers: motionKit.liquidLayers({ preset: id, size: 80 }, Object.assign({ duration: 6 }, c)) };
+    if (kind === 'chart') return motionKit.chartScene({ type: id, data: 'A, 80\nB, 55\nC, 95\nD, 40', title: '' }, c);
+    if (kind === 'counter') return { comp: { name: id, duration: 4, bg: '#0b0806', width: 640, height: 360 }, layers: motionKit.counterLayers({ style: id, to: id === 'ring' || id === 'bar' ? 75 : 1250, format: id === 'ring' || id === 'bar' ? 'percent' : 'currency', currency: 'USD', size: 60, label: 'Sales' }, c) };
+    if (kind === 'transition') return { comp: { name: id, duration: 2, width: 640, height: 360 }, layers: motionKit.transitionLayers(id, 1, { d: 0.8, comp: c }).concat([{ type: 'text', name: 'B', text: 'B', size: 160, color: '#ffffff', start: 1 }, { type: 'solid', name: 'B BG', color: '#1e293b', start: 1 }, { type: 'text', name: 'A', text: 'A', size: 160, color: '#1f140c', end: 1 }, { type: 'solid', name: 'A BG', color: '#fdba74', end: 1 }]) };
+    throw new Error('نوع معاينة مش معروف');
+  }
+  /** render the missing previews (needs AE) — 8 frames each, kept in ~/.editfast/previews */
+  async previewMake({ kind, ids, force = false, onStep } = {}) {
+    let made = 0;
+    for (const id of ids) {
+      if (!force && this.previewList(kind, id).length) continue;
+      onStep && onStep(kind + ': ' + id);
+      const raw = this.previewSpec(kind, id);
+      raw.comp = Object.assign({ fps: 15 }, raw.comp, { width: 640, height: 360, create: true });
+      const { spec } = aeScene.normalize(raw, {});
+      const dir = this.previewDir(kind, id); fs.mkdirSync(dir, { recursive: true });
+      const times = Array.from({ length: 8 }, (_, i) => +(spec.comp.duration * (i + 0.5) / 8).toFixed(2));
+      await this.host('scenePreview', { spec, times, dir });
+      made++;
+    }
+    return { made };
+  }
+
   async selfTest() { return this.host('selfTest', {}); }
 }
 
-module.exports = { AEServices, AI_ACTIONS };
+module.exports = { AEServices, AI_ACTIONS, styleSummary };

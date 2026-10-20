@@ -4,6 +4,7 @@
 const curves = require('./curves');
 const svg = require('./svgPath');
 const character = require('./character');
+const motionKit = require('./motionKit');
 
 /**
  * Effects the AI may use by a friendly name: AE matchName + its parameters (a param is a matchName, or the English
@@ -42,7 +43,7 @@ const EFFECTS = {
   cornerPin: { match: 'ADBE Corner Pin', params: { topLeft: 'ADBE Corner Pin-0001', topRight: 'ADBE Corner Pin-0002', bottomLeft: 'ADBE Corner Pin-0003', bottomRight: 'ADBE Corner Pin-0004' } },
   motionTile: { match: 'ADBE Tile', params: { outputWidth: 'Output Width', outputHeight: 'Output Height', mirror: 'Mirror Edges' } }
 };
-const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light', 'precomp', 'particles', 'character', 'plexus'];
+const TYPES = ['text', 'shape', 'solid', 'adjustment', 'null', 'footage', 'camera', 'light', 'precomp', 'particles', 'character', 'plexus', 'counter', 'chart', 'liquid'];
 const PROPS = ['position', 'scale', 'rotation', 'opacity', 'anchor', 'rotationX', 'rotationY', 'orientation'];
 const SHAPE_PROPS = ['trimStart', 'trimEnd', 'trimOffset', 'fillColor', 'fillOpacity', 'strokeColor', 'strokeWidth', 'size', 'roundness', 'path',
   'repeaterCopies', 'repeaterOffset', 'repeaterPosition', 'repeaterScale', 'repeaterRotation', 'outerRadius', 'innerRadius', 'starRotation', 'groupPosition', 'groupScale', 'groupRotation'];
@@ -108,6 +109,7 @@ function pathValue(v, comp, { center = false, size = null } = {}) {
  */
 function keyTarget(k, effects) {
   if (PROPS.indexOf(k) >= 0) return { key: k, kind: k };
+  if (k === 'text') return { key: 'text', kind: 'text' };
   let m = /^shape:(\w+)$/.exec(k);
   if (m && SHAPE_PROPS.indexOf(m[1]) >= 0) return { key: k, kind: 'shape:' + m[1] };
   m = /^shape:path\.(\d+)$/.exec(k);
@@ -322,6 +324,12 @@ function layerList(list, comp, ctx, depth) {
     // generated groups: a rigged character (plain layers) / a plexus (precomp)
     if (L.type === 'character') { out.push(...layerList(character.flatCharacter(L, comp), comp, ctx, depth)); continue; }
     if (L.type === 'plexus') { out.push(...layerList([plexusLayer(L, comp)], comp, ctx, depth)); continue; }
+    if (L.type === 'counter') { out.push(...layerList(motionKit.counterLayers(Object.assign({}, L, { layerStart: L.start, layerEnd: L.end }), comp), comp, ctx, depth)); continue; }
+    if (L.type === 'liquid') { out.push(...layerList(motionKit.liquidLayers(Object.assign({}, L, { position: L.position ? vec(L.position, comp) : undefined }), comp), comp, ctx, depth)); continue; }
+    if (L.type === 'chart') {
+      let ch; try { ch = motionKit.chartScene(L, comp); } catch (e) { ctx.warnings.push(e.message); continue; }
+      out.push(...layerList([{ type: 'precomp', name: L.name || 'Chart', start: L.start, end: L.end, transform: L.transform, keys: L.keys, comp: { duration: ch.comp.duration }, layers: ch.layers }], comp, ctx, depth)); continue;
+    }
     const made = layerSpec(L, comp, ctx, depth);
     for (const m of made) { out.push(m); ctx.layers++; }
   }
@@ -347,7 +355,14 @@ function layerSpec(L, comp, ctx, depth) {
     if (L.leading) o.leading = +L.leading;
     if (L.allCaps) o.allCaps = true;
     if (L.stroke) { o.stroke = hex(L.stroke); o.strokeWidth = clamp(+L.strokeWidth || 2, 0, 100); }
-    if (L.counter && isFinite(+L.counter.to)) o.counter = { to: +L.counter.to, from: +L.counter.from || 0, start: +L.counter.start || o.start, duration: Math.max(0.1, +L.counter.duration || 2), decimals: clamp(+L.counter.decimals || 0, 0, 4), prefix: String(L.counter.prefix || '').slice(0, 10), suffix: String(L.counter.suffix || '').slice(0, 10) };
+    if (L.counter && isFinite(+L.counter.to)) {
+      // a counting number = slider "Count" (keyed from → to) + the formatted Source Text expression
+      const C = L.counter, from = +C.from || 0, t0 = Math.max(0, (C.start === undefined ? o.start : +C.start) - o.start);
+      L = Object.assign({}, L, { effects: (L.effects || []).concat([{ name: 'slider', label: 'Count', params: { value: from } }]),
+        keys: Object.assign({}, L.keys, { 'fx:Count.value': [[t0, from, C.ease || 'expoOut'], [t0 + Math.max(0.1, +C.duration || 2), +C.to]] }),
+        expressions: Object.assign({}, L.expressions, { text: motionKit.counterExpr(C) }) });
+      o.effects = effectList(L.effects, comp, warnings);
+    }
     const anims = [].concat(L.textAnimators || [], L.textAnimator ? [L.textAnimator] : [], L.textOut ? [Object.assign({ out: true }, L.textOut)] : []);
     o.textAnimators = anims.slice(0, 4).filter(a => a).map(a => ({ preset: TEXT_PRESETS.indexOf(a.preset) >= 0 ? a.preset : 'fadeUp', by: ['chars', 'words', 'lines'].indexOf(a.by) >= 0 ? a.by : 'chars', duration: clamp(+a.duration || 1, 0.05, 30), start: a.start === undefined ? (a.out && o.end ? o.end - (+a.duration || 1) : o.start) : +a.start, out: !!a.out }));
   }
@@ -464,6 +479,9 @@ function promptDoc() {
     '- camera: "camera":{"zoom":2000,"dof":1,"focusDistance":2000,"aperture":50,"blurLevel":100}',
     '- precomp: "comp":{"width","height","duration"},"layers":[…] (مشاهد جوه مشاهد — استخدمه لتقسيم الفيديو لمشاهد ورا بعض بترانزيشن)',
     '- character: شخصية فلات بأطراف مطاطية ومتريّجة: "action":"walk|run|idle|wave|talk|jump","colors":{"skin","shirt","pants","hair","shoes"},"height":600,"position":[x, y الأرض],"walkAcross":true,"sliders":{"Speed":1.2} — بتتحرك بسلايدرز على "<name> Ctrl" (Walk, Speed, Stride, Arm Swing, Bob, Breath, Blink, Talk, Mouth, Wave, Jump, Look)',
+    '- counter: عدّاد: "from":0,"to":1500,"duration":2,"format":"number|currency|percent|compact|time","currency":"USD|EUR|GBP|EGP|SAR|AED|KWD|QAR","decimals":0,"arabic":true (أرقام عربي),"prefix","suffix","plus":true,"style":"plain|ring|bar|card","label":"عميل سعيد","color","accent","size","position" (أو "counter":{…نفس الإعدادات…} على لير text)',
+    '- chart: إنفوجرافيك: "type":"column|bar|line|area|pie|donut|progress|timeline","data":"اسم, رقم\\nاسم, رقم","title","colors":[…],"format":{…زي العدّاد…}',
+    '- liquid: أشكال سايلة متحركة: "preset":"' + Object.keys(motionKit.LIQUID).join('|') + '","color","color2","size","position"',
     '- plexus: نقط بتطفو وخطوط بينها (تكنولوجي): "count":16,"distance":300,"color":"#hex"',
     '- particles: "preset":"' + PARTICLES.join('|') + '","count":40,"color":"#hex","colors":[…],"size":[3,8],"speed":60,"burstAt":0.5,"origin":["50%","50%"],"life":2.5',
     'الخصايص اللي تتحط في transform / keys / expressions:',

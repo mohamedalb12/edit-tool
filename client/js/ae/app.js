@@ -7,6 +7,8 @@
     { id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي', icon: 'cube', members: ['studio'] },
     { id: 'track', label: 'تراكينج', title: 'تراكينج', icon: 'reels', members: ['track'] },
     { id: 'character', label: 'كاراكتر', title: 'كاراكتر أنيميشن', icon: 'agent', members: ['character'] },
+    { id: 'fx', label: 'مؤثرات', title: 'ترانزيشنز وسايل وفيزيا', icon: 'autofx', members: ['fx'] },
+    { id: 'info', label: 'إنفوجرافيك', title: 'عدّادات وإنفوجرافيك', icon: 'thumb', members: ['info'] },
     { id: 'motion', label: 'الحركة', title: 'الحركة', icon: 'motion', members: ['motion'] },
     { id: 'text', label: 'الكلام', title: 'الكلام والأشكال', icon: 'titles', members: ['text'] },
     { id: 'expr', label: 'إكسبريشن', title: 'إكسبريشنز بضغطة', icon: 'code', members: ['expr'] },
@@ -51,6 +53,14 @@
     A('char', '🧍', 'كاراكتر متريّج', 'character rig rubberhose duik كاراكتر ريج', function () { show('character'); });
     A('explode', '✂', 'فصّل الشيب لليرز', 'explode shape layers فصل', function () { return S.explodeShapes().then(function (r) { UI.toast(r.layers + ' ✓'); }); });
     A('colors', '🎨', 'كنترول واحد لكل الألوان', 'color controller palette ألوان', function () { return S.colorRig().then(function (r) { UI.toast(r.colors.length + ' لون ✓'); }); });
+    A('counter', '🔢', 'عدّاد أرقام', 'counter number عداد رقم دولار نسبة', function () { show('info'); });
+    A('chart', '📊', 'رسم بياني / تايملاين', 'chart graph infographic رسم بياني انفوجرافيك تايملاين', function () { show('info'); });
+    A('trans', '🔀', 'ترانزيشن بين اللقطات', 'transition zoom whip glitch ترانزيشن', function () { show('fx'); });
+    A('liquid', '💧', 'أشكال سايلة', 'liquid blob wave سايل بلوب موج', function () { show('fx'); });
+    A('phys', '🧲', 'فيزيا (تقع وتتنطط)', 'physics gravity bounce فيزيا جاذبية', function () { return S.physics({}).then(function (r) { UI.toast(r.bodies + ' ✓'); }); });
+    A('roto', '✂', 'روتو: افصل الشخص', 'roto mask background remove روتو فصل خلفية', function () { show('studio'); });
+    A('sizes', '📐', 'ريندر كل المقاسات', 'render sizes 9:16 reels مقاسات', function () { return S.multiFormat({}).then(function (r) { UI.toast(r.comps.length + ' ✓'); }); });
+    A('kinetic', '💬', 'كلام متحرك مع الصوت', 'kinetic typography captions كلام صوت', function () { show('director'); });
     A('save', '💾', 'احفظ الكومب كقالب', 'template mogrt قالب', function () { show('templates'); });
     return out;
   };

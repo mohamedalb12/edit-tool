@@ -205,6 +205,14 @@
           action('فصّل الشيب لليرز', 'بيفصل', function () { return S().explodeShapes().then(function (q) { ok(q.layers + ' لير جديد ✓ (الأصلي اتقفل)'); }); }),
           action('كنترول واحد لكل الألوان', 'بيربط الألوان', function () { return S().colorRig().then(function (q) { ok(q.colors.length + ' لون على "EF Colors" — غيّر اللون مرة يتغيّر في ' + q.linked + ' مكان ✓'); }); })),
         UI.hint('زي Motion Tools وExplode Shape Layers وRay Dynamic Color: محاذاة، توزيع، ترتيب في الوقت، تفصيل جروبات الشيب، ولوحة ألوان واحدة للكومب كله.')));
+      var mf = { sizes: ['16:9', '9:16', '1:1'], fit: 'blur', render: true };
+      var sizeBox = h('div', { class: 'chips' });
+      ['16:9', '9:16', '1:1', '4:5', '4:3'].forEach(function (z) { sizeBox.appendChild(h('button', { type: 'button', class: 'chip' + (mf.sizes.indexOf(z) >= 0 ? ' on' : ''), 'data-size': z, onclick: function (e) { var i = mf.sizes.indexOf(z); if (i >= 0) mf.sizes.splice(i, 1); else mf.sizes.push(z); e.currentTarget.classList.toggle('on', i < 0); } }, z)); });
+      view.appendChild(UI.card('ريندر كل المقاسات بضغطة',
+        UI.hint('الكومب المفتوح بيتعمل منه كومب لكل مقاس، وبيترندروا كلهم ورا بعض ويروحوا لبريمير.'), sizeBox,
+        UI.row(h('label', null, 'المحتوى'), UI.seg([{ value: 'blur', label: 'كامل فوق خلفية بلور' }, { value: 'fill', label: 'يملا الكادر' }, { value: 'fit', label: 'كامل بحواف' }], mf.fit, function (v) { mf.fit = v; })),
+        UI.row(h('label', null, h('input', { type: 'checkbox', checked: true, onchange: function (e) { mf.render = e.target.checked; } }), ' رندر على طول')),
+        UI.row(action('اعمل المقاسات', 'بيعمل المقاسات', function () { return S().multiFormat(mf).then(function (r) { ok(r.comps.length + ' مقاس ✓' + (mf.render ? ' — في EditFast Renders' : '')); }); }, 'primary'))));
       view.appendChild(UI.card('ريندر وابعته لبريمير',
         UI.row(UI.seg([{ value: 'h264', label: 'MP4 عادي' }, { value: 'alpha', label: 'شفاف (ProRes 4444)' }, { value: 'prores', label: 'ProRes' }], r.template, function (v) { r.template = v; })),
         UI.row(h('label', null, h('input', { type: 'checkbox', onchange: function (e) { r.ame = e.target.checked; } }), ' من Media Encoder (الأفتر يفضل فاضي)')),
@@ -251,6 +259,7 @@
   });
 
   /* ——— المونتير الذكي: وصف / ريفرانس → مشهد بليرز وكي فريمز، ومونتاج لوحده ——— */
+  var drawFavs = function () {};
   var chat = [], refs = [], where = 'auto', review = true, lib = { id: null, p: {} }, ed = { files: [], music: null, style: 'energetic', ratio: '16:9', duration: 0, brief: '' };
   function base(f) { return String(f).split(/[\\/]/).pop(); }
   function summary(r) {
@@ -268,7 +277,8 @@
         UI.empty(log);
         if (!chat.length) log.appendChild(UI.hint('وصّف المشهد بالمصري — بيبني ليرز وكي فريمز حقيقية في كومب جديد، وبعدها قولّه "كبّر العنوان" أو "خلّيها أبطأ" أو "غيّر اللون لأزرق" ويعدّل على نفس الليرز.'));
         chat.forEach(function (m) {
-          log.appendChild(h('div', { class: 'msg ' + m.who }, h('div', null, m.text), m.ref ? h('div', { class: 'hint' }, '🔍 ' + m.ref) : null, m.info ? h('div', { class: 'hint' }, m.info) : null));
+          log.appendChild(h('div', { class: 'msg ' + m.who }, h('div', null, m.text), m.ref ? h('div', { class: 'hint' }, '🔍 ' + m.ref) : null, m.info ? h('div', { class: 'hint' }, m.info) : null,
+            m.canFav ? h('button', { type: 'button', class: 'fav-btn' + (m.faved ? ' on' : ''), title: 'عجبني — احفظه في ستايلي', onclick: function () { if (m.faved) return; try { S().favSave({ prompt: m.prompt }); m.faved = true; drawLog(); drawFavs(); ok('اتحفظ في ستايلك ✓ — المونتير هيقلّده بعد كده'); } catch (e) { UI.toast(e.message, true); } } }, m.faved ? '❤ اتحفظ' : '♡ عجبني') : null));
         });
         log.scrollTop = log.scrollHeight;
       }
@@ -285,7 +295,7 @@
         return S().director({ message: text, refs: r0, where: where, review: review, onStep: function (m) { live.textContent = m; } }).then(function (r) {
           live.textContent = '';
           var rv = r.review || {};
-          chat.push({ who: 'ai', text: r.say || (r.action === 'edit' ? 'عدّلت ✓' : 'المشهد جاهز ✓'), ref: r.reference, info: summary(r) + (rv.fixed ? ' · 🔁 راجع وصلّح ' + rv.fixed + ': ' + (rv.say || '') : rv.ok && rv.say ? ' · ✓ ' + rv.say : '') });
+          chat.push({ who: 'ai', canFav: r.action !== 'edit', prompt: text, text: r.say || (r.action === 'edit' ? 'عدّلت ✓' : 'المشهد جاهز ✓'), ref: r.reference, info: summary(r) + (rv.fixed ? ' · 🔁 راجع وصلّح ' + rv.fixed + ': ' + (rv.say || '') : rv.ok && rv.say ? ' · ✓ ' + rv.say : '') });
           q.value = ''; refs = []; drawRefs(); drawLog();
           ok(r.action === 'edit' ? 'اتعدّل ✓' : 'المشهد اتبنى ✓');
         }, function (e) { live.textContent = ''; chat.push({ who: 'ai', text: '✗ ' + e.message }); drawLog(); throw e; });
@@ -294,6 +304,7 @@
       view.appendChild(UI.card('قولّه المشهد',
         log, live, q, refBox,
         UI.row(UI.seg([{ value: 'auto', label: 'هو يقرر' }, { value: 'new', label: 'كومب جديد' }, { value: 'here', label: 'في الكومب المفتوح' }], where, function (v) { where = v; }),
+          UI.btn('🔗 لينك', function () { var u = window.prompt('لينك يوتيوب / إنستجرام / تيك توك للريفرانس'); if (u && /^https?:\/\//.test(u.trim())) { refs = refs.concat([u.trim()]).slice(0, 6); drawRefs(); } }, 'small'),
           UI.btn('📎 ريفرانس', function () { var f = EF.pickFiles('صور أو فيديو ريفرانس', ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mkv']); if (f && f.length) { refs = refs.concat(f).slice(0, 6); drawRefs(); } }, 'small')),
         UI.row(h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: review, 'data-review': '1', onchange: function (e) { review = e.target.checked; } }), ' يراجع شغله ويصلّحه (بيشوف فريمات من اللي عمله)')),
         UI.modelPicker('motion_ai'),
@@ -302,7 +313,7 @@
       drawLog(); drawRefs();
 
       // pro scenes, ready to customise
-      var grid = h('div', { class: 'chips' }), fields = h('div');
+      var grid, fields = h('div');
       function drawFields() {
         UI.empty(fields);
         var sc = S().sceneLibrary().filter(function (x) { return x.id === lib.id; })[0];
@@ -315,10 +326,12 @@
         });
         fields.appendChild(UI.row(action('اعمل المشهد', 'بيبني المشهد', function () { return S().libraryScene(lib.id, lib.p).then(function (r) { ok(sc.name + ' — ' + summary(r) + ' ✓'); }); }, 'primary')));
       }
-      S().sceneLibrary().forEach(function (sc) {
-        grid.appendChild(h('button', { type: 'button', class: 'chip', 'data-scene': sc.id, onclick: function () { lib = { id: sc.id, p: {} }; Array.prototype.forEach.call(grid.children, function (b) { b.classList.toggle('on', b.dataset.scene === sc.id); }); drawFields(); } }, sc.name));
-      });
-      view.appendChild(UI.card('مشاهد احترافية جاهزة', UI.hint('اختار مشهد، اكتب كلامك ولونك — بيتبني ليرز عادية بحركة متظبطة تعدّل عليها.'), grid, fields));
+      var scenes = S().sceneLibrary();
+      grid = previewGrid('scene', scenes, lib.id, function (id) { lib = { id: id, p: {} }; drawFields(); });
+      Array.prototype.forEach.call(grid.children, function (b, i) { b.setAttribute('data-scene', scenes[i].id); });
+      view.appendChild(UI.card('مشاهد احترافية جاهزة', UI.hint('اختار مشهد، اكتب كلامك ولونك — بيتبني ليرز عادية بحركة متظبطة تعدّل عليها. عدّي بالماوس على أي مشهد تشوف حركته.'), grid, fields,
+        UI.row(previewButton('scene', scenes.map(function (x) { return x.id; }), function () { EF.show('director'); }))));
+      if (lib.id) drawFields();
 
       // the whole edit, alone
       var info = h('p', { class: 'hint' }), stepTxt = h('p', { class: 'hint' });
@@ -339,6 +352,36 @@
           });
         }, 'primary')), stepTxt));
       drawInfo();
+
+      // your style: scenes you liked (the director imitates them)
+      var favBox = h('div', { class: 'list' });
+      drawFavs = function () {
+        UI.empty(favBox);
+        var list = S().favList();
+        if (!list.length) { favBox.appendChild(UI.hint('دوس "♡ عجبني" على أي مشهد عمله المونتير وهيتحفظ هنا — وبعد كده المونتير بيقلّد ستايلك (الألوان، الخطوط، الحركة) في كل مشهد جديد.')); return; }
+        list.forEach(function (f) {
+          favBox.appendChild(h('div', { class: 'item' }, h('div', { class: 'grow' }, h('b', null, f.name), h('div', { class: 'hint' }, f.summary)),
+            UI.btn('اعمل زيه', function () { UI.safe('بيبني', function () { return S().favUse(f.id).then(function () { ok('✓'); }); }); }, 'small'),
+            UI.btn('×', function () { S().favRemove(f.id); drawFavs(); }, 'small ghost')));
+        });
+      };
+      view.appendChild(UI.card('ستايلي (المونتير بيتعلّم منه)', favBox));
+      drawFavs();
+
+      var kn = { style: 'pop', color: '#ffffff', accent: '#f97316', upper: false }, knStep = h('p', { class: 'hint' });
+      var kstyles = S().kitInfo().kinetic;
+      view.appendChild(UI.card('كلام متحرك مع الصوت (Kinetic Typography)',
+        UI.hint('اختار صوت أو فيديو فيه كلام: بيتفرّغ على جهازك (Whisper) وكل كلمة بتظهر في نفس لحظة ما بتتقال — عربي من اليمين، والكلمة الحالية ممكن تنوّر.'),
+        UI.row(UI.seg(kstyles.map(function (x) { return { value: x.id, label: x.name }; }), kn.style, function (v) { kn.style = v; })),
+        UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: kn.color, oninput: function (e) { kn.color = e.target.value; } }), h('input', { type: 'color', value: kn.accent, oninput: function (e) { kn.accent = e.target.value; } })),
+        UI.row(action('اختار الصوت واعمله', 'بيفرّغ ويعمل الكلام', function () { var f = EF.pickFile('الصوت / الفيديو', ['wav', 'mp3', 'm4a', 'aac', 'mp4', 'mov']); if (!f) return Promise.resolve(); return S().kinetic({ audio: f, style: kn.style, color: kn.color, accent: kn.accent, onStep: function (m) { knStep.textContent = m; } }).then(function (r) { knStep.textContent = r.words + ' كلمة'; ok('الكلام اتحرّك مع الصوت ✓'); }); }, 'primary')), knStep));
+
+      var va = { brief: '', captions: 'highlight' }, vaStep = h('p', { class: 'hint' });
+      view.appendChild(UI.card('صوتك ← فيديو أنيميشن',
+        UI.hint('سجّل الإعلان أو الفكرة بصوتك (أو اختار ملف): بيسمعه، ويعمل لكل جملة مشهد بيوضّحها (أيقونات، أرقام، رسوم، كاراكتر…) على توقيت كلامك بالظبط، والكابشن متحرك تحت، وصوتك تحتهم.'),
+        h('input', { class: 'grow', placeholder: 'البريف (اختياري): ستايل، ألوان البراند، نوع الجمهور…', oninput: function (e) { va.brief = e.target.value; } }),
+        UI.row(h('label', null, 'الكابشن'), UI.seg([{ value: 'highlight', label: 'الكلمة بتنوّر' }, { value: 'pop', label: 'كلمة كلمة' }, { value: '', label: 'من غير' }], va.captions, function (v) { va.captions = v; })),
+        UI.row(action('اختار التسجيل واعمل الفيديو', 'بيعمل الفيديو من صوتك', function () { var f = EF.pickFile('التسجيل', ['wav', 'mp3', 'm4a', 'aac', 'mp4', 'mov']); if (!f) return Promise.resolve(); return S().voiceAd({ audio: f, brief: va.brief, captions: va.captions, onStep: function (m) { vaStep.textContent = m; } }).then(function (r) { vaStep.textContent = r.sentences + ' جملة' + (r.say ? ' — ' + r.say : ''); ok('الفيديو اتبنى على صوتك ✓'); }); }, 'primary')), vaStep));
     }
   });
 
@@ -379,6 +422,19 @@
         UI.field('العمق', UI.slider(0.3, 2.5, 0.1, p3.strength, function (v) { return v.toFixed(1) + 'x'; }, function (v) { p3.strength = v; })),
         UI.row(action('اعملها ثري دي', 'بيعمل الثري دي', function () { return S().photo3D({ file: p3.file, depthFile: p3.depthFile, slices: p3.slices, move: p3.move, strength: p3.strength, onStep: function (m) { p3Step.textContent = m; } }).then(function (r) { p3Step.textContent = r.slices + ' طبقات · العمق: ' + r.depth; ok('اللقطة الثري دي جاهزة ✓'); }); }, 'primary'),
           action('موديل ثري دي حقيقي (fal.ai)', 'بيعمل الموديل', function () { return S().imageTo3DModel({ file: p3.file, onStep: function (m) { p3Step.textContent = m; } }).then(function (r) { p3Step.textContent = base(r.file); ok('الموديل اتحط في كومب ثري دي ✓ (محتاج AE 2024+)'); }); })), p3Step));
+      var rotoStep = h('p', { class: 'hint' }), ro = { mode: 'ai', seconds: 10 };
+      view.appendChild(UI.card('روتو: افصل الشخص عن الخلفية',
+        UI.hint('اختار لير الفيديو وحط المؤشر على البداية. بالـ AI (fal.ai): ماسك لكل فريم ← نسخة من الفيديو مقصوص فيها الشخص فوق الأصل — حط كلام أو جرافيك بينهم يبان "ورا" الشخص. أو Green / Blue Screen بـ Keylight.'),
+        UI.row(UI.seg([{ value: 'ai', label: 'AI (أي خلفية)' }, { value: 'green', label: 'Green Screen' }, { value: 'blue', label: 'Blue Screen' }], ro.mode, function (v) { ro.mode = v; })),
+        UI.field('لحد', UI.slider(1, 60, 1, ro.seconds, function (v) { return v + 's'; }, function (v) { ro.seconds = v; })),
+        UI.row(action('افصل', 'بيعمل روتو', function () { return S().roto({ mode: ro.mode, seconds: ro.seconds, onStep: function (m) { rotoStep.textContent = m; } }).then(function (r) { rotoStep.textContent = r.frames ? r.frames + ' فريم ✓' : ''; ok(r.cutout ? 'الشخص مقصوص في "' + r.cutout + '" ✓' : 'Keylight اتحط ✓'); }); }, 'primary')), rotoStep,
+        UI.hint('الـ AI بيتحاسب على كل فريم في fal.ai — جرّب على ثواني قليلة الأول.')));
+      var gen = { prompt: '', kind: 'image', ratio: '16:9', removeBg: false }, genStep = h('p', { class: 'hint' });
+      view.appendChild(UI.card('صورة / فيديو بالـ AI (fal.ai)',
+        h('textarea', { rows: 2, placeholder: 'مثلاً: خلفية أبستراكت برتقالي غامق بإضاءة سينمائية، أو كوباية قهوة على خلفية بيضا', oninput: function (e) { gen.prompt = e.target.value; } }),
+        UI.row(UI.seg([{ value: 'image', label: 'صورة' }, { value: 'video', label: 'فيديو (5 ث)' }], gen.kind, function (v) { gen.kind = v; }), UI.seg([{ value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }, { value: '1:1', label: '1:1' }], gen.ratio, function (v) { gen.ratio = v; })),
+        UI.row(h('label', null, h('input', { type: 'checkbox', onchange: function (e) { gen.removeBg = e.target.checked; } }), ' شيل الخلفية (عنصر PNG)')),
+        UI.row(action('اعمل', 'بيولّد', function () { return S().genMedia({ prompt: gen.prompt, kind: gen.kind, ratio: gen.ratio, removeBg: gen.removeBg, onStep: function (m) { genStep.textContent = m; } }).then(function (r) { genStep.textContent = base(r.file); ok('اتحط في الكومب ✓'); }); }, 'primary')), genStep));
     }
   });
 
@@ -405,6 +461,10 @@
         UI.row(h('label', null, 'بعدها'), UI.seg([{ value: 'attach', label: 'ليرز تمشي معاها' }, { value: 'pin', label: 'شاشة (Corner Pin)' }, { value: 'stabilize', label: 'ثبّت الفيديو' }], tk.mode, function (v) { tk.mode = v; })),
         UI.row(txt),
         UI.field('لحد', UI.slider(0, 30, 0.5, tk.duration, function (v) { return v ? v + 's' : 'آخر اللير'; }, function (v) { tk.duration = v; })),
+        UI.row(action('حط على السطح (أرض / حيطة / شاشة)', 'بيحط على السطح', function () {
+          var f = EF.pickFile('صورة أو فيديو يتحط على السطح (أو Cancel واكتب كلام فوق)', ['png', 'jpg', 'jpeg', 'mp4', 'mov']);
+          return S().surfacePlace({ points: tk.points, file: f || null, text: f ? '' : tk.text, onStep: function (m) { step.textContent = m; } }).then(function (r) { step.textContent = r.frames + ' فريم'; ok('اتلزق على السطح ✓ (عدّل المحتوى جوه "' + r.pinned + '")'); });
+        }), action('3D Camera Tracker', 'بيشغّل تراكر الكاميرا', function () { return S().trackCamera().then(function () { ok('الأفتر بيحلّل في الخلفية — بعد ما يخلص: اختار نقط ← كليك يمين ← Create Solid and Camera'); }); })),
         UI.row(action('تراك', 'بيتتبّع', function () { return S().track({ points: tk.points, mode: tk.mode, text: tk.text, duration: tk.duration, onStep: function (m) { step.textContent = m; } }).then(function (r) { step.textContent = r.frames + ' فريم' + (r.lost !== null ? ' — ⚠ التتبّع ضاع عند ' + r.lost + 's من البداية (حط نقطة أوضح وكمّل من هناك)' : ' ✓'); ok('التراكينج خلص ✓'); }); }, 'primary')), step));
       drawDots();
     }
@@ -435,6 +495,95 @@
         UI.row(h('label', null, 'المختار'), UI.seg([{ value: 'scale', label: 'يكبر ويصغر' }, { value: 'opacity', label: 'ينوّر' }], ch.link, function (v) { ch.link = v; })),
         UI.field('القوة', UI.slider(5, 100, 5, ch.react, function (v) { return v + '%'; }, function (v) { ch.react = v; })),
         UI.row(action('Audio React', 'بيسمع المزيكا', function () { var f = EF.pickFile('المزيكا', ['wav', 'mp3', 'm4a', 'aac']); if (!f) return Promise.resolve(); return S().audioReact({ audio: f, amount: ch.react, link: ch.link }).then(function (r) { ok(r.frames + ' فريم · ' + r.linked + ' لير بينبض ✓'); }); }))));
+    }
+  });
+
+  /* ——— معاينات متحركة: فريمات اتعملت في الأفتر مرة واتحفظت ——— */
+  function previewTile(kind, id, label, onPick, isOn) {
+    var frames = S().previewList ? S().previewList(kind, id) : [], img = null, k = 0, timer = null;
+    var tile = h('button', { type: 'button', class: 'pv-tile' + (isOn ? ' on' : ''), 'data-pv': kind + ':' + id, title: label, onclick: function () { onPick(id, tile); } });
+    if (frames.length) { img = h('img', { src: EF.fileUrl(frames[Math.min(3, frames.length - 1)]), alt: '' }); tile.appendChild(img); }
+    else tile.appendChild(h('span', { class: 'pv-ph' }, '▶'));
+    tile.appendChild(h('span', { class: 'pv-name' }, label));
+    if (frames.length > 1) {
+      tile.addEventListener('mouseenter', function () { timer = setInterval(function () { k = (k + 1) % frames.length; img.src = EF.fileUrl(frames[k]); }, 160); });
+      tile.addEventListener('mouseleave', function () { clearInterval(timer); img.src = EF.fileUrl(frames[Math.min(3, frames.length - 1)]); });
+    }
+    return tile;
+  }
+  function previewGrid(kind, list, current, onPick) {
+    var g = h('div', { class: 'pv-grid' });
+    list.forEach(function (x) { g.appendChild(previewTile(kind, x.id, x.name, function (id, tile) { Array.prototype.forEach.call(g.children, function (b) { b.classList.toggle('on', b === tile); }); onPick(id); }, x.id === current)); });
+    return g;
+  }
+  function previewButton(kind, ids, redraw) {
+    return UI.btn('🎞 اعمل المعاينات', function () { UI.safe('بيعمل المعاينات في الأفتر', function () { return S().previewMake({ kind: kind, ids: ids, onStep: function (m) { UI.status('معاينة: ' + m, 'busy'); } }).then(function (r) { UI.status('جاهز'); ok(r.made ? r.made + ' معاينة ✓' : 'المعاينات موجودة'); redraw(); }); }); }, 'small ghost');
+  }
+
+  /* ——— مؤثرات: ترانزيشنز، سايل، فيزيا ——— */
+  var fxo = { trans: 'zoomIn', tDur: 0.6, c1: '#f97316', c2: '#fbbf24', liquid: 'blob-calm', lsize: 0, ph: { mode: 'drop', gravity: 1, bounce: 0.5, duration: 4 } };
+  EF.tabs.push({
+    id: 'fx', label: 'مؤثرات', title: 'ترانزيشنز وسايل وفيزيا',
+    render: function (view) {
+      var K = S().kitInfo();
+      var tg = previewGrid('transition', K.transitions, fxo.trans, function (id) { fxo.trans = id; });
+      view.appendChild(UI.card('ترانزيشنز بين اللقطات',
+        UI.hint('اختار الكليبات (بترتيبها في الوقت) وهتتحط ترانزيشن على كل قطع بينهم — أو من غير اختيار: عند المؤشر. زووم وWhip ولفّة وجليتش ببلير Adjustment، وأشكال بتغطي الكادر وتكشف اللقطة الجاية.'),
+        tg, UI.field('المدة', UI.slider(0.2, 2, 0.05, fxo.tDur, function (v) { return v.toFixed(2) + 's'; }, function (v) { fxo.tDur = v; })),
+        UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: fxo.c1, oninput: function (e) { fxo.c1 = e.target.value; } }), h('input', { type: 'color', value: fxo.c2, oninput: function (e) { fxo.c2 = e.target.value; } })),
+        UI.row(action('حط الترانزيشن', 'بيحط ترانزيشنز', function () { return S().transitionApply({ kind: fxo.trans, duration: fxo.tDur, color: fxo.c1, color2: fxo.c2 }).then(function (r) { ok('ترانزيشن على ' + r.cuts + ' قطع ✓'); }); }, 'primary'), previewButton('transition', K.transitions.map(function (x) { return x.id; }), function () { EF.show('fx'); }))));
+      var lg = previewGrid('liquid', K.liquid, fxo.liquid, function (id) { fxo.liquid = id; });
+      view.appendChild(UI.card('أشكال سايلة (Liquid)',
+        UI.hint(K.liquid.length + ' شكل بيتحرك لوحده (لوب): بلوبات بتتشكّل، موج، مية بتملا، نقط لزجة، طرطشة، حبر، فقاعات… ليرز عادية تغيّر لونها وحجمها.'),
+        lg, UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: fxo.c1, oninput: function (e) { fxo.c1 = e.target.value; } }), h('input', { type: 'color', value: fxo.c2, oninput: function (e) { fxo.c2 = e.target.value; } })),
+        UI.field('الحجم', UI.slider(0, 600, 10, fxo.lsize, function (v) { return v ? v + 'px' : 'تلقائي'; }, function (v) { fxo.lsize = v; })),
+        UI.row(action('ضيف الشكل', 'بيضيف', function () { return S().liquidAdd({ preset: fxo.liquid, color: fxo.c1, color2: fxo.c2, size: fxo.lsize || undefined }).then(function (r) { ok(r.layers + ' لير ✓'); }); }, 'primary'), previewButton('liquid', K.liquid.map(function (x) { return x.id; }), function () { EF.show('fx'); }))));
+      view.appendChild(UI.card('فيزيا (زي Newton)',
+        UI.hint('اختار ليرز (كلام، أشكال، صور) وهي تقع وتخبط في بعض وفي الأرض والحيطان وتتنطط وتتدحرج — بتتخبز كي فريمز تعدّلها. سمّي اللير "ball / circle / كورة" عشان يتدحرج كدايرة.'),
+        UI.row(UI.seg(K.physics.map(function (x) { return { value: x.id, label: x.name }; }), fxo.ph.mode, function (v) { fxo.ph.mode = v; })),
+        UI.field('الجاذبية', UI.slider(0.2, 3, 0.1, fxo.ph.gravity, function (v) { return v.toFixed(1) + 'x'; }, function (v) { fxo.ph.gravity = v; })),
+        UI.field('النطّ', UI.slider(0, 0.95, 0.05, fxo.ph.bounce, function (v) { return Math.round(v * 100) + '%'; }, function (v) { fxo.ph.bounce = v; })),
+        UI.field('المدة', UI.slider(1, 10, 0.5, fxo.ph.duration, function (v) { return v + 's'; }, function (v) { fxo.ph.duration = v; })),
+        UI.row(action('شغّل الفيزيا', 'بيحسب الفيزيا', function () { return S().physics(fxo.ph).then(function (r) { ok(r.bodies + ' لير · ' + r.frames + ' فريم ✓'); }); }, 'primary'))));
+    }
+  });
+
+  /* ——— إنفوجرافيك: عدّاد وأرقام، رسوم بيانية، تايملاين ——— */
+  var cnt = { from: 0, to: 1500, duration: 2, format: 'number', currency: 'USD', decimals: 0, separator: ',', arabic: false, prefix: '', suffix: '', plus: false, style: 'plain', label: '', ease: 'expoOut', color: '#ffffff', accent: '#f97316', unitsArabic: false };
+  var cht = { type: 'column', data: 'مصر, 120\nالسعودية, 85\nالإمارات, 60\nالكويت, 40', title: 'المبيعات', fmt: 'number' };
+  EF.tabs.push({
+    id: 'info', label: 'إنفوجرافيك', title: 'عدّادات وإنفوجرافيك',
+    render: function (view) {
+      var K = S().kitInfo(), sample = h('div', { class: 'cnt-sample ltr' });
+      function opts() { var o = {}; for (var k in cnt) o[k] = cnt[k]; o.separator = cnt.separator === 'none' ? '' : cnt.separator === 'space' ? ' ' : cnt.separator; return o; }
+      function drawSample() { var o = opts(); sample.textContent = S().formatNumber(cnt.from, o) + '  →  ' + S().formatNumber(cnt.to, o); }
+      var num = function (k, ph) { return h('input', { type: 'number', class: 'grow ltr', value: cnt[k], placeholder: ph, oninput: function (e) { cnt[k] = +e.target.value; drawSample(); } }); };
+      var txt = function (k, ph) { return h('input', { class: 'grow', value: cnt[k], placeholder: ph, oninput: function (e) { cnt[k] = e.target.value; drawSample(); } }); };
+      var cur = h('select', { onchange: function (e) { cnt.currency = e.target.value; drawSample(); } }, K.currencies.map(function (c) { return h('option', { value: c, selected: c === cnt.currency }, c); }));
+      var chk = function (k, label) { return h('label', null, h('input', { type: 'checkbox', checked: cnt[k], onchange: function (e) { cnt[k] = e.target.checked; drawSample(); } }), ' ' + label); };
+      var sg = previewGrid('counter', K.counterStyles, cnt.style, function (id) { cnt.style = id; });
+      view.appendChild(UI.card('عدّاد أرقام',
+        sample,
+        UI.row(h('label', null, 'من'), num('from'), h('label', null, 'لحد'), num('to')),
+        UI.row(h('label', null, 'الشكل'), UI.seg(K.formats.map(function (x) { return { value: x.id, label: x.name }; }), cnt.format, function (v) { cnt.format = v; drawSample(); })),
+        UI.row(h('label', null, 'العملة'), cur, h('label', null, 'كسور'), UI.seg([0, 1, 2, 3].map(function (n) { return { value: n, label: String(n) }; }), cnt.decimals, function (v) { cnt.decimals = v; drawSample(); })),
+        UI.row(h('label', null, 'الفاصل'), UI.seg([{ value: ',', label: '1,000' }, { value: '.', label: '1.000' }, { value: 'space', label: '1 000' }, { value: 'none', label: '1000' }], cnt.separator, function (v) { cnt.separator = v; drawSample(); })),
+        UI.row(txt('prefix', 'قبل الرقم (مثلاً: +، ~)'), txt('suffix', 'بعد الرقم (مثلاً: عميل، كجم)')),
+        UI.row(chk('arabic', 'أرقام عربي ١٢٣'), chk('plus', 'علامة +'), chk('unitsArabic', 'ألف / مليون')),
+        UI.row(h('label', null, 'الحركة'), UI.seg([{ value: 'expoOut', label: 'سريع وبيهدى' }, { value: 'easeInOut', label: 'ناعم' }, { value: 'linear', label: 'ثابت' }, { value: 'backOut', label: 'بيعدّي ويرجع' }], cnt.ease, function (v) { cnt.ease = v; })),
+        UI.field('المدة', UI.slider(0.3, 10, 0.1, cnt.duration, function (v) { return v.toFixed(1) + 's'; }, function (v) { cnt.duration = v; })),
+        sg, UI.row(txt('label', 'عنوان تحت الرقم (اختياري)')),
+        UI.row(h('label', null, 'الألوان'), h('input', { type: 'color', value: cnt.color, oninput: function (e) { cnt.color = e.target.value; } }), h('input', { type: 'color', value: cnt.accent, oninput: function (e) { cnt.accent = e.target.value; } })),
+        UI.row(action('ضيف العدّاد', 'بيضيف العدّاد', function () { return S().counterAdd(opts()).then(function (r) { ok('العدّاد اتحط (' + r.layers + ' لير) ✓ — الرقم سلايدر "Count" تقدر تكي فريمه'); }); }, 'primary'), previewButton('counter', K.counterStyles.map(function (x) { return x.id; }), function () { EF.show('info'); }))));
+      drawSample();
+      var data = h('textarea', { rows: 5, class: 'ltr-ok', oninput: function (e) { cht.data = e.target.value; } }, cht.data);
+      var ttl = h('input', { class: 'grow', value: cht.title, placeholder: 'العنوان', oninput: function (e) { cht.title = e.target.value; } });
+      var cg = previewGrid('chart', K.charts, cht.type, function (id) { cht.type = id; });
+      view.appendChild(UI.card('رسوم بيانية وتايملاين',
+        UI.hint('اكتب البيانات سطر سطر: "الاسم, الرقم" (أو الصق من إكسل). للتايملاين: "السنة, الحدث". الأعمدة بتطلع ورا بعض، الأرقام بتعدّ، الخطوط بتترسم.'),
+        cg, UI.row(ttl), data,
+        UI.row(h('label', null, 'الأرقام'), UI.seg([{ value: 'number', label: '1,250' }, { value: 'compact', label: '1.2K' }, { value: 'currency', label: '$' }, { value: 'percent', label: '%' }], cht.fmt, function (v) { cht.fmt = v; })),
+        UI.row(action('اعمل الرسم', 'بيعمل الإنفوجرافيك', function () { return S().chartAdd({ type: cht.type, data: cht.data, title: cht.title, format: { format: cht.fmt, currency: cnt.currency, arabic: cnt.arabic } }).then(function (r) { ok(r.layers + ' لير ✓'); }); }, 'primary'), previewButton('chart', K.charts.map(function (x) { return x.id; }), function () { EF.show('info'); }))));
     }
   });
 

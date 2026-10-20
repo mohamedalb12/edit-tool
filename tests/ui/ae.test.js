@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'studio', 'track', 'character', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -192,6 +192,67 @@ test('studio, tracking, characters, workflow: each tool reaches AE with its choi
   await click('فصّل الشيب لليرز'); assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'explodeShapes')));
   await click('كنترول واحد لكل الألوان'); assert.ok(await page.evaluate(() => window.__calls.some(c => c.name === 'colorRig')));
   await click('رتّبهم ورا بعض'); assert.deepEqual(await call('sequenceLayers'), { gap: 0 });
+});
+
+test('effects, infographics, director extras: transitions, liquid, physics, counter options with a live sample, charts, favourites, kinetic, voice, roto, AI images, sizes', async () => {
+  await open('fx'); await clear();
+  await page.locator('[data-pv="transition:glitch"]').click();
+  await click('حط الترانزيشن'); assert.deepEqual(await call('transitionApply'), { kind: 'glitch', duration: 0.6 });
+  await page.locator('[data-pv="liquid:water-fill"]').click();
+  await click('ضيف الشكل'); assert.deepEqual(await call('liquidAdd'), { preset: 'water-fill' });
+  await page.locator('.seg button', { hasText: 'بتتفرتك' }).click();
+  await click('شغّل الفيزيا'); assert.deepEqual(await call('physics'), { mode: 'explode' });
+  await page.locator('#view .card', { hasText: 'أشكال سايلة' }).locator('button', { hasText: 'اعمل المعاينات' }).click(); await page.waitForTimeout(250);
+  assert.deepEqual(await call('previewMake'), { kind: 'liquid', n: 2 });
+  await shot('ae-08-fx');
+
+  await open('info'); await clear();
+  await page.fill('#view .card:first-of-type input[type=number] >> nth=1', '2500');
+  await page.locator('.seg button', { hasText: 'فلوس' }).click();
+  await page.locator('.seg button', { hasText: '1.000' }).click();
+  assert.match(await page.locator('.cnt-sample').textContent(), /\$2\.500/);
+  await page.locator('[data-pv="counter:ring"]').click();
+  await page.locator('#view .card', { hasText: 'عدّاد أرقام' }).locator('input[type=checkbox]').first().check();
+  await click('ضيف العدّاد');
+  assert.deepEqual(await call('counterAdd'), { from: 0, to: 2500, format: 'currency', currency: 'USD', style: 'ring', separator: '.', arabic: true });
+  await page.locator('[data-pv="chart:donut"]').click();
+  await click('اعمل الرسم');
+  const ch = await call('chartAdd'); assert.equal(ch.type, 'donut'); assert.match(ch.data, /مصر, 120/);
+  await shot('ae-09-info');
+
+  await open('director'); await clear();
+  await page.fill('#view textarea', 'عنوان'); await click('ابعت'); await page.waitForSelector('.fav-btn');
+  await page.locator('.fav-btn').last().click(); await page.waitForTimeout(150);
+  assert.deepEqual(await call('favSave'), { prompt: 'عنوان' });
+  assert.equal(await page.locator('#view .card', { hasText: 'ستايلي' }).locator('.item').count(), 1);
+  await page.evaluate(() => { window.EF.test.pickFile = () => '/audio/ad.wav'; });
+  await click('اختار الصوت واعمله'); assert.deepEqual(await call('kinetic'), { audio: '/audio/ad.wav', style: 'pop' });
+  await click('اختار التسجيل واعمل الفيديو'); assert.deepEqual(await call('voiceAd'), { audio: '/audio/ad.wav', brief: '', captions: 'highlight' });
+
+  await open('studio'); await clear();
+  await page.locator('#view .card', { hasText: 'روتو' }).locator('.seg button', { hasText: 'Green Screen' }).click();
+  await click('افصل'); assert.deepEqual(await call('roto'), { mode: 'green', seconds: 10 });
+  await page.fill('#view .card:has-text("صورة / فيديو بالـ AI") textarea', 'خلفية برتقالي');
+  await page.locator('#view .card', { hasText: 'صورة / فيديو بالـ AI' }).locator('button', { hasText: 'اعمل' }).last().click(); await page.waitForTimeout(200);
+  assert.deepEqual(await call('genMedia'), { prompt: 'خلفية برتقالي', kind: 'image', removeBg: false });
+
+  await open('routine'); await clear();
+  await page.locator('[data-size="4:5"]').click(); await page.locator('[data-size="1:1"]').click();
+  await click('اعمل المقاسات'); assert.deepEqual(await call('multiFormat'), { sizes: ['16:9', '9:16', '4:5'], fit: 'blur' });
+});
+
+test('⌘K favourites: ☆ pins a tool on top (kept per app), recents below', async () => {
+  await page.evaluate(() => { localStorage.removeItem('ef-pal-fav-ae'); localStorage.removeItem('ef-pal-recent-ae'); });
+  await page.keyboard.press('Control+KeyK');
+  await page.fill('.pal-in', 'عدّاد'); await page.waitForTimeout(120);
+  const top = await page.locator('.pal-item.on').getAttribute('data-id');
+  await page.keyboard.press('Control+KeyD'); await page.waitForTimeout(120);
+  await page.fill('.pal-in', ''); await page.waitForTimeout(120);
+  assert.match(await page.locator('.pal-sec').first().textContent(), /المفضلة/);
+  assert.equal(await page.locator('.pal-item').first().getAttribute('data-id'), top);
+  assert.match(await page.locator('.pal-item .pal-star.on').first().textContent(), /★/);
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('ef-pal-fav-ae'))), [top]);
+  await page.keyboard.press('Escape');
 });
 
 test('⌘K in After Effects lists AE tools (motion, curves, expressions, cameras)', async () => {

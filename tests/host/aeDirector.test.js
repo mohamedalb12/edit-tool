@@ -58,7 +58,8 @@ test('every library scene builds real layers in AE: new comp, order (first = top
   assert.equal(sc.numKeys, 5); assert.ok(sc.keys[0].outE && sc.keys[0].outE[0].influence > 0, 'eased');
   ae2.call('buildScene', { spec: aeScene.normalize(aeScene.buildLibrary('number-counter', { title: '250' }), {}).spec });
   const num = byName(ae2.project.activeItem, 'Number');
-  assert.match(num.property('ADBE Text Properties').property('ADBE Text Document').expression, /linear\(t,0,2,0,250\)/);
+  assert.match(num.property('ADBE Text Properties').property('ADBE Text Document').expression, /efFmt\(effect\("Count"\)\("Slider"\)/);
+  assert.deepEqual(num.property('ADBE Effect Parade').property('Count').property(1).keys.map(k => k.v), [0, 250], 'the count is a slider you can key');
   ae2.call('buildScene', { spec: aeScene.normalize(aeScene.buildLibrary('glitch-title', {}), {}).spec });
   const g = byName(ae2.project.activeItem, 'Title');
   const blur = g.property('ADBE Effect Parade').property('ADBE Motion Blur');
@@ -215,7 +216,7 @@ test('v2 build: svg path + trim + dash + morph keys, gradient (matted solid), re
   assert.equal(anims.numProperties, 2);
   const outOff = anims.property(2).property('ADBE Text Selectors').property(1).property('ADBE Text Percent Offset');
   assert.deepEqual(outOff.keys.map(k => [k.t, k.v]), [[5, -100], [5.5, 0]]);
-  assert.match(title.property('ADBE Text Properties').property('ADBE Text Document').expression, /'\$'\+n\.toFixed\(1\)\+'\+'/);
+  assert.match(title.property('ADBE Text Properties').property('ADBE Text Document').expression, /"decimals":1,.*"prefix":"\$","suffix":"\+"/);
   // precomp + particles (a precomp of expression-driven shapes)
   const sub = byName(c, 'Sub');
   assert.equal(sub.startTime, 1); assert.equal(sub.source.layerList.length, 2);

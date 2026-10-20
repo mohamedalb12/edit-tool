@@ -61,7 +61,12 @@ function make(spec, { width = 1920, height = 1080 } = {}) {
       get position() { return value(name, 'position', time); }, get rotation() { return value(name, 'rotation', time); }, get scale() { return value(name, 'scale', time); }, get anchorPoint() { return value(name, 'anchor', time); },
       get hasParent() { return !!L.parent; },
       get parent() { return layerObj(L.parent, time); },
-      effect(label) { const e = (L.effects || []).find(x => x.label === label || x.name === label); if (!e) throw new Error('no effect ' + label + ' on ' + name); const v = Object.values(e.params)[0]; return () => (v === undefined ? 0 : v); },
+      effect(label) {
+        const e = (L.effects || []).find(x => x.label === label || x.name === label); if (!e) throw new Error('no effect ' + label + ' on ' + name);
+        const keyed = Object.keys(L.keys || {}).find(k => k.indexOf('fxl:' + label + '|') === 0);
+        if (keyed) { const K = L.keys[keyed]; return () => { const t = time - (L.start || 0); if (t <= K[0].t) return K[0].v; for (let i = 0; i < K.length - 1; i++) if (t <= K[i + 1].t) return K[i].v + (K[i + 1].v - K[i].v) * (t - K[i].t) / (K[i + 1].t - K[i].t); return K[K.length - 1].v; }; }
+        const v = Object.values(e.params)[0]; return () => (v === undefined ? 0 : v);
+      },
       toComp(p) { return toComp(name, p, time); }, fromComp(p) { return fromComp(name, p, time); }
     };
     return self;
@@ -78,10 +83,10 @@ function make(spec, { width = 1920, height = 1080 } = {}) {
   function run(L, code, time, val) {
     const thisComp = { layer: n => layerObj(n, time), width, height };
     const thisLayer = layerObj(L.name, time);
-    const fn = new Function('time', 'value', 'thisComp', 'thisLayer', 'add', 'sub', 'mul', 'div', 'length', 'clamp', 'linear', 'radiansToDegrees', 'seedRandom', 'random', 'createPath', 'fromComp', 'toComp', 'index',
+    const fn = new Function('time', 'value', 'thisComp', 'thisLayer', 'add', 'sub', 'mul', 'div', 'length', 'clamp', 'linear', 'radiansToDegrees', 'seedRandom', 'random', 'createPath', 'fromComp', 'toComp', 'index', 'effect', 'thisProperty',
       // the last expression statement is the value
       lastAsReturn(code));
-    return fn(time, val, thisComp, thisLayer, add, sub, mul, div, length, clamp, linear, radiansToDegrees, seedRandom, random, createPath, p => thisLayer.fromComp(p), p => thisLayer.toComp(p), 1);
+    return fn(time, val, thisComp, thisLayer, add, sub, mul, div, length, clamp, linear, radiansToDegrees, seedRandom, random, createPath, p => thisLayer.fromComp(p), p => thisLayer.toComp(p), 1, n => thisLayer.effect(n), {});
   }
   return { value, toComp, fromComp, layer: layerObj };
 }

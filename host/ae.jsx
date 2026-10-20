@@ -600,6 +600,7 @@ EFM.target = function (L, key) {
       for (i = 1; i <= fx.numProperties; i++) { e = fx.property(i); if (e.matchName === parts[0]) return EFM.find(e, parts[1]); }
       return null;
     }
+    if (key === 'text') return L instanceof TextLayer ? L.property('ADBE Text Properties').property('ADBE Text Document') : null;
     m = /^shape:path\.(\d+)$/.exec(key);
     if (m) return EFM.findNth(L.property('ADBE Root Vectors Group'), 'ADBE Vector Shape', +m[1]);
     if (key.indexOf('geometry:') === 0) return EFM.find(L.property('ADBE Extrsn Options Group'), { depth: 'ADBE Extrsn Depth', bevelDepth: 'ADBE Bevel Depth', bevelStyle: 'ADBE Bevel Styles' }[key.substr(9)]);
@@ -1038,7 +1039,7 @@ EFMAPI.rigInfo = function () {
     if (x instanceof CameraLayer || x instanceof LightLayer || x.nullLayer) continue;
     try {
       var r = x.sourceRectAtTime(c.time, false), t = EFM.tr;
-      out.push({ name: x.name, rect: { left: r.left, top: r.top, width: r.width, height: r.height }, anchor: t(x, 'ADBE Anchor Point').value, position: t(x, 'ADBE Position').value, scale: t(x, 'ADBE Scale').value, rotation: t(x, 'ADBE Rotate Z').value, parent: x.parent ? x.parent.name : null, threeD: !!x.threeDLayer });
+      out.push({ name: x.name, inPoint: x.inPoint, rect: { left: r.left, top: r.top, width: r.width, height: r.height }, anchor: t(x, 'ADBE Anchor Point').value, position: t(x, 'ADBE Position').value, scale: t(x, 'ADBE Scale').value, rotation: t(x, 'ADBE Rotate Z').value, parent: x.parent ? x.parent.name : null, threeD: !!x.threeDLayer });
     } catch (e) {}
   }
   return { layers: out, comp: { width: c.width, height: c.height, time: c.time } };
@@ -1154,6 +1155,110 @@ EFMAPI.colorRig = function () {
     if (!n) throw new Error('مفيش ألوان أشكال أو Fill في الكومب');
     return { colors: list, linked: n };
   });
+};
+
+/* ---------------- roto / keying / camera tracking ---------------- */
+/** the AI matte (a black / white video) under a copy of the footage as its luma matte → the person cut out on top */
+EFMAPI.rotoApply = function (a) {
+  var c = EFM.comp(), L = EFM.layerByName(c, a.layer);
+  if (!L) throw new Error('مش لاقي اللير: ' + a.layer);
+  return EFM.undo('روتو', function () {
+    var cut = L.duplicate(); cut.name = L.name + ' (EF Cutout)';
+    var item = app.project.importFile(new ImportOptions(new File(a.matte)));
+    try { item.parentFolder = EFM.folder('EditFast Roto'); } catch (eF) {}
+    var M = c.layers.add(item); M.name = L.name + ' (EF Matte)';
+    M.startTime = a.start; M.inPoint = a.start; M.outPoint = Math.min(c.duration, a.start + item.duration);
+    var t = EFM.tr, k = L.source.width / item.width;
+    t(M, 'ADBE Anchor Point').setValue([t(L, 'ADBE Anchor Point').value[0] / k, t(L, 'ADBE Anchor Point').value[1] / k]);
+    t(M, 'ADBE Position').setValue(t(L, 'ADBE Position').value);
+    var s = t(L, 'ADBE Scale').value; t(M, 'ADBE Scale').setValue([s[0] * k, s[1] * k]);
+    t(M, 'ADBE Rotate Z').setValue(t(L, 'ADBE Rotate Z').value);
+    if (L.parent) M.parent = L.parent;
+    cut.moveBefore(L); M.moveBefore(cut);
+    EFM.setMatte(cut, M, 'luma');
+    return { cutout: cut.name, matte: M.name };
+  });
+};
+/** green / blue screen: Keylight on the footage (+ a little choke and spill clean-up) */
+EFMAPI.keyApply = function (a) {
+  var c = EFM.comp(), L = EFM.layerByName(c, a.layer);
+  if (!L) throw new Error('مش لاقي اللير: ' + a.layer);
+  return EFM.undo('كيينج', function () {
+    var fx = L.property('ADBE Effect Parade'), k = null;
+    try { k = fx.addProperty('Keylight 906'); } catch (e) {}
+    if (!k) throw new Error('Keylight مش موجود في الأفتر ده');
+    var col = a.color === 'blue' ? [0, 0.28, 1, 1] : [0, 0.85, 0.2, 1];
+    var p = EFM.find(k, 'Screen Colour'); if (p) p.setValue(col);
+    try { var g = EFM.find(k, 'Screen Gain'); if (g) g.setValue(105); } catch (e2) {}
+    try { var ch = fx.addProperty('ADBE Simple Choker'); EFM.find(ch, 'Choke Matte').setValue(1); } catch (e3) {}
+    return { keyed: L.name };
+  });
+};
+/** AE's own 3D Camera Tracker on the footage (analysis runs in the background) */
+EFMAPI.trackCamera = function (a) {
+  var c = EFM.comp(), L = EFM.layerByName(c, a.layer), id = 0, i;
+  if (!L) throw new Error('اختار لير الفيديو');
+  for (i = 1; i <= c.numLayers; i++) c.layer(i).selected = false;
+  L.selected = true;
+  try { id = app.findMenuCommandId('Track Camera'); } catch (e0) {}
+  if (!id) id = 3020;
+  app.executeCommand(id);
+  return { layer: L.name, command: id };
+};
+
+/* ---------------- one comp → every size ---------------- */
+/** new comps 16:9 / 9:16 / 1:1 / 4:5 holding the active comp (fill, fit, or fit over a blurred fill), optionally rendered */
+EFMAPI.multiFormat = function (a) {
+  var src = EFM.comp(), out = [], i;
+  if (a.render) EFM.needWrite();
+  return EFM.undo('مقاسات', function () {
+    for (i = 0; i < a.sizes.length; i++) {
+      var z = a.sizes[i], c = app.project.items.addComp(src.name + ' ' + z.label, z.w, z.h, 1, src.duration, 1 / src.frameDuration);
+      try { c.parentFolder = EFM.folder('EditFast Formats'); } catch (eF) {}
+      var fill = Math.max(z.w / src.width, z.h / src.height) * 100, fit = Math.min(z.w / src.width, z.h / src.height) * 100;
+      if (a.fit === 'blur') {
+        var B = c.layers.add(src); B.name = 'Background'; EFM.tr(B, 'ADBE Scale').setValue([fill, fill]);
+        var bl = B.property('ADBE Effect Parade').addProperty('ADBE Gaussian Blur 2'); bl.property(1).setValue(60);
+        try { var ex = B.property('ADBE Effect Parade').addProperty('ADBE Exposure2'); EFM.find(ex, 'Exposure').setValue(-1); } catch (eX) {}
+      }
+      var L = c.layers.add(src); L.name = src.name;
+      var s = a.fit === 'fill' ? fill : fit; EFM.tr(L, 'ADBE Scale').setValue([s, s]);
+      var item = { comp: c.name, size: z.label };
+      if (a.render) {
+        var rq = app.project.renderQueue.items.add(c), om = rq.outputModule(1), names = om.templates || [], j;
+        for (j = 0; j < names.length; j++) if (/H\.264/i.test(names[j]) && !/^_HIDDEN/.test(names[j])) { om.applyTemplate(names[j]); break; }
+        om.file = new File(a.dir + '/' + src.name.replace(/[\\\/:*?"<>|]/g, '_') + ' ' + z.label.replace(':', 'x') + '.mp4');
+        item.path = om.file.fsName;
+      }
+      out.push(item);
+    }
+    if (a.render) { if (a.ame) app.project.renderQueue.queueInAME(true); else app.project.renderQueue.render(); }
+    return { comps: out };
+  });
+};
+
+/* ---------------- previews: build a scene off-screen, save frames, throw it away ---------------- */
+EFM.removeDeep = function (c) {
+  var srcs = [], i;
+  for (i = 1; i <= c.numLayers; i++) { try { var s = c.layer(i).source; if (s && (s instanceof CompItem || (s.mainSource && s.mainSource instanceof SolidSource))) srcs.push(s); } catch (e) {} }
+  c.remove();
+  for (i = 0; i < srcs.length; i++) { try { if (srcs[i] instanceof CompItem) EFM.removeDeep(srcs[i]); else if (!srcs[i].usedIn || !srcs[i].usedIn.length) srcs[i].remove(); } catch (e2) {} }
+};
+EFMAPI.scenePreview = function (a) {
+  EFM.needWrite();
+  var s = a.spec, cs = s.comp, keep = app.project.activeItem, out = [], i;
+  EFM.warn = [];
+  app.beginUndoGroup('EF preview');
+  try {
+    var c = app.project.items.addComp('EF Preview', cs.width, cs.height, 1, cs.duration, cs.fps);
+    if (cs.renderer === '3d') EFM.renderer3d(c);
+    if (cs.bg) c.layers.addSolid([cs.bg[0], cs.bg[1], cs.bg[2]], 'Background', c.width, c.height, 1, c.duration);
+    EFM.fillComp(c, s.layers);
+    for (i = 0; i < a.times.length; i++) { var f = new File(a.dir + '/' + i + '.png'); try { c.saveFrameToPng(Math.min(a.times[i], c.duration - c.frameDuration), f); out.push(f.fsName); } catch (e) {} }
+    EFM.removeDeep(c);
+  } finally { app.endUndoGroup(); }
+  try { if (keep) keep.openInViewer(); } catch (e3) {}
+  return { files: out };
 };
 
 /* ---------------- shapes, lower thirds ---------------- */

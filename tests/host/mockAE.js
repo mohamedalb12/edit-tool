@@ -87,9 +87,9 @@ function effect(matchName) {
   }
   else {
     const def = Object.values(require('../../core/aeScene').EFFECTS).find(d => d.match === matchName);
-    const plugin = { 'VIDEOCOPILOT 3DSaber': ['Glow Intensity', 'Core Size', 'Start Offset'] }[matchName];
+    const plugin = { 'VIDEOCOPILOT 3DSaber': ['Glow Intensity', 'Core Size', 'Start Offset'], 'ADBE Simple Choker': ['Choke Matte'], 'ADBE Offset': ['Shift Center To'], 'ADBE Shift Channels': ['Take Green From', 'Take Blue From'], 'ADBE Geometry2': ['Position', 'Scale', 'Rotation', 'Shutter Angle', "Use Composition's Shutter Angle"], 'Keylight 906': ['Screen Colour', 'Screen Gain'] }[matchName];
     if (!def && !plugin) return null;
-    for (const pm of def ? Object.values(def.params) : plugin) if (!g.property(pm) && !(matchName === 'ADBE Fractal Noise' && pm === 'Scale')) g.add(new Prop(pm, pm, /Color|Highlights|Midtones|Shadows$/.test(pm) && !/Shadows/.test(matchName) ? [0, 0, 0, 1] : /Center|^Start$|^End$|-0001$|-0003$/.test(pm) && matchName !== 'ADBE Gaussian Blur 2' && matchName !== 'ADBE Noise' && !/Motion Blur|Tint|Turbulent|Glo2/.test(matchName) ? [0, 0] : 0, PVT.OneD));
+    for (const pm of def ? Object.values(def.params) : plugin) if (!g.property(pm) && !(matchName === 'ADBE Fractal Noise' && pm === 'Scale')) g.add(new Prop(pm, pm, /^(Position|Shift Center To)$/.test(pm) ? [0, 0] : /Screen Colour/.test(pm) ? [0, 1, 0, 1] : /Color|Highlights|Midtones|Shadows$/.test(pm) && !/Shadows/.test(matchName) ? [0, 0, 0, 1] : /Center|^Start$|^End$|-0001$|-0003$/.test(pm) && matchName !== 'ADBE Gaussian Blur 2' && matchName !== 'ADBE Noise' && !/Motion Blur|Tint|Turbulent|Glo2/.test(matchName) ? [0, 0] : 0, PVT.OneD));
     if (matchName === 'ADBE Fractal Noise') g.add(new Group('ADBE Fractal Noise Transform', 'Transform')).add(new Prop('Scale', 'Scale', 100, PVT.OneD));
   }
   return g;
@@ -237,7 +237,7 @@ function loadAE({ dir } = {}) {
       },
       addCamera(name) { const L = push(new K.CameraLayer(c, name, 'camera'), false); const co = L.root.add(new Group('ADBE Camera Options Group', 'Camera Options')); [['ADBE Camera Zoom', 'Zoom', 2666.7], ['ADBE Camera Depth of Field', 'Depth of Field', 0], ['ADBE Camera Focus Distance', 'Focus Distance', 2666.7], ['ADBE Camera Aperture', 'Aperture', 25], ['ADBE Camera Blur Level', 'Blur Level', 100]].forEach(x => co.add(new Prop(x[0], x[1], x[2], PVT.OneD))); return L; },
       addLight(name) { const L = push(new K.LightLayer(c, name, 'light'), false); L.lightType = 0; const o = L.root.add(new Group('ADBE Light Options Group', 'Light Options')); ['ADBE Light Intensity', 'ADBE Light Casts Shadows', 'ADBE Light Shadow Diffusion', 'ADBE Light Cone Angle', 'ADBE Light Cone Feather 2'].forEach(m => o.add(new Prop(m, m, 0, PVT.OneD))); o.add(new Prop('ADBE Light Color', 'Color', [1, 1, 1, 1], PVT.COLOR)); return L; },
-      addSolid(color, name, w, hh) { const L = push(new K.AVLayer(c, name, 'solid')); L.source = { name, width: w, height: hh, mainSource: Object.assign(new K.SolidSource(), { color }) }; return L; },
+      addSolid(color, name, w, hh) { const L = push(new K.AVLayer(c, name, 'solid')); const src = Object.assign(new K.FootageItem(), { name, id: IDS++, width: w, height: hh, usedIn: [], mainSource: Object.assign(new K.SolidSource(), { color }) }); src.remove = () => { const i = items.indexOf(src); if (i >= 0) items.splice(i, 1); }; items.push(src); L.source = src; return L; },
       add(item) { const L = push(new K.AVLayer(c, item.name, 'footage')); L.source = item; if (item.usedIn) item.usedIn.push(c); return L; }
     };
     c.duplicate = () => {
@@ -257,6 +257,7 @@ function loadAE({ dir } = {}) {
       N.name = L.name + ' 2'; N.inPoint = L.inPoint; N.outPoint = L.outPoint; copyTree(L.root, N.root);
       N.moveBefore(L); return N;
     };
+    c.remove = () => { const i = items.indexOf(c); if (i >= 0) items.splice(i, 1); c.removed = true; if (project._active === c) project._active = null; };
     c.openInViewer = () => { project._active = c; return c; };
     c.saveFrameToPng = (t, f) => { fs.mkdirSync(path.dirname(f.fsName), { recursive: true }); fs.writeFileSync(f.fsName, require('../../core/util').makePng(16, 9, [249, 115, 22, 255])); };
     c.exportAsMotionGraphicsTemplate = (overwrite, p) => {
