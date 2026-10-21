@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'claude', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -296,8 +296,29 @@ test('settings: "test every tool" runs the self-test and shows a copyable report
   assert.match(await page.locator('.ft-report').inputValue(), /Logo PNG 3d/);
   assert.ok(await page.locator('button', { hasText: 'انسخ التقرير' }).isVisible());
   assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
-  assert.ok(await page.locator('.claude-card').isVisible(), 'the Claude card is in the settings');
-  assert.match(await page.locator('.claude-card').textContent(), /ثبّت في Claude Desktop/);
+});
+
+test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
+  await open('claude');
+  assert.match(await page.locator('#tab-title').textContent(), /Claude/);
+  assert.match(await page.locator('.claude-status').textContent(), /البانل مش جاهز|جاهز لـ Claude/);
+  assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
+  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
+  assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
+  await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'ae_build_scene', args: {} }); });
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-row.run').first().textContent(), /build scene/);
+  assert.match(await page.locator('.claude-status').textContent(), /آخر مرة Claude كلّم البانل: دلوقتي/);
+  await page.evaluate(() => { EF.claude._event({ phase: 'done', name: 'ae_build_scene', ms: 1500 }); EF.claude._event({ phase: 'start', name: 'ae_tool', args: {} }); EF.claude._event({ phase: 'error', name: 'ae_tool', ms: 300, error: 'مفيش كليب' }); });
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-row.ok').first().textContent(), /1\.5s/);
+  assert.match(await page.locator('.claude-row.err').first().textContent(), /مفيش كليب/);
+  await page.screenshot({ path: path.join(SHOTS, 'ae-claude.png'), fullPage: true });
+  await page.locator('button', { hasText: 'وقّف Claude مؤقتًا' }).click(); await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-status').textContent(), /متوقّف مؤقتًا/);
+  assert.equal(await page.evaluate(() => EF.claude.info().paused), true);
+  await page.locator('button', { hasText: 'شغّل Claude تاني' }).click(); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => EF.claude.info().paused), false);
 });
 
 test('no page errors in the After Effects panel', () => { assert.deepEqual(errors, []); });

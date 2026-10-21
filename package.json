@@ -1,6 +1,6 @@
 {
   "name": "editfast",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "EditFast — إضافة مونتاج ذكية لبريمير برو (CEP)",
   "private": true,
   "scripts": {

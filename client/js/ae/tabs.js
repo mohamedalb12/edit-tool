@@ -700,7 +700,6 @@
         });
       }, 'primary')), ftStep, ftRep, ftCopy,
         UI.hint('بيشغّل كل أداة بجد في الأفتر ده على كومبات تجربة (لوجو، صورة، فيديو، صوت بيتعملوا لوحدهم)، والأفتر نفسه بيفحص كل إكسبريشن، وبعدين بيمسح كل اللي عمله ويرجّعك للكومب بتاعك. مفيش AI ولا فلوس بتتصرف. بياخد دقيقة أو اتنين.')), view.firstChild);
-      if (EF.claude) { try { view.insertBefore(EF.claude.card(), view.firstChild); } catch (eC) { console.warn(eC); } }
       view.appendChild(UI.card('فحص الأفتر', UI.row(action('افحص', 'بيفحص', function () { return S().selfTest().then(function (r) { out.textContent = JSON.stringify(r, null, 1); }); })), out,
         UI.hint('فولدر القوالب: ' + S().templatesDir())));
     }

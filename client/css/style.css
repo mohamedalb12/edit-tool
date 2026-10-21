@@ -671,3 +671,19 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .fav-btn.on { color: #fb7185; border-color: rgba(251, 113, 133, .4); }
 .hl-poly { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .hl-poly polygon { fill: rgba(249, 115, 22, .25); stroke: #fb923c; stroke-width: .6; vector-effect: non-scaling-stroke; }
+
+/* تاب Claude */
+.claude-status { display: grid; gap: 6px; margin-bottom: 8px; }
+.claude-st { padding: 7px 10px; border-radius: 10px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line-2); font-size: 12.5px; }
+.claude-st b { display: inline-block; width: 16px; text-align: center; }
+.claude-st.ok { border-color: rgba(52, 211, 153, .35); } .claude-st.ok b { color: var(--ok); }
+.claude-st.bad { border-color: rgba(251, 113, 133, .35); } .claude-st.bad b { color: var(--err); }
+.claude-st.wait b { color: var(--muted, #a8a29e); }
+.claude-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.claude-examples .chip { text-align: start; white-space: normal; }
+.claude-log { display: grid; gap: 4px; max-height: 320px; overflow: auto; }
+.claude-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 6px; align-items: center; padding: 5px 8px; border-radius: 8px; background: rgba(255, 255, 255, .025); font-size: 12px; }
+.claude-row .tm { color: var(--muted, #a8a29e); font-size: 11px; }
+.claude-row.ok .ic { color: var(--ok); } .claude-row.err .ic, .claude-row.blocked .ic { color: var(--err); }
+.claude-row.run { background: rgba(249, 115, 22, .08); }
+.claude-row .hint { grid-column: 2 / -1; margin: 0; }

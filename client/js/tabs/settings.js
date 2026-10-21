@@ -91,7 +91,6 @@
       var diagCard = UI.card('الفحص', UI.hint('بيجرّب كل أمر الإضافة بتستخدمه على سيكوينس تجربة (وبيمسحها بعدها)، وبيدوّر على البرامج والنت. لو أداة مش شغالة هيقولك ليه. لو حاجة وقعت معاك دوس "انسخ تقرير المشكلة" وابعتهولي.'),
         UI.row(runDiag, report, diagStep), diagBox);
       diagCard.id = 'diag';
-      if (EF.claude) { try { view.appendChild(EF.claude.card()); } catch (eC) { console.warn(eC); } }
       view.appendChild(diagCard);
       if (S.lastSelfTest) drawDiag(S.lastSelfTest);
       view.appendChild(UI.card('المفاتيح', UI.hint('بتتحفظ على جهازك بس (~/.editfast). كل الذكاء الاصطناعي بيعدّي من OpenRouter بمفتاحك.'),

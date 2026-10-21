@@ -9,6 +9,7 @@
    */
   EF.GROUPS = [
     { id: 'agent', label: 'المونتير', title: 'المونتير الذكي', members: ['agent', 'auto', 'autofx'], names: { agent: 'شات', auto: 'مونتاج تلقائي', autofx: 'مؤثرات على الكلام' } },
+    { id: 'claude', label: 'Claude', title: 'Claude يمنتج هنا', members: ['claude'] },
     { id: 'transcribe', label: 'كابشن', title: 'التفريغ والكابشن', members: ['transcribe', 'search'], names: { transcribe: 'تفريغ وكابشن', search: 'بحث وفصول وماركرز' } },
     { id: 'quickcut', label: 'القص', title: 'القص', members: ['quickcut', 'multicam'], names: { quickcut: 'سكتات وتكرار', multicam: 'مالتي كام' } },
     { id: 'audio', label: 'الصوت', title: 'الصوت', members: ['audio'] },

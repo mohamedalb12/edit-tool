@@ -59,13 +59,13 @@ async function open(id) {
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 12 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
+test('boots: 13 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 12);
+  assert.deepEqual(ids, ['agent', 'claude', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 13);
   // every screen lives inside some tool ("organize" is back, next to relink)
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
-  assert.equal(members.length, 29); assert.ok(members.includes('organize'));
+  assert.equal(members.length, 30); assert.ok(members.includes('organize'));
   assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
@@ -325,7 +325,6 @@ test('B-Roll: search with sources, click places footage', async () => {
 
 test('الإعدادات: keys (with a Key-ID check), a model picker for every AI feature, test results next to each', async () => {
   await open('settings'); await clearCalls();
-  assert.ok(await page.locator('.claude-card').isVisible(), 'the Claude card is in the settings');
   const labels = await page.$$eval('#view label', hs => hs.map(h => h.textContent));
   for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll', 'اختيار الهوك (المونتاج التلقائي)', 'أقوى مقاطع الشورتس', 'عناوين الثامبنيل', 'ترجمة الكابشن', 'تعديلات العميل']) assert.ok(labels.includes(f), f);
   assert.equal(await page.locator('#view .mp-input').count(), 16, 'general default + 15 features');
@@ -366,6 +365,29 @@ test('narrow panel (320px): no horizontal overflow on any tab', async () => {
     assert.ok(over <= 1, id + ' overflows by ' + over);
   }
   await page.setViewportSize({ width: 420, height: 820 });
+});
+
+test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
+  await open('claude');
+  assert.match(await page.locator('#tab-title').textContent(), /Claude/);
+  assert.match(await page.locator('.claude-status').textContent(), /البانل مش جاهز|جاهز لـ Claude/);
+  assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
+  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
+  assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
+  await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'premiere_add_captions', args: {} }); });
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-row.run').first().textContent(), /add captions/);
+  assert.match(await page.locator('.claude-status').textContent(), /آخر مرة Claude كلّم البانل: دلوقتي/);
+  await page.evaluate(() => { EF.claude._event({ phase: 'done', name: 'premiere_add_captions', ms: 1500 }); EF.claude._event({ phase: 'start', name: 'premiere_place_clip', args: {} }); EF.claude._event({ phase: 'error', name: 'premiere_place_clip', ms: 300, error: 'مفيش كليب' }); });
+  await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-row.ok').first().textContent(), /1\.5s/);
+  assert.match(await page.locator('.claude-row.err').first().textContent(), /مفيش كليب/);
+  await page.screenshot({ path: path.join(SHOTS, 'claude.png'), fullPage: true });
+  await page.locator('button', { hasText: 'وقّف Claude مؤقتًا' }).click(); await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-status').textContent(), /متوقّف مؤقتًا/);
+  assert.equal(await page.evaluate(() => EF.claude.info().paused), true);
+  await page.locator('button', { hasText: 'شغّل Claude تاني' }).click(); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => EF.claude.info().paused), false);
 });
 
 test('no page errors across the whole session', () => { assert.deepEqual(errors, []); });

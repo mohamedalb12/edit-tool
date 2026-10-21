@@ -48,7 +48,15 @@ function version() {
   try { const m = fs.readFileSync(path.join(ROOT, 'CSXS', 'manifest.xml'), 'utf8').match(/ExtensionBundleVersion="([\d.]+)"/); if (m) return m[1]; } catch (_) {}
   return '1.0.0';
 }
+/** is Claude Desktop on this machine, and is EditFast installed in it (as an extension or in its config)? */
+function desktopStatus({ home = require('os').homedir(), platform = process.platform, appData = process.env.APPDATA } = {}) {
+  const dir = platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Claude') : platform === 'win32' ? path.join(appData || path.join(home, 'AppData', 'Roaming'), 'Claude') : path.join(home, '.config', 'Claude');
+  const out = { dir, app: fs.existsSync(dir), installed: false, how: null };
+  try { for (const d of fs.readdirSync(path.join(dir, 'Claude Extensions'))) if (/editfast/i.test(d)) { out.installed = true; out.how = 'extension'; } } catch (_) {}
+  try { const c = JSON.parse(fs.readFileSync(path.join(dir, 'claude_desktop_config.json'), 'utf8')); if (c.mcpServers && Object.keys(c.mcpServers).some(k => /editfast/i.test(k))) { out.installed = true; out.how = out.how || 'config'; } } catch (_) {}
+  return out;
+}
 /** the Claude Code command for this install */
 function claudeCodeCommand() { return 'claude mcp add editfast -- node "' + path.join(MCP, 'server.js') + '"'; }
 
-module.exports = { toolsJson, writeTools, manifest, build, claudeCodeCommand, version };
+module.exports = { toolsJson, writeTools, manifest, build, claudeCodeCommand, version, desktopStatus };
