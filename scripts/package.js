@@ -7,7 +7,7 @@ const zipLib = require('../core/zip');
 
 const ROOT = path.join(__dirname, '..');
 const pkg = require('../package.json');
-const INCLUDE = ['CSXS', 'client', 'core', 'host', 'assets', 'remotion/src', 'remotion/public', 'remotion/package.json', 'remotion/package-lock.json', 'remotion/render.mjs', 'remotion/.gitignore', 'scripts/install-windows.bat', 'scripts/install-windows.ps1', 'scripts/install-mac.command', 'README.md', '.debug'];
+const INCLUDE = ['CSXS', 'client', 'core', 'host', 'assets', 'mcp', 'remotion/src', 'remotion/public', 'remotion/package.json', 'remotion/package-lock.json', 'remotion/render.mjs', 'remotion/.gitignore', 'scripts/install-windows.bat', 'scripts/install-windows.ps1', 'scripts/install-mac.command', 'README.md', '.debug'];
 
 function list(p, out = []) {
   const abs = path.join(ROOT, p);
@@ -17,12 +17,17 @@ function list(p, out = []) {
   return out;
 }
 
+// the MCP server for Claude: tools.json in step with the code, and EditFast.mcpb for Claude Desktop
+require('../core/mcpBundle').writeTools(pkg.version);
 const files = INCLUDE.flatMap(p => list(p));
 fs.mkdirSync(path.join(ROOT, 'dist'), { recursive: true });
 const out = path.join(ROOT, 'dist', `EditFast-${pkg.version}.zip`);
 const buf = zipLib.create(files.map(rel => ({ name: 'EditFast/' + rel.split(path.sep).join('/'), data: fs.readFileSync(path.join(ROOT, rel)), mode: rel.endsWith('.command') ? 0o100755 : 0o100644 })));
 fs.writeFileSync(out, buf);
 console.log(`${out} — ${files.length} files, ${(fs.statSync(out).size / 1024).toFixed(0)} KB`);
+const mcpb = path.join(ROOT, 'dist', 'EditFast.mcpb');
+fs.writeFileSync(mcpb, require('../core/mcpBundle').build(pkg.version));
+console.log(mcpb);
 
 // --release "ملاحظات": publish to updates/ (the panel checks updates/latest.json and updates itself)
 const ri = process.argv.indexOf('--release');

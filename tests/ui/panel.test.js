@@ -325,6 +325,7 @@ test('B-Roll: search with sources, click places footage', async () => {
 
 test('الإعدادات: keys (with a Key-ID check), a model picker for every AI feature, test results next to each', async () => {
   await open('settings'); await clearCalls();
+  assert.ok(await page.locator('.claude-card').isVisible(), 'the Claude card is in the settings');
   const labels = await page.$$eval('#view label', hs => hs.map(h => h.textContent));
   for (const f of ['المونتير الذكي — قوي', 'المونتير الذكي — قوي جدًا', 'المؤثرات التلقائية', 'ترجمة وصف المؤثر الصوتي', 'التصحيح الإملائي بعد التفريغ', 'فصول يوتيوب', 'بناء المشاهد المتحركة', 'كلمات بحث الـ B-Roll', 'اختيار الهوك (المونتاج التلقائي)', 'أقوى مقاطع الشورتس', 'عناوين الثامبنيل', 'ترجمة الكابشن', 'تعديلات العميل']) assert.ok(labels.includes(f), f);
   assert.equal(await page.locator('#view .mp-input').count(), 16, 'general default + 15 features');

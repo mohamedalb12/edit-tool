@@ -489,11 +489,12 @@ EF.placedClip = function (track, item, t, fps) {
 };
 
 /** lay one item at t for dur seconds on track ti, without the full source length ever covering later clips */
-EF.layItem = function (seq, item, kind, ti, t, dur, fps) {
-  var tracks = EF.tracks(seq, kind), setIO = false;
-  if (dur > 0) {
+EF.layItem = function (seq, item, kind, ti, t, dur, fps, srcIn) {
+  var tracks = EF.tracks(seq, kind), setIO = false, si = srcIn > 0 ? srcIn : 0;
+  if (dur > 0 || si > 0) {
     var src = EF.itemDuration(item);
-    if (!src || dur < src - 0.001) { try { item.setInPoint(0, 4); item.setOutPoint(dur, 4); setIO = true; } catch (e) {} }
+    if (!(dur > 0)) dur = Math.max(0.1, (src || si + 5) - si);
+    if (!src || si > 0 || dur < src - 0.001) { try { item.setInPoint(si, 4); item.setOutPoint(si + dur, 4); setIO = true; } catch (e) {} }
   }
   tracks[ti].overwriteClip(item, t);
   if (setIO) { try { item.clearInPoint(); item.clearOutPoint(); } catch (e2) {} }
@@ -504,14 +505,14 @@ EF.layItem = function (seq, item, kind, ti, t, dur, fps) {
 
 /**
  * Import a file (if needed) and place it on the timeline.
- * a: { path, time, kind: 'video'|'audio', track (-1 auto), duration, bin }
+ * a: { path, time, kind: 'video'|'audio', track (-1 auto), duration, srcIn (seconds into the source), bin }
  */
 EFAPI.placeFile = function (a) {
-  var seq = EF.seq(), fps = EF.fps(seq), item = EF.importFile(a.path, a.bin || 'EditFast'), kind = a.kind || 'video';
+  var seq = EF.seq(), fps = EF.fps(seq), item = EF.importFile(a.path, a.bin || 'EditFast'), kind = a.kind || 'video', si = +a.srcIn || 0;
   var t = EF.snap(a.time === undefined || a.time === null ? EF.sec(seq.getPlayerPosition()) : a.time, fps);
-  var dur = a.duration || EF.itemDuration(item) || 5;
+  var dur = a.duration || Math.max(0.1, (EF.itemDuration(item) || 5) - si);
   var ti = (a.track === undefined || a.track === null || a.track < 0) ? EF.pickTrack(seq, kind, t, t + dur, a.minTrack === undefined ? 1 : a.minTrack) : a.track;
-  var clip = EF.layItem(seq, item, kind, ti, t, a.duration || 0, fps);
+  var clip = EF.layItem(seq, item, kind, ti, t, a.duration || 0, fps, si);
   return { track: ti, start: t, end: clip ? EF.sec(clip.end) : t + dur, name: item.name };
 };
 

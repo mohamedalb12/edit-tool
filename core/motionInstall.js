@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const FOLDER = 'EditFastMotion';
-const DIRS = ['client', 'core', 'host', 'assets'];
+const DIRS = ['client', 'core', 'host', 'assets', 'mcp'];
 
 function version(dir) {
   try { return (/ExtensionBundleVersion="([^"]+)"/.exec(fs.readFileSync(path.join(dir, 'CSXS', 'manifest.xml'), 'utf8')) || [])[1] || null; } catch (_) { return null; }

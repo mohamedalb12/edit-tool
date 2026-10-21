@@ -79,6 +79,7 @@
     var first = null; try { first = localStorage.getItem('ef-ae-tab'); } catch (e) {}
     show(first || 'templates');
     EF.connect();
+    if (EF.claude && !EF.test) EF.claude.start('ae');
   }
   /** load the AE script and say hello; the status pill shows why when it fails (and retries on click) */
   EF.connect = function () {

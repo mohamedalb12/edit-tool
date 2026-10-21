@@ -296,6 +296,8 @@ test('settings: "test every tool" runs the self-test and shows a copyable report
   assert.match(await page.locator('.ft-report').inputValue(), /Logo PNG 3d/);
   assert.ok(await page.locator('button', { hasText: 'انسخ التقرير' }).isVisible());
   assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
+  assert.ok(await page.locator('.claude-card').isVisible(), 'the Claude card is in the settings');
+  assert.match(await page.locator('.claude-card').textContent(), /ثبّت في Claude Desktop/);
 });
 
 test('no page errors in the After Effects panel', () => { assert.deepEqual(errors, []); });

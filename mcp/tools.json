@@ -1,0 +1,1551 @@
+[
+ {
+  "name": "premiere_guide",
+  "description": "اقرا ده الأول: إزاي تمنتج في بريمير بالأدوات دي (التايملين بالثواني، القص على نسخة، المشاهد والكابشن والستايلات المتاحة).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_list_media",
+  "description": "الملفات اللي في فولدر (فيديو / صوت / صور) بمدتها ومقاسها — عشان تعرف الفوتيج قبل ما تمنتج.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "folder": {
+     "type": "string",
+     "description": "مسار الفولدر على الجهاز"
+    }
+   },
+   "required": [
+    "folder"
+   ]
+  }
+ },
+ {
+  "name": "premiere_place_clip",
+  "description": "حط ملف (أو جزء منه) على التايملين: time = فين على التايملين، src_in = من ثانية كام في الملف، duration = قد إيه. track فاضي = أول تراك فاضي.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "مسار الملف"
+    },
+    "time": {
+     "type": "number",
+     "description": "ثانية على التايملين"
+    },
+    "src_in": {
+     "type": "number",
+     "description": "من ثانية كام في الملف (0 = البداية)"
+    },
+    "duration": {
+     "type": "number",
+     "description": "المدة بالثواني (فاضي = لآخر الملف)"
+    },
+    "kind": {
+     "type": "string",
+     "enum": [
+      "video",
+      "audio"
+     ]
+    },
+    "track": {
+     "type": "number",
+     "description": "رقم التراك (0 = V1/A1)، فاضي = تلقائي"
+    }
+   },
+   "required": [
+    "path",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_new_sequence",
+  "description": "سيكوينس جديدة من ملفات ورا بعض (مقاسها من أول ملف) — بداية مونتاج من الصفر.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "اسم السيكوينس"
+    },
+    "files": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "المسارات بالترتيب"
+    }
+   },
+   "required": [
+    "files"
+   ]
+  }
+ },
+ {
+  "name": "premiere_cut_ranges",
+  "description": "اقطع فترات من التايملين وقفّل الفراغ (على نسخة من السيكوينس، والأصل بيفضل سليم).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "ranges": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "start": {
+        "type": "number",
+        "description": "من"
+       },
+       "end": {
+        "type": "number",
+        "description": "لحد"
+       }
+      },
+      "required": [
+       "start",
+       "end"
+      ]
+     }
+    }
+   },
+   "required": [
+    "ranges"
+   ]
+  }
+ },
+ {
+  "name": "premiere_apply_effect",
+  "description": "طبّق إفكت أو ترانزيشن من بريمير بالاسم (Cross Dissolve, Lumetri Color, Gaussian Blur…) على الكليب المختار أو اللي عند رأس التشغيل (حرّكه بـ premiere_set_playhead).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "اسم الإفكت كما في بريمير"
+    },
+    "kind": {
+     "type": "string",
+     "enum": [
+      "video",
+      "audio",
+      "transition"
+     ]
+    },
+    "duration": {
+     "type": "number",
+     "description": "مدة الترانزيشن بالثواني"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "premiere_beat_montage",
+  "description": "قطّع اللقطات على البيت بتاع المزيكا.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "every": {
+     "type": "number",
+     "description": "كل كام بيت (2 افتراضي)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_auto_zoom",
+  "description": "زووم تلقائي على اللحظات القوية في الصوت (من غير AI).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "density": {
+     "type": "string",
+     "enum": [
+      "low",
+      "medium",
+      "high"
+     ]
+    },
+    "style": {
+     "type": "string",
+     "enum": [
+      "jump",
+      "smooth"
+     ]
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_multi_formats",
+  "description": "نسخ بمقاسات تانية (16:9 / 4:5 / 9:16) من الـ In/Out أو السيكوينس كلها.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "formats": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "16:9",
+       "4:5",
+       "9:16",
+       "1:1"
+      ]
+     }
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_get_project_state",
+  "description": "حالة السيكوينس الحالية: الاسم والمدة والتراكات والكليبات ورأس التشغيل وهل فيه تفريغ.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_transcribe",
+  "description": "فرّغ كلام السيكوينس بتوقيت لكل كلمة (أوفلاين). لازم قبل الكابشن والتكرار والهوك.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "dialect": {
+     "type": "string",
+     "enum": [
+      "egyptian",
+      "gulf",
+      "levantine",
+      "iraqi",
+      "maghrebi",
+      "msa",
+      "english"
+     ]
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_look_at_frames",
+  "description": "شوف صور من الفيديو نفسه (فريمات) عشان تحكم على الصورة: أحسن تيك، اللقطة مضلمة/مهزوزة، فين حد بيضحك، مكان الـ B-Roll، الألوان… الصور بتوصلك في الرسالة اللي بعدها.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "times": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "description": "أوقات على التايملين (لحد 12). فاضي = عينة من اللقطات"
+    },
+    "count": {
+     "type": "number"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_get_transcript",
+  "description": "هات التفريغ (جمل بتوقيتها) لفترة معينة أو للكل.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "from": {
+     "type": "number"
+    },
+    "to": {
+     "type": "number"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_remove_fillers",
+  "description": "شيل كلمات الحشو (اممم، آآآ، uh) من الكلام — وممكن كلمات زي \"يعني\" لو المونتير عايز — على نسخة.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "extra": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "كلمات إضافية تتشال كحشو (اختياري)"
+    },
+    "markers_only": {
+     "type": "boolean",
+     "description": "ماركرز بس من غير قص"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_bleep_words",
+  "description": "بيب أو كتم أو ماركرز على كلمات معيّنة في الكلام (شتيمة، اسم، رقم).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "words": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "beep",
+      "mute",
+      "markers"
+     ]
+    }
+   },
+   "required": [
+    "words"
+   ]
+  }
+ },
+ {
+  "name": "premiere_remove_silences",
+  "description": "شيل السكتات وقفل الفراغات (على نسخة من السيكوينس افتراضيًا).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sensitivity": {
+     "type": "number",
+     "description": "1..10 (أعلى = يقص أكتر)"
+    },
+    "crossfade": {
+     "type": "boolean"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_remove_repeats",
+  "description": "شيل التكرار وإعادات التيك والتهتهة من التفريغ.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "dry_run": {
+     "type": "boolean"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_make_hook",
+  "description": "خد جزء قوي من الفيديو وحطه في البداية كهوك (بيتعمل سيكوينس جديدة).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "start": {
+     "type": "number"
+    },
+    "end": {
+     "type": "number"
+    },
+    "title": {
+     "type": "string",
+     "description": "نص اختياري يظهر على الهوك"
+    }
+   },
+   "required": [
+    "start",
+    "end"
+   ]
+  }
+ },
+ {
+  "name": "premiere_add_captions",
+  "description": "نزّل كابشن على التايملين من التفريغ. animated=true (الافتراضي) = كابشن متحرك متزامن مع كل كلمة بستايل؛ animated=false = SRT عادي يتعدّل من تبويب Text.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "max_words": {
+     "type": "number"
+    },
+    "max_duration": {
+     "type": "number"
+    },
+    "single_word": {
+     "type": "boolean"
+    },
+    "animated": {
+     "type": "boolean"
+    },
+    "style": {
+     "type": "string",
+     "enum": [
+      "karaoke",
+      "pop",
+      "box",
+      "bold",
+      "neon",
+      "gradient",
+      "minimal",
+      "typewriter",
+      "hormozi",
+      "beast",
+      "highlighter",
+      "outline",
+      "lyric"
+     ]
+    },
+    "position": {
+     "type": "string",
+     "enum": [
+      "bottom",
+      "center",
+      "top"
+     ]
+    },
+    "anim": {
+     "type": "string",
+     "enum": [
+      "none",
+      "drop",
+      "rise",
+      "slideStart",
+      "slideEnd",
+      "zoomIn",
+      "pop",
+      "bounce",
+      "blur",
+      "fade",
+      "flip",
+      "spin",
+      "stretch",
+      "swing",
+      "letters",
+      "glitch",
+      "wave"
+     ],
+     "description": "دخول كل كلمة: drop نازلة من فوق، slideStart من الجنب…"
+    },
+    "ease": {
+     "type": "string",
+     "enum": [
+      "out",
+      "in",
+      "inOut",
+      "linear",
+      "back",
+      "elastic",
+      "bounce"
+     ],
+     "description": "out = سريع في الأول وبطيء في الآخر"
+    },
+    "anim_speed": {
+     "type": "number",
+     "description": "مدة دخول الكلمة بالثواني (0.1-1.2)"
+    },
+    "still": {
+     "type": "boolean",
+     "description": "كابشن ثابت من غير أي أنيميشن"
+    },
+    "timing": {
+     "type": "string",
+     "enum": [
+      "sync",
+      "cascade",
+      "line"
+     ]
+    },
+    "word_gap": {
+     "type": "number",
+     "description": "للـ cascade: ثواني بين كل كلمة"
+    },
+    "exit": {
+     "type": "string",
+     "enum": [
+      "none",
+      "fade",
+      "drop",
+      "rise",
+      "slide",
+      "zoomOut",
+      "blur"
+     ]
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_apply_motion",
+  "description": "طبّق قالب حركة (كي فريمز على Transform) على الكليب اللي عند وقت معين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "preset": {
+     "type": "string",
+     "enum": [
+      "zoom-in-reveal",
+      "zoom-out-reveal",
+      "slide-in-left",
+      "slide-in-right",
+      "slide-in-up",
+      "slide-in-down",
+      "pop-in",
+      "spin-in",
+      "whip-in-left",
+      "fade-in",
+      "drop-in-bounce",
+      "elastic-in",
+      "zoom-out-exit",
+      "slide-out-left",
+      "slide-out-right",
+      "fade-out",
+      "pop-out",
+      "spin-out",
+      "whip-out-right",
+      "punch-in",
+      "shake",
+      "handheld",
+      "pulse",
+      "heartbeat",
+      "ken-burns-left",
+      "ken-burns-right",
+      "slow-push",
+      "glitch-jump"
+     ]
+    },
+    "level": {
+     "type": "number",
+     "enum": [
+      1,
+      2,
+      3
+     ]
+    },
+    "time": {
+     "type": "number"
+    },
+    "track": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "preset",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_add_title",
+  "description": "نزّل تايتل متحرك جاهز عند وقت معين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "template": {
+     "type": "string",
+     "enum": [
+      "big-center",
+      "lower-third",
+      "lower-third-accent",
+      "name-tag",
+      "top-banner",
+      "typewriter",
+      "zoom-punch",
+      "elastic-word",
+      "bounce-drop",
+      "spin-badge",
+      "whip-headline",
+      "subscribe-cta",
+      "chapter-card",
+      "quote",
+      "number-stat",
+      "side-left",
+      "side-right",
+      "rise-up",
+      "pulse-alert",
+      "glitch-title",
+      "cinematic",
+      "caption-box",
+      "location",
+      "end-card",
+      "hook-flash"
+     ]
+    },
+    "text": {
+     "type": "string"
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "template",
+    "text"
+   ]
+  }
+ },
+ {
+  "name": "premiere_build_scene",
+  "description": "ابني مشهد متحرك (موشن جرافيك) بستايل المونتير وحطه على التايملين. layers: نصوص وأشكال بحركات دخول/خروج.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "time": {
+     "type": "number"
+    },
+    "spec": {
+     "type": "object",
+     "description": "duration (ث), background {type: solid|gradient|transparent, colors[]}, layers[{type:text|shape, text, x,y (0..1), size (نسبة من الارتفاع), color (hex أو primary|accent|text), box, underline, shape (rect|circle|line), w,h, in/out (none|fade|slide-up|slide-down|slide-left|slide-right|pop|zoom|typewriter|wipe|blur|bounce), delay, inDur, outDur}]"
+    }
+   },
+   "required": [
+    "spec"
+   ]
+  }
+ },
+ {
+  "name": "premiere_pro_scene",
+  "description": "مشهد موشن جرافيك احترافي بمحرك Remotion (أقوى بكتير من build_scene): عناوين حركية، أرقام، رسوم، قوائم، لوور ثيرد، لوجو، اشترك، كولاج، كاروسيل ثري دي، نص ثري دي، محادثة، إشعار، متصفح… اكتب brief والمخرج هيصممه (ولو فيه style بيستخدم لقطات من الفيديو). — ابعت spec كامل (اقرا premiere_guide)، الـ brief لوحده محتاج مفتاح OpenRouter.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "brief": {
+     "type": "string",
+     "description": "وصف المشهد (المحتوى والإحساس)"
+    },
+    "spec": {
+     "type": "object",
+     "description": "اختياري: مواصفات جاهزة {duration, style, background:{type}, elements:[{type, from, duration, position, props}]}"
+    },
+    "style": {
+     "type": "string",
+     "enum": [
+      "collage",
+      "3d",
+      "neon",
+      "minimal",
+      "cinematic",
+      "popart",
+      "glass",
+      "social",
+      "hormozi",
+      "beast",
+      "vhs",
+      "noir",
+      "kinetic",
+      "anime",
+      "vaporwave",
+      "magazine",
+      "explainer",
+      "tech",
+      "luxury",
+      "vlog",
+      "news",
+      "gaming",
+      "blueprint",
+      "grunge"
+     ]
+    },
+    "duration": {
+     "type": "number"
+    },
+    "overlay": {
+     "type": "boolean",
+     "description": "true = خلفية شفافة فوق الفيديو"
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_add_template",
+  "description": "حط قالب جاهز من مكتبة القوالب (نصوص، جلاس، واجهات، مشاهد، ثري دي، كولاج) بنصوصك.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "enum": [
+      "t-rise",
+      "t-split",
+      "t-blur",
+      "t-type",
+      "t-highlight",
+      "t-cutout",
+      "t-3d",
+      "t-cube",
+      "t-quote",
+      "t-scribble",
+      "t-emoji",
+      "g-lower",
+      "g-notif",
+      "g-list",
+      "g-stat",
+      "u-search",
+      "u-chat",
+      "u-browser",
+      "u-post",
+      "u-cta",
+      "u-notif",
+      "s-logo",
+      "s-steps",
+      "s-chart",
+      "s-cinematic",
+      "s-popart",
+      "s-neon",
+      "d-ring",
+      "d-coverflow",
+      "d-helix",
+      "d-stack",
+      "d-card",
+      "c-collage",
+      "c-polaroid",
+      "c-scrap"
+     ]
+    },
+    "values": {
+     "type": "object",
+     "description": "نصوص بالشكل {\"0.text\":\"...\"} (رقم العنصر.اسم الخاصية)"
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "premiere_carousel_3d",
+  "description": "كاروسيل ثري دي من لقطات الفيديو (أو ملفات): ring | coverflow | helix | stack.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layout": {
+     "type": "string",
+     "enum": [
+      "ring",
+      "coverflow",
+      "helix",
+      "stack"
+     ]
+    },
+    "files": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "speed": {
+     "type": "number"
+    },
+    "title": {
+     "type": "string"
+    },
+    "background": {
+     "type": "string",
+     "enum": [
+      "studio",
+      "mesh",
+      "transparent",
+      "particles"
+     ]
+    },
+    "duration": {
+     "type": "number"
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_add_icon",
+  "description": "حط أيقونة متحركة (سوشيال، مونتاج، عربيات، عقارات، أماكن، بيزنس…). query بالعربي أو الإنجليزي.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string"
+    },
+    "anim": {
+     "type": "string",
+     "enum": [
+      "draw",
+      "pop",
+      "bounce",
+      "spin",
+      "pulse",
+      "shake",
+      "slide"
+     ]
+    },
+    "badge": {
+     "type": "string",
+     "enum": [
+      "none",
+      "circle",
+      "square",
+      "glass"
+     ]
+    },
+    "label": {
+     "type": "string"
+    },
+    "color": {
+     "type": "string"
+    },
+    "position": {
+     "type": "string",
+     "enum": [
+      "center",
+      "top",
+      "bottom",
+      "left",
+      "right",
+      "topLeft",
+      "topRight"
+     ]
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "premiere_place_trendy_sfx",
+  "description": "حط مؤثر صوتي ترند من الباقة الأوفلاين (مجاني ومن غير نت).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "enum": [
+      "whoosh",
+      "whoosh-fast",
+      "whoosh-deep",
+      "swipe",
+      "reverse-whoosh",
+      "riser",
+      "riser-short",
+      "downlifter",
+      "impact",
+      "cinematic-hit",
+      "sub-drop",
+      "bass-808",
+      "pop",
+      "bubble",
+      "click",
+      "tick",
+      "ding",
+      "notification",
+      "success",
+      "error",
+      "camera-shutter",
+      "typing",
+      "glitch",
+      "boing",
+      "record-scratch",
+      "magic-sparkle",
+      "cash",
+      "heartbeat",
+      "countdown",
+      "swoosh-pan"
+     ]
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "id",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_generate_music",
+  "description": "ولّد مزيكا خلفية بالذكاء الاصطناعي (ElevenLabs) وحطها على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "prompt": {
+     "type": "string"
+    },
+    "seconds": {
+     "type": "number"
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "prompt"
+   ]
+  }
+ },
+ {
+  "name": "premiere_download_video",
+  "description": "نزّل فيديو/صوت من لينك (يوتيوب، إنستجرام، تيك توك، بنترست، X) بجودة وجزء معيّن وحطه على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "url": {
+     "type": "string"
+    },
+    "quality": {
+     "type": "string",
+     "enum": [
+      "best",
+      "2160",
+      "1080",
+      "720",
+      "480",
+      "audio"
+     ]
+    },
+    "start": {
+     "type": "string",
+     "description": "مثلاً 1:20"
+    },
+    "end": {
+     "type": "string"
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "url"
+   ]
+  }
+ },
+ {
+  "name": "premiere_web_media_search",
+  "description": "دوّر في النت على صور/فيديو/صوت مجانية (Openverse, Wikimedia, Google لو متفعّل, Pexels, Pixabay).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "image",
+      "video",
+      "audio"
+     ]
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "premiere_web_media_place",
+  "description": "نزّل نتيجة من بحث النت وحطها على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "premiere_safe_zones_check",
+  "description": "افحص المناطق الآمنة لريلز/تيك توك/شورتس: الوشوش والكابشن بعيد عن زراير المنصة؟",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "platform": {
+     "type": "string",
+     "enum": [
+      "tiktok",
+      "reels",
+      "shorts",
+      "all"
+     ]
+    },
+    "add_markers": {
+     "type": "boolean"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_relink_missing",
+  "description": "دوّر على الملفات الناقصة (Media Offline) في الجهاز واربطها تاني.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "folders": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_liquid_glass",
+  "description": "حط عنصر Liquid Glass (زجاج سايل بيكسر ويغبّش الفيديو اللي تحته، الستايل المشهور) فوق الفيديو عند وقت معين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "preset": {
+     "type": "string",
+     "enum": [
+      "pill",
+      "card",
+      "lens",
+      "lower-third",
+      "notification",
+      "subscribe",
+      "glass-text",
+      "dock",
+      "side-panel",
+      "frame"
+     ]
+    },
+    "label": {
+     "type": "string",
+     "description": "نص على الزجاج"
+    },
+    "text": {
+     "type": "string",
+     "description": "للـ glass-text: الكلمة نفسها زجاج"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    },
+    "w": {
+     "type": "number"
+    },
+    "h": {
+     "type": "number"
+    },
+    "tint": {
+     "type": "string",
+     "description": "لون hex"
+    },
+    "tint_amount": {
+     "type": "number"
+    },
+    "blur": {
+     "type": "number"
+    },
+    "refract": {
+     "type": "number"
+    },
+    "anim_in": {
+     "type": "string",
+     "enum": [
+      "liquid",
+      "pop",
+      "drop",
+      "slide",
+      "fade",
+      "none"
+     ]
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "preset"
+   ]
+  }
+ },
+ {
+  "name": "premiere_generate_sfx",
+  "description": "ولّد مؤثر صوتي من وصف وحطه على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "prompt": {
+     "type": "string",
+     "description": "وصف بالإنجليزي"
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "prompt",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_add_markers",
+  "description": "حط ماركرز.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "markers": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "time": {
+        "type": "number"
+       },
+       "name": {
+        "type": "string"
+       },
+       "comment": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "time",
+       "name"
+      ]
+     }
+    }
+   },
+   "required": [
+    "markers"
+   ]
+  }
+ },
+ {
+  "name": "premiere_search_broll",
+  "description": "دوّر على لقطات B-Roll (Pexels/Pixabay/محلي).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "video",
+      "photo"
+     ]
+    }
+   },
+   "required": [
+    "query"
+   ]
+  }
+ },
+ {
+  "name": "premiere_place_broll",
+  "description": "حط لقطة B-Roll من نتايج البحث على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "time": {
+     "type": "number"
+    },
+    "duration": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "id",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_library_search",
+  "description": "دوّر في مكتبة المونتير الخاصة (sfx | transitions | overlays | music).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "q": {
+     "type": "string"
+    },
+    "category": {
+     "type": "string",
+     "enum": [
+      "sfx",
+      "transitions",
+      "overlays",
+      "music"
+     ]
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_place_library_item",
+  "description": "حط عنصر من مكتبة المونتير على التايملين.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string"
+    },
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "id",
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "premiere_make_reels",
+  "description": "حوّل السيكوينس لفيديو طولي (ريلز/تيك توك) والكاميرا بتتبع وش اللي بيتكلم (أوفلاين). بيعمل سيكوينس جديدة.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "ratio": {
+     "type": "string",
+     "enum": [
+      "9:16",
+      "4:5",
+      "1:1"
+     ]
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_make_short",
+  "description": "اعمل شورت من مقطع: سيكوينس جديدة فيها المقطع بس، ومعاه تحويل طولي وكابشن.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "start": {
+     "type": "number"
+    },
+    "end": {
+     "type": "number"
+    },
+    "title": {
+     "type": "string"
+    },
+    "reframe": {
+     "type": "boolean"
+    },
+    "captions": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "start",
+    "end"
+   ]
+  }
+ },
+ {
+  "name": "premiere_clean_audio",
+  "description": "نضّف صوت الكلام أوفلاين (دوشة، رمبل، سين حادة، ضغط، علو صوت موحد) — النسخة النضيفة بتنزل على تراك جديد والأصلي بيتكتم.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "strength": {
+     "type": "string",
+     "enum": [
+      "light",
+      "medium",
+      "strong"
+     ]
+    },
+    "loudness": {
+     "type": "number",
+     "description": "LUFS (يوتيوب -14، بودكاست -16)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_duck_music",
+  "description": "وطّي الموسيقى تلقائي وقت الكلام وارفعها في السكوت (كي فريمز Volume).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "duck_db": {
+     "type": "number",
+     "description": "كام dB تتوطّى (افتراضي -12)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_undo_last",
+  "description": "رجّع آخر عملية عملتها (القص بيرجع للسيكوينس الأصلية، والحاجات اللي اتحطت بتتشال).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_set_playhead",
+  "description": "حرّك رأس التشغيل.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "time": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "time"
+   ]
+  }
+ },
+ {
+  "name": "ae_guide",
+  "description": "اقرا ده الأول: لغة المشاهد (JSON) اللي بتبني بيها أي موشن جرافيك في الأفتر، قواعد التصميم، المكتبة، والأدوات.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "ae_status",
+  "description": "الكومب المفتوح: المقاس والمدة والليرز والمختار.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "ae_build_scene",
+  "description": "ابني مشهد كامل (ليرز + كي فريمز + إفكتس + إكسبريشنز) من JSON بلغة المشاهد (ae_guide). where: new = كومب جديد، here = جوه الكومب المفتوح.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "scene": {
+     "type": "object",
+     "description": "{\"comp\":{…},\"layers\":[…]}"
+    },
+    "where": {
+     "type": "string",
+     "enum": [
+      "new",
+      "here"
+     ]
+    }
+   },
+   "required": [
+    "scene"
+   ]
+  }
+ },
+ {
+  "name": "ae_edit_scene",
+  "description": "عدّل الليرز الموجودة بأساميها: ops = [{op:\"set\",layer,look:{…}}, {op:\"add\",layer:{…}}, {op:\"replace\",layer,spec}, {op:\"delete\",layer}, {op:\"retime\",factor}, {op:\"comp\",duration}].",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "ops": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    }
+   },
+   "required": [
+    "ops"
+   ]
+  }
+ },
+ {
+  "name": "ae_scene_state",
+  "description": "الليرز اللي في الكومب المفتوح بالتفصيل (أساميها، أنواعها، توقيتها) — قبل التعديل.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "ae_look",
+  "description": "صور حقيقية من الكومب المفتوح (من الأفتر نفسه) عشان تشوف شغلك وتصلّحه.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "frames": {
+     "type": "number",
+     "description": "عدد الصور (1-8)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "ae_library_scene",
+  "description": "مشهد جاهز من المكتبة بنصوصك وألوانك (الأسامي والحقول في ae_guide).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "id المشهد"
+    },
+    "params": {
+     "type": "object",
+     "description": "{title, subtitle, color, …}"
+    },
+    "where": {
+     "type": "string",
+     "enum": [
+      "new",
+      "here"
+     ]
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "ae_tool",
+  "description": "أي أداة من أدوات EditFast Motion بالاسم. الأدوات (args):\n• logoAnimate {file, style: draw|outline|neon|build|3d|static, where: new|here, color, duration} لوجو (PNG/JPG/SVG) → شيبس متحركة\n• vectorImport {file} SVG / صورة → شيب ليرز في الكومب المفتوح\n• morph {files:[a.svg,b.svg] | (من غير files = الليرز المختارة), dur, hold, loop} شكل بيتحول لشكل\n• photo3D {file, move: push|orbit|rise|float, slices: 2-8, strength} صورة → لقطة ثري دي بكاميرا\n• imageTo3DModel {file} صورة → موديل ثري دي .glb (محتاج مفتاح fal)\n• track {points:[[x,y] 0-1 على الفريم], mode: attach|pin|stabilize, duration, text} تراكينج للفيديو المختار\n• surfacePlace {points: 4 أركان, file | text} حط صورة / كلام على سطح بيتتبّع\n• highlight {points: ≥3 أركان المبنى 0-1, mode: manual|ai, preset: blue-rest|bw-rest|gold|color-building|focus, label:{title,price,currency,area}, seconds} إبراز مبنى (عقارات)\n• characterAdd {name, action: walk|run|idle|wave|talk|jump, colors, walkAcross} كاراكتر متحرك\n• characterRig {ik} ريج لليرز كاراكتر (head, body, arm L…)\n• lipSync {audio} بُق الكاراكتر مع الصوت\n• audioReact {audio, amount, link: scale|opacity|position} الليرز المختارة بتنبض مع الصوت\n• counterAdd {from, to, duration, format: number|currency|percent|compact|time, currency: EGP|USD|SAR…, arabic, prefix, suffix, label, style: plain|ring|bar|card|slot} عدّاد أرقام\n• chartAdd {type: bar|column|line|pie|donut|progress|timeline|…, data: \"اسم, رقم\\n…\", title} رسم بياني\n• liquidAdd {preset, color, color2} أشكال سايلة\n• transitionApply {kind, duration} ترانزيشن بين الكليبات المختارة (أو عند وقت الكومب)\n• physics {mode: drop|fall|explode|float, gravity, bounce, duration} فيزيا للّيرز المختارة\n• roto {mode: ai|green|blue, seconds} فصل الشخص (ai محتاج مفتاح fal)\n• multiFormat {sizes:[\"16:9\",\"9:16\",\"1:1\",\"4:5\"], fit: blur|fit|fill, render} نسخ بكل المقاسات\n• kinetic {audio, style: pop|highlight|stack|typewriter|slide} كلام متحرك مع الصوت (تفريغ Groq / على الجهاز)\n• applyMotion {preset, level 1-3} قالب حركة على الليرز المختارة\n• applyEase {curve: ease|easeIn|easeOut|easeInOut|expoOut…} منحنى على الكي فريمز\n• stagger {frames, order} ورا بعض بفرق فريمات\n• anchor {where: tl|t|tr|l|c|r|bl|b|br}\n• nullController {}\n• addExpression {kind: wiggle|loopCycle|loopPingpong|bounce|autoFade|flicker|spin|float|squash|pendulum|typewriter}\n• textAnimate {preset: fadeUp|typewriter|blurIn|scalePop|slideIn|tracking|rotateIn|dropIn, by: chars|words|lines, duration}\n• addShape {kind: rect|circle|ring|line, color}\n• lowerThird {name, title, color, accent}\n• cameraRig {kind: push|orbit|dolly}\n• parallax {depth}\n• lightRig {}\n• extrude {depth}\n• explodeShapes {}\n• alignLayers {mode: left|hcenter|right|top|vcenter|bottom|distH|distV, to: comp|selection}\n• sequenceLayers {gap}\n• colorRig {}\n• paletteRead {}\n• paletteApply {\"#old\":\"#new\"} (الـ map نفسه)\n• templateSave {name, editable:{text,colors,motion,transform,media,controls}} احفظ الكومب كقالب MOGRT لبريمير\n• render {template: h264|prores|alpha, ame}\n• fullTest {} اختبر كل الأدوات (تقرير)",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "enum": [
+      "logoAnimate",
+      "vectorImport",
+      "morph",
+      "photo3D",
+      "imageTo3DModel",
+      "track",
+      "surfacePlace",
+      "highlight",
+      "characterAdd",
+      "characterRig",
+      "lipSync",
+      "audioReact",
+      "counterAdd",
+      "chartAdd",
+      "liquidAdd",
+      "transitionApply",
+      "physics",
+      "roto",
+      "multiFormat",
+      "kinetic",
+      "applyMotion",
+      "applyEase",
+      "stagger",
+      "anchor",
+      "nullController",
+      "addExpression",
+      "textAnimate",
+      "addShape",
+      "lowerThird",
+      "cameraRig",
+      "parallax",
+      "lightRig",
+      "extrude",
+      "explodeShapes",
+      "alignLayers",
+      "sequenceLayers",
+      "colorRig",
+      "paletteRead",
+      "paletteApply",
+      "templateSave",
+      "render",
+      "fullTest"
+     ]
+    },
+    "args": {
+     "type": "object"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "ae_list_media",
+  "description": "الملفات اللي في فولدر (فيديو / صوت / صور / لوجوهات) بمدتها ومقاسها.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "folder": {
+     "type": "string",
+     "description": "مسار الفولدر"
+    }
+   },
+   "required": [
+    "folder"
+   ]
+  }
+ }
+]

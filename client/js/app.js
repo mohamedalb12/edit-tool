@@ -81,6 +81,7 @@
       } catch (e) { console.warn(e); }
     }, 2500);
     if (EF.spend) EF.spend.boot();
+    if (EF.claude && !EF.test) EF.claude.start('premiere');
     EF.loadHostScript().then(function () { return EF.host('ping', {}); }).then(function (r) { UI.status('متصل بـ ' + (r.app || 'Premiere')); }).catch(function (e) { UI.status('مش متصل ببريمير', 'err'); console.warn(e); });
   }
   /** Node didn't start inside the panel: say why and what to do instead of a blank panel */
