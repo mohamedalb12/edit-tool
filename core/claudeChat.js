@@ -38,6 +38,20 @@ function childEnv(bin, token) {
 }
 const AUTH_ERR = /failed to authenticate|oauth|authentication_error|invalid api key|please run \/login|login expired|not logged in|invalid bearer|401/i;
 const isToken = t => /^sk-ant-oat\d*-[\w-]{20,}$/.test(String(t || '').trim());
+/**
+ * The token out of whatever was pasted: just the token, the token wrapped over several lines by the terminal
+ * (a line break + spaces inside it), or the whole `claude setup-token` output. → token or ''.
+ */
+function extractToken(text) {
+  const s = String(text || '').replace(/\r/g, '');
+  const at = s.search(/sk-ant-oat\d*-/);
+  if (at < 0) return '';
+  const lines = s.slice(at).split('\n');
+  let tok = (lines[0].match(/^[\w-]+/) || [''])[0];
+  // the terminal wrapped it: keep taking lines that are one unbroken run of token characters
+  for (let i = 1; i < lines.length; i++) { const l = lines[i].trim(); if (!/^[\w-]+$/.test(l)) break; tok += l; }
+  return isToken(tok) ? tok : '';
+}
 function run(bin, args, timeout = 20000, token) {
   return new Promise(resolve => {
     const shell = WIN && /\.cmd$/i.test(bin);
@@ -155,4 +169,4 @@ function friendly(err, code) {
   return 'Claude وقف' + (code ? ' (' + code + ')' : '') + (e.trim() ? ': ' + e.trim().split('\n').slice(-3).join(' ').slice(0, 300) : '');
 }
 
-module.exports = { ClaudeChat, labelOf, verify, isToken, childEnv, status, find, candidates, terminalCommand, openTerminal, SYSTEM, friendly };
+module.exports = { ClaudeChat, labelOf, verify, isToken, extractToken, childEnv, status, find, candidates, terminalCommand, openTerminal, SYSTEM, friendly };

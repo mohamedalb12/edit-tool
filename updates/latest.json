@@ -1,8 +1,8 @@
 {
-  "version": "2.6.0",
-  "url": "EditFast-2.6.0.zip",
-  "sha256": "23e913b4b1c6020af05ea139e789fb4bc10ed0795cb0a7de4ab1564f48ef65c2",
-  "size": 3500382,
-  "notes": "العملاء (ستايل + ذاكرة + محادثة لكل عميل) · توكن ثابت يحل مشكلة OAuth expired · Enter يبعت",
+  "version": "2.6.1",
+  "url": "EditFast-2.6.1.zip",
+  "sha256": "def859c0994192c7f3ddd8271cc5bd0d24082e56958491fa4c4ab2632c1e913f",
+  "size": 3500971,
+  "notes": "التوكن بيتقبل حتى لو التيرمنال قسمه على كذا سطر",
   "date": "2026-10-21"
 }

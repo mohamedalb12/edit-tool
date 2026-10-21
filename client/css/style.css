@@ -694,3 +694,4 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .claude-clients .row label { min-width: 48px; }
 .claude-memory { display: grid; gap: 4px; margin-bottom: 8px; }
 .claude-memory .claude-row { grid-template-columns: 14px 1fr auto; }
+.claude-token { min-height: 60px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; resize: vertical; }

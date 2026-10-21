@@ -176,7 +176,8 @@
               return;
             }
             // installed: link the account with a long-lived token (works from inside Adobe apps), or a normal login
-            var tok = h('input', { class: 'grow ltr claude-token', type: 'password', placeholder: 'sk-ant-oat01-…', value: token() });
+            // a textarea: the token comes wrapped over 2–3 lines from the terminal, and an <input> would mangle the line breaks
+            var tok = h('textarea', { class: 'grow ltr claude-token', rows: 3, placeholder: 'الصق التوكن هنا (أو رسالة التيرمنال كلها — هلاقيه لوحدي)' });
             var res = h('div', { class: 'hint' });
             setupBox.appendChild(UI.card(state.authFailed ? 'Claude محتاج تربط حسابك تاني' : 'اربط حسابك في Claude (مرة واحدة)',
               state.authFailed ? h('div', { class: 'claude-st bad' }, h('b', null, '✗'), ' تسجيل الدخول اللي في Claude Code انتهى أو مش واصل للبانل — التوكن الثابت بيحل ده نهائي (سنة كاملة).') : null,
@@ -184,8 +185,9 @@
               h('div', { class: 'claude-st wait' }, h('b', null, '2'), ' هيطبعلك توكن بيبدأ بـ sk-ant-oat01 — انسخه والصقه هنا ودوس "احفظ واتأكد"'),
               UI.row(UI.btn('اعمل توكن', function () { term('token'); }, 'primary')),
               UI.row(tok, UI.btn('احفظ واتأكد', function () {
-                var t = tok.value.trim();
-                if (!C.isToken(t)) { res.textContent = 'ده مش شكل التوكن — لازم يبدأ بـ sk-ant-oat01-'; return; }
+                var t = C.extractToken ? C.extractToken(tok.value) : tok.value.replace(/\s+/g, '');
+                if (!t || !C.isToken(t)) { res.textContent = 'مالقيتش توكن في اللي اتلصق — انسخ من sk-ant-oat01 لحد آخر التوكن (حتى لو على كذا سطر) والصقه تاني'; return; }
+                tok.value = t.slice(0, 18) + '…' + t.slice(-4) + '  (اتلقط ✓)';
                 S.saveSettings({ keys: { claudeToken: t } });
                 res.textContent = 'بيجرّب…';
                 return C.verify({ bin: cs.bin, token: t }).then(function (r) {

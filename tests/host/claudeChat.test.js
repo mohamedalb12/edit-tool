@@ -134,3 +134,16 @@ test('clients: a profile per client, Claude reads it and saves what it learns; e
     assert.equal(K.remove(other.id), true);
   } finally { b.close(); }
 });
+
+test('the setup-token is picked out of whatever gets pasted: wrapped by the terminal over lines, or the whole output', () => {
+  // a made-up token with the real shape (underscores, dashes, wrapped mid-token with a leading space)
+  const tok = 'sk-ant-oat01-_ZZfakeFAKEfake0123456789abcdEFGH_ijklMNOPqrst-uvwxYZ-' + 'ab9Cd5yJSnf-4-uSM-uA-xECFmAAA';
+  const wrapped = tok.slice(0, 80) + '\n ' + tok.slice(80);
+  assert.equal(chat.extractToken(wrapped), tok);
+  const whole = [' Welcome to Claude Code v2.1.289', '', ' ✓ Long-lived authentication token created successfully!', '', ' Your OAuth token (valid for 1 year):', '',
+    ' ' + tok.slice(0, 80), ' ' + tok.slice(80), '', ' Store this token securely. You won\'t be able to see it again.', '', ' Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>'].join('\n');
+  assert.equal(chat.extractToken(whole), tok);
+  assert.equal(chat.extractToken('  ' + tok + '  \n'), tok);
+  assert.equal(chat.extractToken('mohamed@Mac ~ % hello'), '');
+  assert.equal(chat.extractToken('sk-ant-oat01-short'), '');
+});
