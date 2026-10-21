@@ -1,8 +1,8 @@
 {
-  "version": "2.5.0",
-  "url": "EditFast-2.5.0.zip",
-  "sha256": "02b04737f4971d40d292529ea372748490263fc73a3a2af26af8d2734d896f79",
-  "size": 3492475,
-  "notes": "كلّم Claude جوه بريمير والأفتر (شات في تاب Claude) — باشتراكك من غير مفتاح API",
+  "version": "2.6.0",
+  "url": "EditFast-2.6.0.zip",
+  "sha256": "23e913b4b1c6020af05ea139e789fb4bc10ed0795cb0a7de4ab1564f48ef65c2",
+  "size": 3500382,
+  "notes": "العملاء (ستايل + ذاكرة + محادثة لكل عميل) · توكن ثابت يحل مشكلة OAuth expired · Enter يبعت",
   "date": "2026-10-21"
 }

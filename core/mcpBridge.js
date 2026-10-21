@@ -20,7 +20,7 @@ function start({ app, services, version = '', port, onCall } = {}) {
   const token = crypto.randomBytes(24).toString('hex');
   const list = tools.forApp(app);
   let queue = Promise.resolve(), server;
-  const ctl = { paused: false, lastSeen: null };
+  const ctl = { paused: false, lastSeen: null, client: null };
   const emit = e => { try { onCall && onCall(e); } catch (_) {} };
   const handle = async (req, res) => {
     const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
@@ -42,7 +42,7 @@ function start({ app, services, version = '', port, onCall } = {}) {
   const runTool = (tool, args) => {
     if (ctl.paused) { emit({ phase: 'blocked', name: tool.name, args }); return Promise.resolve({ isError: true, content: [{ type: 'text', text: 'المونتير وقّف Claude مؤقتًا من البانل (تاب Claude) — استنى لما يشغّله تاني.' }] }); }
     let t0 = 0;
-    const job = queue.then(async () => { t0 = Date.now(); emit({ phase: 'start', name: tool.name, args: args || {} }); return tools.run(tool, services, args || {}); });
+    const job = queue.then(async () => { t0 = Date.now(); emit({ phase: 'start', name: tool.name, args: args || {} }); return tools.run(tool, services, args || {}, { client: ctl.client }); });
     queue = job.catch(() => {});
     return job.then(r => { emit({ phase: 'done', name: tool.name, ms: Date.now() - t0 }); return r; },
       e => { const m = String(e && e.message || e); emit({ phase: 'error', name: tool.name, ms: Date.now() - t0, error: m }); return { isError: true, content: [{ type: 'text', text: m }] }; });
@@ -85,6 +85,7 @@ function start({ app, services, version = '', port, onCall } = {}) {
     return {
       port: p, token, ctl,
       pause(v) { ctl.paused = !!v; },
+      setClient(id) { ctl.client = id || null; },
       close() { try { server.close(); } catch (_) {} try { const cur = JSON.parse(fs.readFileSync(f, 'utf8')); if (cur.token === token) fs.unlinkSync(f); } catch (_) {} }
     };
   });

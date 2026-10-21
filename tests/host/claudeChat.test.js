@@ -80,3 +80,57 @@ test('a missing Claude Code reads as what to do', async () => {
   assert.match(ev[0].message, /ثبّت Claude Code/);
   assert.equal(c.busy, false);
 });
+
+test('an expired Claude Code login is said plainly, and a setup-token (long-lived) gets through; no stray API key reaches Claude', async () => {
+  process.env.FAKE_CLAUDE_EXPIRED = '1'; process.env.ANTHROPIC_API_KEY = 'sk-ant-api-should-not-leak';
+  try {
+    const ev = [];
+    const c = new chat.ClaudeChat({ bin: FAKE, app: 'premiere', mcp: { mcpServers: { editfast: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: {} } } }, onEvent: e => ev.push(e) });
+    await c.send('ازيك');
+    assert.ok(ev.some(e => e.type === 'auth' && /اربط بتوكن ثابت/.test(e.message)), JSON.stringify(ev));
+    assert.ok(!ev.some(e => e.type === 'text' && /Failed to authenticate/.test(e.text)), 'the raw English error is not shown as Claude talking');
+    assert.equal((await chat.verify({ bin: FAKE })).auth, true);
+    assert.equal(chat.isToken('sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123'), true);
+    assert.equal(chat.isToken('hello'), false);
+    const v = await chat.verify({ bin: FAKE, token: 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123' });
+    assert.equal(v.ok, true, JSON.stringify(v));
+    process.env.CLAUDE_BIN = FAKE;
+    const st = await chat.status({ token: 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123' });
+    assert.equal(st.method, 'token'); assert.equal(st.loggedIn, true);
+  } finally { delete process.env.FAKE_CLAUDE_EXPIRED; delete process.env.ANTHROPIC_API_KEY; delete process.env.CLAUDE_BIN; }
+});
+
+test('clients: a profile per client, Claude reads it and saves what it learns; each client keeps its own conversation', async () => {
+  config.save({ ...config.DEFAULTS });
+  const K = require('../../core/clients');
+  const c = K.create('مطعم الشيف', { style: { captions: 'hormozi-pop أصفر كبير', pace: 'سريع جدًا', colors: '#f97316 #111111', bogus: 'x' }, notes: 'ريلز أكل' });
+  assert.equal(K.get(c.id).style.bogus, undefined, 'only the known style fields');
+  assert.match(K.profileText(K.get(c.id)), /العميل: مطعم الشيف[\s\S]*hormozi-pop أصفر كبير[\s\S]*سريع جدًا/);
+  const ae = loadAE(); const main = ae.newComp('Main', { duration: 4 }); ae.project._active = main;
+  const b = await bridge.start({ app: 'ae', services: new AEServices({ host: async (n, a) => ae.call(n, JSON.parse(JSON.stringify(a))) }), port: 0 });
+  const call = (name, args) => new Promise(res => { const r = http.request({ host: '127.0.0.1', port: b.port, path: '/mcp', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + b.token } }, x => { let t = ''; x.on('data', d => { t += d; }); x.on('end', () => res(JSON.parse(t).result)); }); r.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args || {} } })); });
+  try {
+    assert.equal((await call('ae_client_profile')).isError, true, 'no client picked → says so');
+    b.setClient(c.id);
+    assert.match((await call('ae_client_profile')).content[0].text, /مطعم الشيف/);
+    await call('ae_client_remember', { note: 'بيحب اللوجو في الركن اليمين فوق' });
+    await call('ae_client_remember', { note: 'بيحب اللوجو في الركن اليمين فوق' });
+    assert.deepEqual(K.get(c.id).memory.map(m => m.text), ['بيحب اللوجو في الركن اليمين فوق'], 'saved once');
+    await call('ae_client_update_style', { music: 'لو-فاي هادية' });
+    assert.equal(K.get(c.id).style.music, 'لو-فاي هادية'); assert.equal(K.get(c.id).style.pace, 'سريع جدًا', 'the rest stays');
+    // the chat for this client: the system prompt names the client, the profile goes with the first message
+    const ev = [];
+    const ch = new chat.ClaudeChat({ bin: FAKE, app: 'ae', mcp: bridge.mcpConfig(b), client: 'مطعم الشيف', onEvent: e => ev.push(e) });
+    await ch.send('اعمل إنترو', { context: K.profileText(K.get(c.id)) });
+    const texts = ev.filter(e => e.type === 'text').map(e => e.text);
+    assert.ok(texts.includes('قريت ملف العميل') && texts.includes('شغّال للعميل مطعم الشيف'), texts.join(' | '));
+    K.saveSession(c.id, 'ae', { session: ch.session, messages: [{ role: 'user', text: 'اعمل إنترو' }], seen: K.hashOf(K.get(c.id)) });
+    const other = K.create('شركة النور');
+    assert.equal(K.session(other.id, 'ae').session, null, 'another client starts fresh');
+    assert.equal(K.session(c.id, 'ae').session, 'sess-1234', 'this client resumes its own session');
+    assert.equal(K.session(c.id, 'premiere').session, null, 'per app');
+    assert.ok(K.list().length >= 2);
+    K.forget(c.id, 0); assert.equal(K.get(c.id).memory.length, 0);
+    assert.equal(K.remove(other.id), true);
+  } finally { b.close(); }
+});

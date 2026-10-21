@@ -164,13 +164,28 @@ function guideAE(svc) {
   ].join('\n');
 }
 
+/* ---------------- clients (the one picked in the panel's Claude tab) ---------------- */
+function clientTools(app) {
+  const C = require('./clients'), pre = app === 'ae' ? 'ae_' : 'premiere_';
+  const need = ctx => { const c = ctx && ctx.client && C.get(ctx.client); if (!c) throw new Error('مفيش عميل مختار في تاب Claude — المونتير يختار العميل الأول، أو كمّل من غير عميل'); return c; };
+  const styleProps = {}; for (const k of Object.keys(C.STYLE_FIELDS)) styleProps[k] = str(C.STYLE_FIELDS[k]);
+  return [
+    { name: pre + 'client_profile', app, description: 'ملف العميل اللي المونتير مختاره: ستايل الكابشن والمونتاج والألوان والخط واللوجو والملاحظات، واللي اتعلمناه عن ذوقه قبل كده. اقراه قبل أي شغل لعميل والتزم بيه.', inputSchema: obj(),
+      run: async (svc, a, ctx) => ({ text: C.profileText(need(ctx)) }) },
+    { name: pre + 'client_remember', app, description: 'احفظ حاجة اتعلمتها عن ذوق العميل عشان المرة الجاية (مثلًا "بيحب الكابشن أصفر وكبير"، "مابيحبش الترانزيشن السريع"). استخدمها كل ما المونتير يصحّحك أو يقول تفضيل.', inputSchema: obj({ note: str('الحاجة اللي تتحفظ بجملة قصيرة') }, ['note']),
+      run: async (svc, a, ctx) => { const c = C.remember(need(ctx).id, a.note); return { text: 'اتحفظ لـ ' + c.name + ' ✓ (' + c.memory.length + ' ملاحظة)' }; } },
+    { name: pre + 'client_update_style', app, description: 'حدّث ستايل العميل الثابت (لما المونتير يقول "خلّي ده الستايل بتاعه").', inputSchema: obj(styleProps),
+      run: async (svc, a, ctx) => { const c = C.update(need(ctx).id, { style: a }); return { text: 'اتحدّث ستايل ' + c.name + ' ✓' }; } }
+  ];
+}
+
 /* ---------------- shared ---------------- */
 let cache = null;
-function all() { if (!cache) cache = premiereTools().concat(aeTools()); return cache; }
+function all() { if (!cache) cache = premiereTools().concat(clientTools('premiere'), aeTools(), clientTools('ae')); return cache; }
 const forApp = app => all().filter(t => t.app === app);
 /** a tool's raw result → MCP content (text JSON + images) */
-async function run(tool, svc, args) {
-  const r = await tool.run(svc, args || {});
+async function run(tool, svc, args, ctx) {
+  const r = await tool.run(svc, args || {}, ctx || {});
   const content = [];
   if (r.text) content.push({ type: 'text', text: String(r.text) });
   if (r.data !== undefined) { let t = JSON.stringify(r.data, (k, v) => (k === 'b64' ? undefined : v), 1); if (t && t.length > 60000) t = t.slice(0, 60000) + '\n…(اتقص)'; content.push({ type: 'text', text: t === undefined ? 'تمام' : t }); }

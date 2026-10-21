@@ -1362,6 +1362,73 @@
   }
  },
  {
+  "name": "premiere_client_profile",
+  "description": "ملف العميل اللي المونتير مختاره: ستايل الكابشن والمونتاج والألوان والخط واللوجو والملاحظات، واللي اتعلمناه عن ذوقه قبل كده. اقراه قبل أي شغل لعميل والتزم بيه.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_client_remember",
+  "description": "احفظ حاجة اتعلمتها عن ذوق العميل عشان المرة الجاية (مثلًا \"بيحب الكابشن أصفر وكبير\"، \"مابيحبش الترانزيشن السريع\"). استخدمها كل ما المونتير يصحّحك أو يقول تفضيل.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "note": {
+     "type": "string",
+     "description": "الحاجة اللي تتحفظ بجملة قصيرة"
+    }
+   },
+   "required": [
+    "note"
+   ]
+  }
+ },
+ {
+  "name": "premiere_client_update_style",
+  "description": "حدّث ستايل العميل الثابت (لما المونتير يقول \"خلّي ده الستايل بتاعه\").",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "captions": {
+     "type": "string",
+     "description": "ستايل الكابشن (مثلًا hormozi-pop أصفر، أو كلمة كلمة، مكانها تحت)"
+    },
+    "pace": {
+     "type": "string",
+     "description": "إيقاع المونتاج (هادي / متوسط / سريع جدًا)"
+    },
+    "music": {
+     "type": "string",
+     "description": "المزيكا (نوعها، مستواها تحت الكلام)"
+    },
+    "colors": {
+     "type": "string",
+     "description": "ألوان البراند (#hex)"
+    },
+    "fonts": {
+     "type": "string",
+     "description": "الخطوط"
+    },
+    "motion": {
+     "type": "string",
+     "description": "الحركة والترانزيشنز (بسيطة / كتير، زووم، هوك في الأول…)"
+    },
+    "format": {
+     "type": "string",
+     "description": "المقاس والمنصة (ريلز 9:16، يوتيوب 16:9…)"
+    },
+    "sfx": {
+     "type": "string",
+     "description": "المؤثرات الصوتية (قليلة / كتير)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
   "name": "ae_guide",
   "description": "اقرا ده الأول: لغة المشاهد (JSON) اللي بتبني بيها أي موشن جرافيك في الأفتر، قواعد التصميم، المكتبة، والأدوات.",
   "inputSchema": {
@@ -1546,6 +1613,73 @@
    "required": [
     "folder"
    ]
+  }
+ },
+ {
+  "name": "ae_client_profile",
+  "description": "ملف العميل اللي المونتير مختاره: ستايل الكابشن والمونتاج والألوان والخط واللوجو والملاحظات، واللي اتعلمناه عن ذوقه قبل كده. اقراه قبل أي شغل لعميل والتزم بيه.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "ae_client_remember",
+  "description": "احفظ حاجة اتعلمتها عن ذوق العميل عشان المرة الجاية (مثلًا \"بيحب الكابشن أصفر وكبير\"، \"مابيحبش الترانزيشن السريع\"). استخدمها كل ما المونتير يصحّحك أو يقول تفضيل.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "note": {
+     "type": "string",
+     "description": "الحاجة اللي تتحفظ بجملة قصيرة"
+    }
+   },
+   "required": [
+    "note"
+   ]
+  }
+ },
+ {
+  "name": "ae_client_update_style",
+  "description": "حدّث ستايل العميل الثابت (لما المونتير يقول \"خلّي ده الستايل بتاعه\").",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "captions": {
+     "type": "string",
+     "description": "ستايل الكابشن (مثلًا hormozi-pop أصفر، أو كلمة كلمة، مكانها تحت)"
+    },
+    "pace": {
+     "type": "string",
+     "description": "إيقاع المونتاج (هادي / متوسط / سريع جدًا)"
+    },
+    "music": {
+     "type": "string",
+     "description": "المزيكا (نوعها، مستواها تحت الكلام)"
+    },
+    "colors": {
+     "type": "string",
+     "description": "ألوان البراند (#hex)"
+    },
+    "fonts": {
+     "type": "string",
+     "description": "الخطوط"
+    },
+    "motion": {
+     "type": "string",
+     "description": "الحركة والترانزيشنز (بسيطة / كتير، زووم، هوك في الأول…)"
+    },
+    "format": {
+     "type": "string",
+     "description": "المقاس والمنصة (ريلز 9:16، يوتيوب 16:9…)"
+    },
+    "sfx": {
+     "type": "string",
+     "description": "المؤثرات الصوتية (قليلة / كتير)"
+    }
+   },
+   "required": []
   }
  }
 ]

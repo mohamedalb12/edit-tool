@@ -298,42 +298,64 @@ test('settings: "test every tool" runs the self-test and shows a copyable report
   assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
 });
 
-test('Claude tab: chat right here — setup steps when Claude Code is missing, then send, see Claude work step by step, examples, new chat', async () => {
-  await page.evaluate(() => {
-    window.__sent = [];
-    window.__cc = { installed: false };
-    window.__fakeChat = {
-      status: () => Promise.resolve(window.__cc), terminalCommand: k => k === 'install' ? 'curl -fsSL https://claude.ai/install.sh | bash' : 'claude auth login', openTerminal: k => { window.__term = k; },
-      ClaudeChat: function (o) { var self = this; this.bin = o.bin; this.busy = false; this.stop = function () {}; this.reset = function () { window.__reset = true; };
-        this.send = function (t) { self.busy = true; window.__sent.push(t); return new Promise(function (r) { setTimeout(function () { o.onEvent({ type: 'text', text: 'حاضر' }); o.onEvent({ type: 'tool', id: 't1', name: 'build_scene', input: {} }); o.onEvent({ type: 'tool_result', id: 't1', isError: false, text: 'ok' }); o.onEvent({ type: 'text', text: 'خلصت ✓' }); self.busy = false; r({}); }, 60); }); }; }
-    };
-    var orig = EF.test.node; EF.test.node = function (m) { return m === 'claudeChat' ? window.__fakeChat : m === 'mcpBridge' ? { mcpConfig: function () { return {}; } } : orig(m); };
-    EF.claude._setBridge({ pause: function () {} }); EF.claude._testReset();
-  });
+test('Claude tab: chat right here — setup, Enter sends, clients with their own profile + memory + conversation, expired login → token', async () => {
+  await page.addScriptTag({ path: path.join(__dirname, 'claudeFakes.js') });
+  await page.evaluate(t => window.__installClaudeFakes(t), 'build_scene');
   await open('claude'); await page.waitForTimeout(150);
+  // 1) not installed → install; 2) installed, not logged in → link with a token or log in
   assert.match(await page.locator('#view').textContent(), /ثبّت Claude Code/);
   await page.locator('button', { hasText: 'ثبّت Claude Code' }).click();
   assert.equal(await page.evaluate(() => window.__term), 'install');
   await page.evaluate(() => { window.__cc = { installed: true, loggedIn: false, version: '2.1.300', bin: '/x/claude' }; });
-  await page.locator('button', { hasText: 'اتأكد تاني' }).click(); await page.waitForTimeout(150);
-  await page.locator('button', { hasText: 'سجّل دخول' }).click();
-  assert.equal(await page.evaluate(() => window.__term), 'login');
+  await page.locator('button', { hasText: 'اتأكد تاني' }).first().click(); await page.waitForTimeout(150);
+  assert.match(await page.locator('#view').textContent(), /اربط حسابك في Claude/);
+  await page.locator('button', { hasText: 'اعمل توكن' }).click();
+  assert.equal(await page.evaluate(() => window.__term), 'token');
   await page.evaluate(() => { window.__cc = { installed: true, loggedIn: true, version: '2.1.300', bin: '/x/claude' }; });
-  await page.locator('button', { hasText: 'اتأكد تاني' }).click(); await page.waitForTimeout(150);
+  await page.locator('button', { hasText: 'اتأكد تاني' }).first().click(); await page.waitForTimeout(150);
   assert.match(await page.locator('#view').textContent(), /Claude Code 2\.1\.300 متسجّل/);
-  await page.locator('.claude-examples .chip').first().click();
-  assert.ok((await page.locator('.claude-input').inputValue()).length > 10, 'an example fills the box');
+  // Enter sends (Shift+Enter is a new line)
+  await page.fill('.claude-input', 'سطر');
+  await page.locator('.claude-input').press('Shift+Enter');
+  assert.deepEqual(await page.evaluate(() => window.__sent), [], 'Shift+Enter does not send');
   await page.fill('.claude-input', 'شيل السكتات');
-  await page.locator('button', { hasText: 'ابعت' }).click(); await page.waitForTimeout(250);
+  await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
   assert.deepEqual(await page.evaluate(() => window.__sent), ['شيل السكتات']);
-  const msgs = await page.$$eval('.claude-chat .msg', ms => ms.map(m => m.className + '|' + m.textContent));
-  assert.match(msgs[0], /user\|شيل السكتات/);
-  assert.ok(msgs.some(m => /tool ok\|build scene/.test(m)), msgs.join('\n'));
-  assert.ok(msgs.some(m => /ai\|خلصت ✓/.test(m)));
-  await page.screenshot({ path: path.join(SHOTS, 'ae-claude-chat.png'), fullPage: true });
+  assert.equal(await page.locator('.claude-input').inputValue(), '', 'the box empties');
+  let msgs = await page.$$eval('.claude-chat .msg', ms => ms.map(m => m.className + '|' + m.textContent));
+  assert.ok(msgs.some(m => /tool ok\|LABEL build_scene/.test(m)) && msgs.some(m => /ai\|خلصت ✓/.test(m)), msgs.join('\n'));
+  // a client: name it, fill the style, chat for them (their profile goes with the message), memory shows up
+  await page.locator('button', { hasText: '+ عميل' }).click();
+  await page.fill('.claude-new-client', 'مطعم الشيف'); await page.locator('.claude-new-client').press('Enter'); await page.waitForTimeout(150);
+  assert.match(await page.locator('#view').textContent(), /ملف مطعم الشيف/);
+  await page.locator('input[placeholder="ستايل الكابشن"]').fill('hormozi أصفر');
+  await page.locator('button', { hasText: 'احفظ' }).first().click(); await page.waitForTimeout(100);
+  assert.equal(await page.locator('.claude-chat .msg').count(), 0, 'a new client starts its own conversation');
+  assert.equal(await page.evaluate(() => window.__bridgeClient), 'c1', 'the panel tells the bridge who the client is');
+  await page.fill('.claude-input', 'اعمل كابشن'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.match(await page.evaluate(() => window.__ctx[1]), /العميل: مطعم الشيف[\s\S]*hormozi أصفر/);
+  assert.equal(await page.evaluate(() => window.__lastClient), 'مطعم الشيف');
+  await page.fill('.claude-input', 'كمان'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => window.__ctx[2]), null, 'the profile is only re-sent when it changed');
+  await page.evaluate(() => window.__fakeClients.remember('c1', 'بيحب الكابشن كبير'));
+  await page.locator('button', { hasText: 'ملفه' }).click(); await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-memory').textContent(), /بيحب الكابشن كبير/);
+  await page.screenshot({ path: path.join(SHOTS, 'ae-claude-clients.png'), fullPage: true });
+  // back to the general chat: its messages are still there; back to the client: theirs are
+  await page.selectOption('.claude-client-pick', '');  await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-chat').textContent(), /شيل السكتات/);
+  await page.selectOption('.claude-client-pick', 'c1'); await page.waitForTimeout(100);
+  assert.match(await page.locator('.claude-chat').textContent(), /اعمل كابشن/);
+  assert.doesNotMatch(await page.locator('.claude-chat').textContent(), /شيل السكتات/);
+  // the login dies mid-way → the token card comes back; paste a token → checked
+  await page.fill('.claude-input', 'auth'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.match(await page.locator('#view').textContent(), /Claude محتاج تربط حسابك تاني/);
+  await page.fill('.claude-token', 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz');
+  await page.locator('button', { hasText: 'احفظ واتأكد' }).click(); await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => EF.services.settings.keys.claudeToken), 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz');
   await page.locator('button', { hasText: 'محادثة جديدة' }).click();
   assert.equal(await page.locator('.claude-chat .msg').count(), 0);
-  assert.equal(await page.evaluate(() => window.__reset), true);
+  await page.selectOption('.claude-client-pick', '');
 });
 
 test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
@@ -343,7 +365,6 @@ test('Claude tab: status, install + Claude Code command, examples to copy, a liv
   assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
   assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
   assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
-  assert.match(await page.locator('.claude-chat').evaluate(e => getComputedStyle(e, '::before').content), /اكتب لـ Claude/);
   await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'ae_build_scene', args: {} }); });
   await page.waitForTimeout(100);
   assert.match(await page.locator('.claude-row.run').first().textContent(), /build scene/);

@@ -691,3 +691,6 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .claude-chat:empty::before { content: "اكتب لـ Claude تحت وهو يشتغل هنا قدامك ✦"; }
 .msg.ai.err { border-color: rgba(251, 113, 133, .4); color: #fecdd3; }
 .claude-input { min-height: 64px; resize: vertical; }
+.claude-clients .row label { min-width: 48px; }
+.claude-memory { display: grid; gap: 4px; margin-bottom: 8px; }
+.claude-memory .claude-row { grid-template-columns: 14px 1fr auto; }
