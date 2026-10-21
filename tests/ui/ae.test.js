@@ -298,6 +298,44 @@ test('settings: "test every tool" runs the self-test and shows a copyable report
   assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
 });
 
+test('Claude tab: chat right here — setup steps when Claude Code is missing, then send, see Claude work step by step, examples, new chat', async () => {
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__cc = { installed: false };
+    window.__fakeChat = {
+      status: () => Promise.resolve(window.__cc), terminalCommand: k => k === 'install' ? 'curl -fsSL https://claude.ai/install.sh | bash' : 'claude auth login', openTerminal: k => { window.__term = k; },
+      ClaudeChat: function (o) { var self = this; this.bin = o.bin; this.busy = false; this.stop = function () {}; this.reset = function () { window.__reset = true; };
+        this.send = function (t) { self.busy = true; window.__sent.push(t); return new Promise(function (r) { setTimeout(function () { o.onEvent({ type: 'text', text: 'حاضر' }); o.onEvent({ type: 'tool', id: 't1', name: 'build_scene', input: {} }); o.onEvent({ type: 'tool_result', id: 't1', isError: false, text: 'ok' }); o.onEvent({ type: 'text', text: 'خلصت ✓' }); self.busy = false; r({}); }, 60); }); }; }
+    };
+    var orig = EF.test.node; EF.test.node = function (m) { return m === 'claudeChat' ? window.__fakeChat : m === 'mcpBridge' ? { mcpConfig: function () { return {}; } } : orig(m); };
+    EF.claude._setBridge({ pause: function () {} }); EF.claude._testReset();
+  });
+  await open('claude'); await page.waitForTimeout(150);
+  assert.match(await page.locator('#view').textContent(), /ثبّت Claude Code/);
+  await page.locator('button', { hasText: 'ثبّت Claude Code' }).click();
+  assert.equal(await page.evaluate(() => window.__term), 'install');
+  await page.evaluate(() => { window.__cc = { installed: true, loggedIn: false, version: '2.1.300', bin: '/x/claude' }; });
+  await page.locator('button', { hasText: 'اتأكد تاني' }).click(); await page.waitForTimeout(150);
+  await page.locator('button', { hasText: 'سجّل دخول' }).click();
+  assert.equal(await page.evaluate(() => window.__term), 'login');
+  await page.evaluate(() => { window.__cc = { installed: true, loggedIn: true, version: '2.1.300', bin: '/x/claude' }; });
+  await page.locator('button', { hasText: 'اتأكد تاني' }).click(); await page.waitForTimeout(150);
+  assert.match(await page.locator('#view').textContent(), /Claude Code 2\.1\.300 متسجّل/);
+  await page.locator('.claude-examples .chip').first().click();
+  assert.ok((await page.locator('.claude-input').inputValue()).length > 10, 'an example fills the box');
+  await page.fill('.claude-input', 'شيل السكتات');
+  await page.locator('button', { hasText: 'ابعت' }).click(); await page.waitForTimeout(250);
+  assert.deepEqual(await page.evaluate(() => window.__sent), ['شيل السكتات']);
+  const msgs = await page.$$eval('.claude-chat .msg', ms => ms.map(m => m.className + '|' + m.textContent));
+  assert.match(msgs[0], /user\|شيل السكتات/);
+  assert.ok(msgs.some(m => /tool ok\|build scene/.test(m)), msgs.join('\n'));
+  assert.ok(msgs.some(m => /ai\|خلصت ✓/.test(m)));
+  await page.screenshot({ path: path.join(SHOTS, 'ae-claude-chat.png'), fullPage: true });
+  await page.locator('button', { hasText: 'محادثة جديدة' }).click();
+  assert.equal(await page.locator('.claude-chat .msg').count(), 0);
+  assert.equal(await page.evaluate(() => window.__reset), true);
+});
+
 test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
   await open('claude');
   assert.match(await page.locator('#tab-title').textContent(), /Claude/);
@@ -305,10 +343,11 @@ test('Claude tab: status, install + Claude Code command, examples to copy, a liv
   assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
   assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
   assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
+  assert.match(await page.locator('.claude-chat').evaluate(e => getComputedStyle(e, '::before').content), /اكتب لـ Claude/);
   await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'ae_build_scene', args: {} }); });
   await page.waitForTimeout(100);
   assert.match(await page.locator('.claude-row.run').first().textContent(), /build scene/);
-  assert.match(await page.locator('.claude-status').textContent(), /آخر مرة Claude كلّم البانل: دلوقتي/);
+  assert.match(await page.locator('.claude-status').textContent(), /آخر مرة Claude استخدم أداة هنا: دلوقتي/);
   await page.evaluate(() => { EF.claude._event({ phase: 'done', name: 'ae_build_scene', ms: 1500 }); EF.claude._event({ phase: 'start', name: 'ae_tool', args: {} }); EF.claude._event({ phase: 'error', name: 'ae_tool', ms: 300, error: 'مفيش كليب' }); });
   await page.waitForTimeout(100);
   assert.match(await page.locator('.claude-row.ok').first().textContent(), /1\.5s/);

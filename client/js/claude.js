@@ -1,7 +1,7 @@
-/* تاب Claude: Claude Desktop / Claude Code بيمنتج هنا عن طريق MCP — الحالة، التثبيت، اللي بيعمله لايف، أمثلة، وإيقاف مؤقت. */
+/* تاب Claude: شات مع Claude جوه البانل (Claude Code على الجهاز، باشتراكك) + الحالة واللي اتعمل + إيقاف مؤقت + Claude Desktop. */
 (function () {
   var EF = window.EF, UI = EF.ui, h = UI.h;
-  var state = { app: null, bridge: null, error: null, log: [], lastSeen: null, paused: false, view: null };
+  var state = { app: null, bridge: null, error: null, log: [], lastSeen: null, paused: false, view: null, chat: [], engine: null, cc: null, ccAt: 0 };
   var NAMES = { premiere: 'بريمير', ae: 'الأفتر' };
   var EXAMPLES = {
     premiere: [
@@ -48,6 +48,7 @@
     t.remove();
   }
   function bundle() { try { return EF.node('mcpBundle'); } catch (e) { return null; } }
+  function chatMod() { try { return EF.node('claudeChat'); } catch (e) { return null; } }
 
   EF.claude = {
     /** start the bridge for this panel (called once the services are up) */
@@ -63,29 +64,104 @@
       } catch (e) { state.error = e.message; return Promise.resolve(null); }
     },
     info: function () { return { port: state.bridge && state.bridge.port, error: state.error, log: state.log.slice(), paused: state.paused, lastSeen: state.lastSeen }; },
-    /** for tests: what the bridge reports */
+    /** for tests: what the bridge reports, and a stand-in bridge */
     _event: onEvent,
-    /** the tab itself */
+    _setBridge: function (b) { state.bridge = b; },
+    _testReset: function () { state.cc = null; state.ccAt = 0; state.chat = []; state.engine = null; },
+    /** the tab itself: a chat with Claude right here (Claude Code on this machine), plus setup and Claude Desktop */
     tab: function (app) {
       return {
-        id: 'claude', icon: '✳', label: 'Claude', title: 'Claude يمنتج هنا',
+        id: 'claude', icon: '✳', label: 'Claude', title: 'Claude',
         render: function (view) {
           state.app = state.app || app; state.view = view;
-          var B = bundle();
-          var statusBox = h('div', { class: 'claude-status' }), logBox = h('div', { class: 'claude-log' }), pauseBtn;
+          var B = bundle(), C = chatMod();
+          var setupBox = h('div'), chatBox = h('div', { class: 'chat claude-chat' }), logBox = h('div', { class: 'claude-log' }), statusBox = h('div', { class: 'claude-status' });
+          var input = h('textarea', { class: 'grow claude-input', rows: 3, placeholder: state.app === 'ae' ? 'قول لـ Claude عايز إيه في الأفتر… (مثلًا: اعمل إنترو للوجو بنيون)' : 'قول لـ Claude عايز إيه في الفيديو… (مثلًا: شيل السكتات وحط كابشن)' });
+          var sendBtn, stopBtn, pauseBtn;
+          input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } });
+
+          function drawChat() {
+            UI.empty(chatBox);
+            state.chat.forEach(function (m) {
+              if (m.role === 'tool') chatBox.appendChild(h('div', { class: 'msg tool' + (m.status === 'ok' ? ' ok' : m.status === 'err' ? ' fail' : '') , title: m.detail || '' }, m.label));
+              else chatBox.appendChild(h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : m.role === 'error' ? 'ai err' : 'ai') }, m.text));
+            });
+            if (state.engine && state.engine.busy) chatBox.appendChild(h('div', { class: 'msg tool' }, 'Claude بيفكّر…'));
+            chatBox.scrollTop = chatBox.scrollHeight;
+            if (sendBtn) sendBtn.disabled = !!(state.engine && state.engine.busy);
+            if (stopBtn) stopBtn.style.display = state.engine && state.engine.busy ? '' : 'none';
+          }
+          function drawSetup() {
+            UI.empty(setupBox);
+            var cs = state.cc;
+            if (!cs) { setupBox.appendChild(UI.hint('بيدوّر على Claude Code…')); return; }
+            if (cs.installed && cs.loggedIn) { setupBox.appendChild(h('div', { class: 'claude-st ok' }, h('b', null, '✓'), ' Claude Code ' + (cs.version || '') + ' متسجّل — اكتب وهو يشتغل هنا (باشتراكك، من غير مفتاح API)')); return; }
+            var steps = h('div', { class: 'claude-status' });
+            steps.appendChild(h('div', { class: 'claude-st ' + (cs.installed ? 'ok' : 'bad') }, h('b', null, cs.installed ? '✓' : '1'), cs.installed ? ' Claude Code متسطب' : ' ثبّت Claude Code (مرة واحدة — دقيقة)'));
+            steps.appendChild(h('div', { class: 'claude-st ' + (cs.loggedIn ? 'ok' : 'bad') }, h('b', null, cs.loggedIn ? '✓' : '2'), ' سجّل دخول بحساب Claude بتاعك (الاشتراك)'));
+            setupBox.appendChild(UI.card('عشان تكلّم Claude هنا',
+              steps,
+              UI.row(
+                !cs.installed ? UI.btn('ثبّت Claude Code', function () { term('install'); }, 'primary') : null,
+                cs.installed && !cs.loggedIn ? UI.btn('سجّل دخول', function () { term('login'); }, 'primary') : null,
+                UI.btn('اتأكد تاني', function () { check(true); }, 'small')),
+              UI.hint('بيفتح التيرمنال ويكتب الأمر لوحده: ' + (C ? C.terminalCommand(cs.installed ? 'login' : 'install') : '') + ' — في تسجيل الدخول المتصفح هيفتح، وافق، وارجع هنا ودوس "اتأكد تاني".')));
+          }
+          function term(kind) { try { C.openTerminal(kind); UI.toast(kind === 'install' ? 'التيرمنال فتح وبيسطّب — لما يخلص دوس "اتأكد تاني"' : 'التيرمنال فتح — كمّل تسجيل الدخول في المتصفح، وبعدين "اتأكد تاني"'); } catch (e) { UI.toast(e.message, true); } }
+          function check(force) {
+            if (!C) { state.cc = { installed: false }; return drawSetup(); }
+            if (state.cc && !force && Date.now() - state.ccAt < 60000) return drawSetup();
+            if (force) { state.cc = null; drawSetup(); }
+            C.status().then(function (r) { state.cc = r; state.ccAt = Date.now(); drawSetup(); }).catch(function () { state.cc = { installed: false }; drawSetup(); });
+          }
+          function send(textArg) {
+            var text = (textArg || input.value).trim();
+            if (!text) return;
+            if (!state.bridge) return UI.toast('البانل لسه بيجهّز الاتصال — ثانية وجرّب', true);
+            if (!state.cc || !state.cc.installed || !state.cc.loggedIn) { check(true); return UI.toast('ثبّت Claude Code وسجّل دخول الأول (فوق)', true); }
+            if (!state.engine || state.engine.bin !== state.cc.bin) {
+              state.engine = new C.ClaudeChat({ bin: state.cc.bin, app: state.app, mcp: EF.node('mcpBridge').mcpConfig(state.bridge), onEvent: onChat });
+            }
+            if (state.engine.busy) return;
+            input.value = '';
+            state.chat.push({ role: 'user', text: text });
+            drawChat();
+            state.engine.send(text).then(drawChat);
+            drawChat();
+          }
+          function onChat(e) {
+            if (e.type === 'text') state.chat.push({ role: 'ai', text: e.text });
+            else if (e.type === 'tool') state.chat.push({ role: 'tool', id: e.id, label: e.label || label({ name: e.name, args: e.input }), status: 'run' });
+            else if (e.type === 'tool_result') { var t = state.chat.filter(function (m) { return m.role === 'tool' && m.id === e.id; })[0]; if (t) { t.status = e.isError ? 'err' : 'ok'; t.detail = e.text; if (e.isError) state.chat.push({ role: 'error', text: '✗ ' + (e.text || 'الأداة فشلت') }); } }
+            else if (e.type === 'error') state.chat.push({ role: 'error', text: e.message });
+            if (state.view && state.view.isConnected && EF.currentTab === 'claude') drawChat();
+          }
+          state.redrawChat = drawChat;
+
+          // the chat
+          view.appendChild(setupBox);
+          var ex = h('div', { class: 'chips claude-examples' });
+          (EXAMPLES[state.app] || EXAMPLES.premiere).forEach(function (t) { ex.appendChild(h('button', { type: 'button', class: 'chip', onclick: function () { input.value = t; input.focus(); } }, t)); });
+          view.appendChild(UI.card('كلّم Claude', chatBox,
+            UI.row(input),
+            UI.row(sendBtn = UI.btn('ابعت', function () { send(); }, 'primary'),
+              stopBtn = UI.btn('■ وقّف', function () { if (state.engine) state.engine.stop(); }, 'small'),
+              UI.btn('محادثة جديدة', function () { if (state.engine) state.engine.reset(); state.chat = []; drawChat(); }, 'small')),
+            UI.hint('Ctrl/⌘ + Enter يبعت. Claude بيشتغل في ' + NAMES[state.app] + ' قدامك وانت شايف كل خطوة، وتقدر تكمّل معاه في نفس المحادثة ("كبّر العنوان"، "رجّع اللي فات").'),
+            ex));
+
+          // status, pause, live log
           state.draw = function () {
             UI.empty(statusBox);
-            var ds = null; try { ds = B && B.desktopStatus(); } catch (e) {}
             var rows = [
               [!!state.bridge, state.bridge ? NAMES[state.app] + ' جاهز لـ Claude' : 'البانل مش جاهز' + (state.error ? ': ' + state.error : '')],
-              [ds ? ds.installed : null, !ds ? 'Claude Desktop: مش عارف أتأكد' : ds.installed ? 'EditFast متثبّت في Claude Desktop' : ds.app ? 'Claude Desktop موجود بس EditFast مش متثبّت فيه — دوس "ثبّت" تحت' : 'Claude Desktop مش متسطب (أو بتستخدم Claude Code)'],
-              [state.lastSeen ? true : null, 'آخر مرة Claude كلّم البانل: ' + ago(state.lastSeen)]
+              [state.lastSeen ? true : null, 'آخر مرة Claude استخدم أداة هنا: ' + ago(state.lastSeen)]
             ];
             rows.forEach(function (r) { statusBox.appendChild(h('div', { class: 'claude-st ' + (r[0] === true ? 'ok' : r[0] === false ? 'bad' : 'wait') }, h('b', null, r[0] === true ? '✓' : r[0] === false ? '✗' : '•'), ' ', r[1])); });
             if (state.paused) statusBox.appendChild(h('div', { class: 'claude-st bad' }, h('b', null, '⏸'), ' Claude متوقّف مؤقتًا — مش هيقدر يعمل حاجة لحد ما تشغّله'));
             if (pauseBtn) pauseBtn.textContent = state.paused ? '▶ شغّل Claude تاني' : '⏸ وقّف Claude مؤقتًا';
             UI.empty(logBox);
-            if (!state.log.length) logBox.appendChild(UI.hint('لسه Claude ماعملش حاجة. اكتبله في Claude Desktop أو Claude Code وهتشوف كل خطوة هنا.'));
+            if (!state.log.length) logBox.appendChild(UI.hint('لسه Claude ماعملش حاجة.'));
             state.log.forEach(function (r) {
               var icon = r.status === 'run' ? '⏳' : r.status === 'ok' ? '✓' : r.status === 'blocked' ? '⏸' : '✗';
               logBox.appendChild(h('div', { class: 'claude-row ' + r.status },
@@ -94,21 +170,20 @@
                 r.error ? h('div', { class: 'hint err' }, r.error) : null));
             });
           };
-          view.appendChild(UI.card('الحالة', statusBox,
+          view.appendChild(UI.card('الحالة واللي اتعمل', statusBox,
             UI.row(pauseBtn = UI.btn('⏸ وقّف Claude مؤقتًا', function () { state.paused = !state.paused; if (state.bridge) state.bridge.pause(state.paused); state.draw(); }, 'small'),
-              UI.btn('اتصل تاني', function () { EF.claude.start(state.app); }, 'small'))));
+              UI.btn('اتصل تاني', function () { EF.claude.start(state.app); }, 'small')),
+            logBox));
+
+          // Claude Desktop / Claude Code in the terminal (optional)
           var cmdText = ''; try { cmdText = B ? B.claudeCodeCommand() : ''; } catch (e) {}
-          view.appendChild(UI.card('التثبيت (مرة واحدة)',
-            UI.row(UI.btn('ثبّت في Claude Desktop', function () { UI.safe('بيجهّز', install); }, 'primary')),
-            UI.hint('بيعمل ملف EditFast.mcpb في التنزيلات ويفتحه ← Claude Desktop يسألك Install ← دوس Install. مش محتاج مفتاح API، شغّال باشتراكك في Claude.'),
+          var ds = null; try { ds = B && B.desktopStatus(); } catch (e2) {}
+          view.appendChild(UI.card('أو من Claude Desktop (اختياري)',
+            h('div', { class: 'claude-st ' + (ds && ds.installed ? 'ok' : 'wait') }, h('b', null, ds && ds.installed ? '✓' : '•'), ds && ds.installed ? ' EditFast متثبّت في Claude Desktop' : ' مش متثبّت في Claude Desktop'),
+            UI.row(UI.btn('ثبّت في Claude Desktop', function () { UI.safe('بيجهّز', install); }, 'small')),
             UI.row(h('input', { class: 'grow ltr claude-cmd', readonly: 'readonly', value: cmdText }), UI.btn('انسخ', function () { copy(cmdText, 'اتنسخ — الصقه في التيرمنال'); }, 'small')),
-            UI.hint('لـ Claude Code بدل Claude Desktop: الصق الأمر ده في التيرمنال مرة واحدة.'),
-            UI.hint('مهم: البانل ده لازم يفضل مفتوح وانت شغّال مع Claude — ' + (state.app === 'ae' ? 'وممكن تفتح بانل EditFast في بريمير كمان و Claude يشتغل في الاتنين.' : 'وممكن تفتح EditFast Motion في الأفتر كمان و Claude يشتغل في الاتنين.'))));
-          var ex = h('div', { class: 'chips claude-examples' });
-          (EXAMPLES[state.app] || EXAMPLES.premiere).forEach(function (t) { ex.appendChild(h('button', { type: 'button', class: 'chip', onclick: function () { copy(t, 'اتنسخ — الصقه في Claude'); } }, t)); });
-          view.appendChild(UI.card('جرّب تقوله', ex, UI.hint('دوس على أي جملة تتنسخ، والصقها في Claude. اكتب بالمصري عادي.')));
-          view.appendChild(UI.card('Claude بيعمل إيه دلوقتي', logBox));
-          state.draw();
+            UI.hint('ده لو حابب تكلّم Claude من برنامج Claude Desktop أو من Claude Code في التيرمنال بدل الشات اللي فوق — نفس الأدوات.')));
+          check(false); drawChat(); state.draw();
         }
       };
     }

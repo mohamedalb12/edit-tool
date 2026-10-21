@@ -1,8 +1,8 @@
 {
-  "version": "2.4.1",
-  "url": "EditFast-2.4.1.zip",
-  "sha256": "29f38d2574fff250e9dba0f3329babca12bd1e0c9be8934cb0d871c0921ee287",
-  "size": 3485412,
-  "notes": "تاب Claude لوحده: الحالة، التثبيت، اللي Claude بيعمله لايف، أمثلة، وإيقاف مؤقت",
+  "version": "2.5.0",
+  "url": "EditFast-2.5.0.zip",
+  "sha256": "02b04737f4971d40d292529ea372748490263fc73a3a2af26af8d2734d896f79",
+  "size": 3492475,
+  "notes": "كلّم Claude جوه بريمير والأفتر (شات في تاب Claude) — باشتراكك من غير مفتاح API",
   "date": "2026-10-21"
 }

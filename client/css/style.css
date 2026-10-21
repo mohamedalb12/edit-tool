@@ -687,3 +687,7 @@ input[type=checkbox], input[type=radio] { accent-color: #f97316; }
 .claude-row.ok .ic { color: var(--ok); } .claude-row.err .ic, .claude-row.blocked .ic { color: var(--err); }
 .claude-row.run { background: rgba(249, 115, 22, .08); }
 .claude-row .hint { grid-column: 2 / -1; margin: 0; }
+.claude-chat { min-height: 220px; }
+.claude-chat:empty::before { content: "اكتب لـ Claude تحت وهو يشتغل هنا قدامك ✦"; }
+.msg.ai.err { border-color: rgba(251, 113, 133, .4); color: #fecdd3; }
+.claude-input { min-height: 64px; resize: vertical; }
