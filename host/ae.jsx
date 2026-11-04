@@ -1613,6 +1613,43 @@ EFMAPI.selfTest = function () {
   return r;
 };
 
+/* ---------------- effects dictionary: what each effect's parameters are really called in THIS After Effects ---------------- */
+/**
+ * a = { matches: ['ADBE Glo2', ...] } -> { 'ADBE Glo2': { name, params: [{ i, matchName, name, type }] } | { missing: true } }
+ * Each effect goes on a throwaway solid in a throwaway comp; nothing stays in the project.
+ */
+EFMAPI.effectDictionary = function (a) {
+  var out = {}, list = a.matches || [], i, j, c = null, L = null;
+  app.beginUndoGroup('EF effects dictionary');
+  try {
+    c = app.project.items.addComp('EF Dictionary', 200, 200, 1, 1, 25);
+    L = c.layers.addSolid([0.5, 0.5, 0.5], 'EF Dictionary', 200, 200, 1, 1);
+    for (i = 0; i < list.length; i++) {
+      var mn = list[i], fx = L.property('ADBE Effect Parade'), e = null;
+      try { if (fx.canAddProperty && !fx.canAddProperty(mn)) { out[mn] = { missing: true }; continue; } e = fx.addProperty(mn); } catch (eA) { e = null; }
+      if (!e) { out[mn] = { missing: true }; continue; }
+      e = L.property('ADBE Effect Parade').property(L.property('ADBE Effect Parade').numProperties);
+      var info = { name: e.name, params: [] };
+      // params, and the params inside a param group (Fractal Noise > Transform > Scale), with their path
+      (function collect(g, pre, depth) {
+        for (var q = 1; q <= g.numProperties; q++) {
+          var p = g.property(q);
+          if (!p) continue;
+          var isGroup = false; try { isGroup = p.propertyType !== PropertyType.PROPERTY; } catch (eT) {}
+          info.params.push({ i: q, matchName: p.matchName, name: p.name, group: pre || null, type: isGroup ? 'group' : String(p.propertyValueType) });
+          if (isGroup && depth < 2) collect(p, (pre ? pre + ' > ' : '') + p.name, depth + 1);
+        }
+      })(e, '', 0);
+      out[mn] = info;
+      try { L.property('ADBE Effect Parade').property(L.property('ADBE Effect Parade').numProperties).remove(); } catch (eR) {}
+    }
+  } finally {
+    try { if (c) { var src = L && L.source; c.remove(); if (src && src.remove && (!src.usedIn || !src.usedIn.length)) src.remove(); } } catch (eC) {}
+    app.endUndoGroup();
+  }
+  return out;
+};
+
 /* ---------------- "test every tool": scratch comps, AE's own expression check, clean-up ---------------- */
 EFM.T = null;
 /** remember what the project had, so the test only ever checks / removes what it made */

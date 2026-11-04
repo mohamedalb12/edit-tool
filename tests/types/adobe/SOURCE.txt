@@ -1,0 +1,2 @@
+5a69e41e5c5b59f7254cc07ca1e57cf8b6884867 2026-05-18
+https://github.com/docsforadobe/Types-for-Adobe

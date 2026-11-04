@@ -405,6 +405,13 @@ The "اختبر كل الأدوات" button, the first card in AE settings, work
 14. **Adobe apps start with a short PATH.** Search the usual install dirs for every CLI.
 15. **AE "Allow Scripts to Write Files and Access Network"** must be on for MOGRT export, render, and snapshots. Check `Pref_SCRIPTING_FILE_NETWORK_SECURITY` and explain it.
 16. **Offline media for tests is generated with ffmpeg lavfi** (tones with silences, testsrc, colour plus drawbox).
+17. **Check the host scripts against the real APIs:** type-check `ae.jsx` / `host.jsx` with TypeScript `checkJs` against **Types-for-Adobe** (github.com/docsforadobe/Types-for-Adobe, MIT; AE 26 + Premiere 24 typings vendored in the repo). Keep an explicit allowlist of the typings' known false positives, each with its reason. A call to a method that doesn't exist (e.g. `renderQueue.renderAll()`) must fail a test.
+18. **When the typings and reality disagree, follow Adobe's official samples** (github.com/Adobe-CEP/Samples, PProPanel). Examples: `markers.createMarker(time)` takes one argument, `marker.setColorByIndex(index)` takes **one** argument (0–7), and `seq.createCaptionTrack(item, start)` works without a format (the format is the number `Sequence.CAPTION_FORMAT_SUBTITLE`, never a string).
+19. **Effects dictionary from the user's AE:** an effect param addressed by an index matchName (`ADBE Glo2-0003`) is a guess, and a wrong guess silently sets the wrong param.
+   - The host applies every effect the tools use to a throwaway solid and lists each param (matchName, name, group path, including params inside groups such as Fractal Noise > Transform > Scale), then removes everything.
+   - Node checks every param the tools set: missing → failure; the name doesn't contain the expected word (e.g. "Radius") → "maybe the wrong param"; plugin not installed → listed.
+   - This runs as part of the self-test, and the dictionary is saved to `~/.editfast/ae-effects.json`.
+   - Never trust a match-name list from the web; match names can change between AE versions.
 
 ---
 

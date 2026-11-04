@@ -997,6 +997,13 @@ class AEServices {
   }
 
   async selfTest() { return this.host('selfTest', {}); }
+  /** what this After Effects calls every effect parameter we set → audit (saved to ~/.editfast/ae-effects.json) */
+  async effectAudit() {
+    const D = require('./aeDictionary');
+    const dict = await this.host('effectDictionary', { matches: D.matches() });
+    try { fs.writeFileSync(path.join(config.dataDir(), 'ae-effects.json'), JSON.stringify(dict, null, 1)); } catch (_) {}
+    return D.audit(dict);
+  }
   /** every tool, for real, on scratch comps in this AE (nothing paid / AI): → report */
   fullTest(o = {}) { return require('./aeSelfTest').run(this, o); }
 }

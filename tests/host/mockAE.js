@@ -130,6 +130,17 @@ class Group {
 class Shape { constructor() { this.vertices = []; this.inTangents = []; this.outTangents = []; this.closed = true; } }
 
 /* ---- effects ---- */
+// what AE (English UI) calls the index-style params, so the effects dictionary check sees real names
+const REALNAME = {
+  'ADBE Glo2-0001': 'Glow Based On', 'ADBE Glo2-0002': 'Glow Threshold', 'ADBE Glo2-0003': 'Glow Radius', 'ADBE Glo2-0004': 'Glow Intensity',
+  'ADBE Drop Shadow-0001': 'Shadow Color', 'ADBE Drop Shadow-0002': 'Opacity', 'ADBE Drop Shadow-0003': 'Direction', 'ADBE Drop Shadow-0004': 'Distance', 'ADBE Drop Shadow-0005': 'Softness',
+  'ADBE Ramp-0001': 'Start of Ramp', 'ADBE Ramp-0002': 'Start Color', 'ADBE Ramp-0003': 'End of Ramp', 'ADBE Ramp-0004': 'End Color', 'ADBE Ramp-0005': 'Ramp Shape',
+  'ADBE Tint-0001': 'Map Black To', 'ADBE Tint-0002': 'Map White To', 'ADBE Tint-0003': 'Amount to Tint',
+  'ADBE Motion Blur-0001': 'Direction', 'ADBE Motion Blur-0002': 'Blur Length', 'ADBE Noise-0001': 'Amount of Noise',
+  'ADBE Turbulent Displace-0001': 'Displacement', 'ADBE Turbulent Displace-0002': 'Amount', 'ADBE Turbulent Displace-0003': 'Size', 'ADBE Turbulent Displace-0004': 'Offset (Turbulence)', 'ADBE Turbulent Displace-0005': 'Complexity', 'ADBE Turbulent Displace-0006': 'Evolution',
+  'ADBE Corner Pin-0001': 'Upper Left', 'ADBE Corner Pin-0002': 'Upper Right', 'ADBE Corner Pin-0003': 'Lower Left', 'ADBE Corner Pin-0004': 'Lower Right',
+  'ADBE Angle Control-0001': 'Angle'
+};
 function effect(matchName) {
   const g = new Group(matchName, { 'ADBE Slider Control': 'Slider Control', 'ADBE Color Control': 'Color Control', 'ADBE Fill': 'Fill', 'ADBE Checkbox Control': 'Checkbox Control', 'ADBE Point Control': 'Point Control' }[matchName] || matchName, PropertyType.INDEXED_GROUP);
   if (matchName === 'ADBE Slider Control') g.add(new Prop('ADBE Slider Control-0001', 'Slider', 0, PVT.OneD));
@@ -139,15 +150,15 @@ function effect(matchName) {
   else if (matchName === 'ADBE Fill') { g.add(new Prop('ADBE Fill-0001', 'Fill Mask', 0, PVT.OneD)); g.add(new Prop('ADBE Fill-0002', 'Color', [1, 0, 0, 1], PVT.COLOR)); }
   else if (matchName === 'ADBE Gaussian Blur 2') g.add(new Prop('ADBE Gaussian Blur 2-0001', 'Blurriness', 0, PVT.OneD));
   else if (/^ADBE (Glo2|Drop Shadow|Ramp|Tint|Motion Blur|Noise|Turbulent Displace)$/.test(matchName)) {
-    const n = { 'ADBE Glo2': 4, 'ADBE Drop Shadow': 5, 'ADBE Ramp': 5, 'ADBE Tint': 3, 'ADBE Motion Blur': 2, 'ADBE Noise': 1, 'ADBE Turbulent Displace': 3 }[matchName];
+    const n = { 'ADBE Glo2': 4, 'ADBE Drop Shadow': 5, 'ADBE Ramp': 5, 'ADBE Tint': 3, 'ADBE Motion Blur': 2, 'ADBE Noise': 1, 'ADBE Turbulent Displace': 6 }[matchName];
     const colors = { 'ADBE Drop Shadow-0001': 1, 'ADBE Ramp-0002': 1, 'ADBE Ramp-0004': 1, 'ADBE Tint-0001': 1, 'ADBE Tint-0002': 1 };
-    for (let i = 1; i <= n; i++) { const m = matchName + '-000' + i; g.add(colors[m] ? new Prop(m, m, [0, 0, 0, 1], PVT.COLOR) : new Prop(m, m, 0, PVT.OneD)); }
+    for (let i = 1; i <= n; i++) { const m = matchName + '-000' + i; g.add(colors[m] ? new Prop(m, REALNAME[m] || m, [0, 0, 0, 1], PVT.COLOR) : new Prop(m, REALNAME[m] || m, 0, PVT.OneD)); }
   }
   else {
     const def = Object.values(require('../../core/aeScene').EFFECTS).find(d => d.match === matchName);
     const plugin = { 'VIDEOCOPILOT 3DSaber': ['Glow Intensity', 'Core Size', 'Start Offset'], 'ADBE Simple Choker': ['Choke Matte'], 'ADBE Offset': ['Shift Center To'], 'ADBE Shift Channels': ['Take Green From', 'Take Blue From'], 'ADBE Geometry2': ['Anchor Point', 'Position', 'Uniform Scale', 'Scale Height', 'Scale Width', 'Skew', 'Skew Axis', 'Rotation', 'Opacity', 'Use Composition\u2019s Shutter Angle', 'Shutter Angle', 'Sampling'], 'Keylight 906': ['Screen Colour', 'Screen Gain'] }[matchName];
     if (!def && !plugin) return null;
-    for (const pm of def ? Object.values(def.params) : plugin) if (!g.property(pm) && !(matchName === 'ADBE Fractal Noise' && pm === 'Scale')) g.add(new Prop(pm, pm, /^(Position|Shift Center To)$/.test(pm) ? [0, 0] : /Screen Colour/.test(pm) ? [0, 1, 0, 1] : /Color|Highlights|Midtones|Shadows$/.test(pm) && !/Shadows/.test(matchName) ? [0, 0, 0, 1] : /Center|^Start$|^End$|-0001$|-0003$/.test(pm) && matchName !== 'ADBE Gaussian Blur 2' && matchName !== 'ADBE Noise' && !/Motion Blur|Tint|Turbulent|Glo2/.test(matchName) ? [0, 0] : 0, PVT.OneD));
+    for (const pm of def ? Object.values(def.params) : plugin) if (!g.property(pm) && !(matchName === 'ADBE Fractal Noise' && pm === 'Scale')) g.add(new Prop(pm, REALNAME[pm] || pm, /^(Position|Shift Center To)$/.test(pm) ? [0, 0] : /Screen Colour/.test(pm) ? [0, 1, 0, 1] : /Color|Highlights|Midtones|Shadows$/.test(pm) && !/Shadows/.test(matchName) ? [0, 0, 0, 1] : /Center|^Start$|^End$|-0001$|-0003$/.test(pm) && matchName !== 'ADBE Gaussian Blur 2' && matchName !== 'ADBE Noise' && !/Motion Blur|Tint|Turbulent|Glo2/.test(matchName) ? [0, 0] : 0, PVT.OneD));
     if (matchName === 'ADBE Fractal Noise') g.add(new Group('ADBE Fractal Noise Transform', 'Transform')).add(new Prop('Scale', 'Scale', 100, PVT.OneD));
   }
   return g;

@@ -88,7 +88,7 @@ test('placeFile: imports into EditFast bin once, picks a free video track, trims
 test('createCaptions: imports the SRT and builds a caption track', () => {
   const { call, seq } = setup();
   call('createCaptions', { srtPath: '/c/captions.srt', start: 0 });
-  assert.deepEqual(seq.captionTracks, [{ item: 'captions.srt', start: 0, fmt: 'Subtitle Default' }]);
+  assert.deepEqual(seq.captionTracks, [{ item: 'captions.srt', start: 0, fmt: 0 }], 'the numeric Sequence.CAPTION_FORMAT_SUBTITLE, as Premiere has it');
 });
 
 test('applyKeyframes: adds Transform via QE and writes real keys at media time', () => {

@@ -423,7 +423,7 @@ EFAPI.addMarkers = function (a) {
     if (m.name) mk.name = m.name;
     if (m.comment) mk.comments = m.comment;
     if (m.duration) { try { mk.end = EF.timeObj(m.time + m.duration); } catch (e) {} }
-    if (m.color !== undefined && m.color !== null) { try { mk.setColorByIndex(EF.markerColor(m.color), 0); } catch (e2) {} }
+    if (m.color !== undefined && m.color !== null) { try { mk.setColorByIndex(Math.max(0, Math.min(7, EF.markerColor(m.color)))); } catch (e2) {} }
     n++;
   }
   return { added: n };
@@ -542,9 +542,10 @@ EFAPI.placeFiles = function (a) {
 
 EFAPI.createCaptions = function (a) {
   var seq = EF.seq(), item = EF.importFile(a.srtPath, 'EditFast/Captions'), res;
-  var fmt = (typeof Sequence !== 'undefined' && Sequence.CAPTION_FORMAT_SUBTITLE !== undefined) ? Sequence.CAPTION_FORMAT_SUBTITLE : 'Subtitle Default';
+  // as in Adobe's PProPanel sample: the format is a number (Sequence.CAPTION_FORMAT_SUBTITLE) or left out (= subtitle)
+  var fmt = (typeof Sequence !== 'undefined' && typeof Sequence.CAPTION_FORMAT_SUBTITLE === 'number') ? Sequence.CAPTION_FORMAT_SUBTITLE : null;
   if (typeof seq.createCaptionTrack !== 'function') throw new Error('\u0646\u0633\u062e\u0629 \u0628\u0631\u064a\u0645\u064a\u0631 \u062f\u064a \u0645\u0627\u0628\u062a\u0633\u0645\u062d\u0634 \u0628\u0625\u0636\u0627\u0641\u0629 \u0643\u0627\u0628\u0634\u0646 \u0645\u0646 \u0633\u0643\u0631\u064a\u0628\u062a \u2014 \u0627\u0633\u062a\u062e\u062f\u0645 \u0627\u0644\u0643\u0627\u0628\u0634\u0646 \u0627\u0644\u062b\u0627\u0628\u062a \u0628\u0627\u0644\u0634\u0643\u0644 \u0623\u0648 \u0627\u0633\u062d\u0628 \u0645\u0644\u0641 \u0627\u0644\u0640 SRT \u0645\u0646 bin \u0627\u0644\u0640 Captions \u0644\u0644\u062a\u0627\u064a\u0645\u0644\u064a\u0646');
-  res = seq.createCaptionTrack(item, a.start || 0, fmt);
+  res = fmt === null ? seq.createCaptionTrack(item, a.start || 0) : seq.createCaptionTrack(item, a.start || 0, fmt);
   if (res === false) throw new Error('\u0628\u0631\u064a\u0645\u064a\u0631 \u0631\u0641\u0636 \u064a\u0639\u0645\u0644 \u062a\u0631\u0627\u0643 \u0627\u0644\u0643\u0627\u0628\u0634\u0646 \u2014 \u0627\u0633\u062d\u0628 \u0645\u0644\u0641 \u0627\u0644\u0640 SRT \u0645\u0646 bin \u0627\u0644\u0640 EditFast/Captions \u0644\u0644\u062a\u0627\u064a\u0645\u0644\u064a\u0646 \u0628\u0625\u064a\u062f\u0643');
   return { ok: true, item: item.name, result: res === undefined ? null : String(res) };
 };

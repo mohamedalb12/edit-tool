@@ -22,8 +22,10 @@ test('self-test: every tool runs on its own scratch comp, AE checks the expressi
   assert.deepEqual(warns, [], 'nothing skipped inside a tool');
   assert.ok(r.total > 120, 'covers the tools: ' + r.total);
   assert.equal(r.env.pick3d, 'ADBE Calder');
-  assert.ok(r.results.every(x => x.layers > 0), 'every tool made its layers');
-  assert.ok(r.results.reduce((s, x) => s + x.expressions, 0) > 300, 'AE checked the expressions');
+  const tools = r.results.filter(x => x.group !== 'قاموس الإفكتات');
+  assert.ok(tools.every(x => x.layers > 0), 'every tool made its layers');
+  assert.ok(r.results.some(x => x.group === 'قاموس الإفكتات' && x.ok && / باراميتر$/.test(x.name)), 'the effects dictionary was read and checked');
+  assert.ok(r.results.reduce((s, x) => s + (x.expressions || 0), 0) > 300, 'AE checked the expressions');
   assert.deepEqual(ae.project._items.map(i => i.id), before, 'only what the test made is removed');
   assert.equal(ae.project.activeItem, mine, 'back to your comp');
   assert.match(r.report, /النتيجة: \d+ \/ \d+ شغالين ✓/);

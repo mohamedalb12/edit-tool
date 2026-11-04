@@ -132,6 +132,17 @@ async function run(svc, { only = null, keep = false, onStep } = {}) {
   const env = await svc.host('testBegin', {});
   const list = steps(svc, M, env).filter(s => !only || only.includes(s.group));
   const results = [];
+  // the effects dictionary: every parameter we set, checked against what THIS After Effects calls it
+  let dict = null;
+  if (!only || only.includes('قاموس الإفكتات')) {
+    step('بيقرا أسامي باراميترات الإفكتات من الأفتر…');
+    try {
+      dict = await svc.effectAudit();
+      for (const b of dict.bad) results.push({ group: 'قاموس الإفكتات', name: b.effect + ' · ' + b.param, ok: false, error: b.spec + ': ' + b.why });
+      for (const w of dict.warn) results.push({ group: 'قاموس الإفكتات', name: w.effect + ' · ' + w.param, ok: true, warn: ['ممكن يكون باراميتر غلط — ' + w.spec + ' ' + w.why] });
+      results.push({ group: 'قاموس الإفكتات', name: dict.checked + ' باراميتر', ok: true });
+    } catch (e) { results.push({ group: 'قاموس الإفكتات', name: 'القراية', ok: false, error: String(e && e.message || e).slice(0, 300) }); }
+  }
   try {
     for (let i = 0; i < list.length; i++) {
       const s = list[i], t0 = Date.now();
@@ -154,13 +165,13 @@ async function run(svc, { only = null, keep = false, onStep } = {}) {
   } finally {
     if (!keep) { step('بيمسح كومبات الاختبار…'); try { await svc.host('testEnd', {}); } catch (_) {} }
   }
-  const fail = results.filter(r => !r.ok), text = report(results, env);
+  const fail = results.filter(r => !r.ok), text = report(results, env, dict);
   const file = path.join(config.dataDir(), 'selftest', 'report.txt');
   try { fs.writeFileSync(file, text, 'utf8'); } catch (_) {}
   return { ok: results.length - fail.length, fail: fail.length, total: results.length, results, env, report: text, file };
 }
 
-function report(results, env) {
+function report(results, env, dict) {
   const fail = results.filter(r => !r.ok), lines = [];
   lines.push('EditFast Motion — اختبار كل الأدوات');
   lines.push(`After Effects ${env.version} · 3D renderer: ${env.pick3d || 'مش موجود (الثري دي مش هيشتغل)'} · كتابة ملفات: ${env.canWrite ? 'مسموح' : 'مقفول'}`);
@@ -175,6 +186,7 @@ function report(results, env) {
   const groups = [...new Set(results.map(r => r.group))];
   lines.push('', 'كل مجموعة:');
   for (const g of groups) { const rs = results.filter(r => r.group === g); lines.push(`${rs.every(r => r.ok) ? '✓' : '✗'} ${g}: ${rs.filter(r => r.ok).length}/${rs.length}`); }
+  if (dict && dict.missing.length) lines.push('', 'إفكتات مش متسطبة عندك (الأدوات اللي بتستخدمها هتتخطاها): ' + dict.missing.join('، '));
   const warns = results.filter(r => r.warn && r.warn.length);
   if (warns.length) { lines.push('', 'ملاحظات (اتعملت بس حاجة صغيرة اتخطّت):'); for (const r of warns.slice(0, 20)) lines.push(`• ${r.name}: ${r.warn.join('، ')}`); }
   return lines.join('\n');

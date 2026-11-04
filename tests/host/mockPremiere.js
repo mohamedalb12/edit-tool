@@ -239,7 +239,7 @@ function createPremiere() {
     }
   };
   const newSequence = (name, opts) => { const s = new Sequence(project, name, opts); project.seqs.push(s); project.activeSeq = s; return s; };
-  return { app, qe, Time, project, newSequence, qeLog, ProjectItemType: { CLIP: 1, BIN: 2, ROOT: 3, FILE: 4 }, Sequence: { CAPTION_FORMAT_SUBTITLE: 'Subtitle Default' } };
+  return { app, qe, Time, project, newSequence, qeLog, ProjectItemType: { CLIP: 1, BIN: 2, ROOT: 3, FILE: 4 }, Sequence: { CAPTION_FORMAT_SUBTITLE: 0, CAPTION_FORMAT_608: 1 } };
 }
 
 /** Load host.jsx into a fresh VM context wired to a fresh mock. Returns {call, pr}. */
