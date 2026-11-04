@@ -95,6 +95,11 @@
     voiceAd: function (o) { return rec('voiceAd', { audio: o.audio, brief: o.brief, captions: o.captions }, { sentences: 4, say: '' }); },
     highlightPresets: function () { return [{ id: 'blue-rest', name: 'الباقي أزرق والمبنى طبيعي' }, { id: 'bw-rest', name: 'الباقي أبيض وأسود' }, { id: 'gold', name: 'ذهبي' }, { id: 'color-building', name: 'المبنى ملوّن' }, { id: 'focus', name: 'غامق ومبلّر' }]; },
     highlight: function (o) { o.onStep && o.onStep('بيتتبّع'); return rec('highlight', { n: o.points.length, mode: o.mode, preset: o.preset, look: o.look, label: o.label }, { frames: 50, controls: 'EF Highlight 1 Controls', mode: o.mode }); },
+    separateAudio: function (o) { o.onStep && o.onStep('بيفصل…'); return rec('separateAudio', {}, { layers: ['Clip (EF Voice)', 'Clip (EF Music)'], cost: 0.12 }); },
+    faceTrack: function (o) { o.onStep && o.onStep('بيدوّر على الوش 50%'); return rec('faceTrack', {}, { frames: 30, found: 28, attached: 1 }); },
+    relight: function (o) { return rec('relight', { intensity: o.intensity, glow: o.glow, color: o.color, softness: o.softness }, { name: 'EF Light 1', follows: 'EF Face' }); },
+    slowMotion: function (o) { return rec('slowMotion', o, { remapped: 1, layers: 1, speed: o.speed }); },
+    beatCut: function (o) { return rec('beatCut', o, { markers: 16, cut: o.cut ? 4 : 0, bpm: 120 }); },
     selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); },
     fullTest: function (o) { o.onStep('(1/2) لوجو · Logo PNG 3d'); return rec('fullTest', {}, { ok: 1, fail: 1, total: 2, report: 'EditFast Motion — اختبار كل الأدوات\n✗ لوجو · Logo PNG 3d → renderer', results: [] }); }
   };

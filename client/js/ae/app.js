@@ -5,6 +5,7 @@
     { id: 'templates', label: 'قوالبي', title: 'قوالبي (لبريمير)', icon: 'templates', members: ['templates'] },
     { id: 'director', label: 'المونتير', title: 'المونتير الذكي', icon: 'auto', members: ['director'] },
     { id: 'claude', label: 'Claude', title: 'Claude يمنتج هنا', icon: 'claude', members: ['claude'] },
+    { id: 'smart', label: 'أدوات ذكية', title: 'أدوات ذكية', icon: 'agent', members: ['smart'] },
     { id: 'estate', label: 'عقارات', title: 'إبراز مبنى (عقارات)', icon: 'templates', members: ['estate'] },
     { id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي', icon: 'cube', members: ['studio'] },
     { id: 'track', label: 'تراكينج', title: 'تراكينج', icon: 'reels', members: ['track'] },
@@ -69,7 +70,7 @@
   };
 
   function boot() {
-    try { EF.services = EF.test && EF.test.services ? EF.test.services : new (EF.node('aeServices').AEServices)({ host: EF.host, log: function (m) { console.log('[EditFast Motion]', m); } }); } catch (err) { return failed(err); }
+    try { EF.services = EF.test && EF.test.services ? EF.test.services : new (EF.node('aeServices').AEServices)({ host: EF.host, analyzeFaces: EF.analyzeFaces, log: function (m) { console.log('[EditFast Motion]', m); } }); } catch (err) { return failed(err); }
     var nav = document.getElementById('nav');
     Array.prototype.forEach.call(document.querySelectorAll('[data-icon]'), function (el) { el.appendChild(UI.icon(el.getAttribute('data-icon'))); });
     EF.GROUPS.forEach(function (g) {

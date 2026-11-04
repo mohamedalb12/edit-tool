@@ -1202,23 +1202,50 @@ ${JSON.stringify(lite)}
     return { voice: voice ? voice.index : 0, music: music ? music.index : -1, seq: s };
   }
 
-  async cleanAudio({ track, strength = 'medium', loudness = -16, onProgress } = {}) {
+  /** mode: 'studio' (Auphonic-style: noise profile → hum notch / RNNoise / FFT, leveler, loudness; a before / after report) | 'classic' */
+  async cleanAudio({ track, strength = 'medium', loudness = -16, mode = 'studio', onProgress } = {}) {
     const audio = require('./audioTools');
     const g = await this.audioTracksGuess();
     const ti = track ?? g.voice, tr = g.seq.audio[ti];
     if (!tr || !tr.clips.length) throw new Error('مفيش صوت على التراك ده');
     const clips = tr.clips.filter(c => c.mediaPath && !c.disabled);
-    const files = [];
+    const files = [], reports = [];
     for (const [i, c] of clips.entries()) {
-      const out = path.join(config.cacheDir('audio'), `clean-${hash(c.mediaPath + '|' + c.inPoint + '|' + (c.end - c.start) + '|' + strength + '|' + loudness)}.wav`);
-      if (!fs.existsSync(out)) await audio.cleanFile(this.ffmpeg(), { file: c.mediaPath, start: c.inPoint, duration: c.end - c.start, out, strength, loudness });
+      const out = path.join(config.cacheDir('audio'), `clean-${hash(c.mediaPath + '|' + c.inPoint + '|' + (c.end - c.start) + '|' + strength + '|' + loudness + '|' + mode)}.wav`);
+      const rep = out.replace(/\.wav$/, '.json');
+      if (!fs.existsSync(out)) {
+        if (mode === 'classic') await audio.cleanFile(this.ffmpeg(), { file: c.mediaPath, start: c.inPoint, duration: c.end - c.start, out, strength, loudness });
+        else { const r = await audio.studioFile(this.ffmpeg(), { file: c.mediaPath, start: c.inPoint, duration: c.end - c.start, out, strength, loudness }); fs.writeFileSync(rep, JSON.stringify({ before: r.before, after: r.after, profile: r.profile })); }
+      }
+      try { reports.push(JSON.parse(fs.readFileSync(rep, 'utf8'))); } catch (_) {}
       files.push({ file: out, start: c.start, end: c.end });
       onProgress && onProgress((i + 1) / clips.length);
     }
     return this.op('تنضيف الصوت', async () => {
       for (const f of files) await this.host('placeFile', { path: f.file, time: f.start, kind: 'audio', track: -1, minTrack: ti + 1, duration: +(f.end - f.start).toFixed(3), bin: 'EditFast/Audio' });
       await this.host('muteTrack', { track: ti, mute: true });   // the original stays on the timeline, just muted
-      return { clips: files.length, track: ti, strength };
+      return { clips: files.length, track: ti, strength, mode, report: audio.summarize ? audio.summarize(reports) : null };
+    });
+  }
+
+  /** voice and music apart (Demucs on fal.ai): each clip of the track → a voice clip and a music clip on new tracks, the original muted */
+  async separateAudio({ track, onProgress } = {}) {
+    const g = await this.audioTracksGuess();
+    const ti = track ?? g.voice, tr = g.seq.audio[ti];
+    if (!tr || !tr.clips.length) throw new Error('مفيش صوت على التراك ده');
+    const stems = require('./stems'), clips = tr.clips.filter(c => c.mediaPath && !c.disabled), out = [];
+    let cost = 0;
+    for (const [i, c] of clips.entries()) {
+      const r = await stems.separate({ ffmpeg: this.ffmpeg(), file: c.mediaPath, start: c.inPoint, duration: c.end - c.start, key: this.settings.keys.fal, fetchImpl: this.fetch, dir: config.cacheDir('stems'),
+        onStep: m => onProgress && onProgress((i + 0.5) / clips.length, m) });
+      out.push({ c, r }); cost += r.cost || 0;
+      onProgress && onProgress((i + 1) / clips.length);
+    }
+    return this.op('فصل الصوت عن المزيكا', async () => {
+      const v = await this.host('placeFiles', { items: out.filter(x => x.r.vocals).map(x => ({ path: x.r.vocals, time: x.c.start, duration: +(x.c.end - x.c.start).toFixed(3) })), kind: 'audio', bin: 'EditFast/Stems', minTrack: ti + 1, sameTrack: true });
+      const m = await this.host('placeFiles', { items: out.filter(x => x.r.music).map(x => ({ path: x.r.music, time: x.c.start, duration: +(x.c.end - x.c.start).toFixed(3) })), kind: 'audio', bin: 'EditFast/Stems', minTrack: (v && v.track !== undefined ? v.track : ti) + 1, sameTrack: true });
+      await this.host('muteTrack', { track: ti, mute: true });
+      return { clips: out.length, voiceTrack: v && v.track, musicTrack: m && m.track, cost: +cost.toFixed(2) };
     });
   }
 

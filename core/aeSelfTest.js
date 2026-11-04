@@ -53,7 +53,9 @@ async function media(ffmpeg, dir) {
     '-vf', "crop=960:540:'40+t*40':'30+t*12',format=yuv420p", '-t', '3', '-r', '25', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', f('street.mp4')]);
   if (!fs.existsSync(f('green.mp4'))) await run(['-f', 'lavfi', '-i', 'color=c=0x00c832:s=960x540:d=2:r=25', '-vf', 'drawbox=x=360:y=140:w=240:h=280:color=white:t=fill,format=yuv420p', '-c:v', 'libx264', f('green.mp4')]);
   if (!fs.existsSync(f('voice.wav'))) await run(['-f', 'lavfi', '-i', 'aevalsrc=0.6*sin(2*PI*180*t)*abs(sin(2*PI*2.1*t)):s=16000:d=3', f('voice.wav')]);
-  return { logo: f('logo.png'), svg: f('logo.svg'), svg2: f('logo2.svg'), photo: f('photo.png'), video: f('street.mp4'), green: f('green.mp4'), audio: f('voice.wav') };
+  // a 120 BPM click track for the beat tools
+  if (!fs.existsSync(f('beat.wav'))) await run(['-f', 'lavfi', '-i', "aevalsrc='0.8*sin(2*PI*1000*t)*exp(-mod(t,0.5)*120)':s=22050:d=6", f('beat.wav')]);
+  return { logo: f('logo.png'), svg: f('logo.svg'), svg2: f('logo2.svg'), photo: f('photo.png'), video: f('street.mp4'), green: f('green.mp4'), audio: f('voice.wav'), beat: f('beat.wav') };
 }
 
 /* ---------- the tool list ---------- */
@@ -111,6 +113,10 @@ function steps(svc, M, info) {
   for (const m of Object.keys(physics.MODES)) add('أدوات', 'Physics ' + m, [SHAPE('Ball 1', { position: [600, 200] }), SHAPE('Ball 2', { position: [960, 300] }), SHAPE('Box', { position: [1300, 250] })], () => svc.physics({ mode: m, duration: 2 }));
   add('أدوات', 'Multi-size (no render)', [TEXT('Hello')], () => svc.multiFormat({ sizes: ['16:9', '9:16', '1:1', '4:5'], fit: 'blur', render: false }));
   add('أدوات', 'Green screen', [{ kind: 'footage', name: 'Green', file: M.green }], () => svc.roto({ mode: 'green' }));
+  // أدوات ذكية (voice / music apart costs fal credit and the face track needs a real face: not run here)
+  add('أدوات ذكية', 'Slow motion 50%', [VIDEO(M), TEXT('Title')], () => svc.slowMotion({ speed: 50, blend: 'pixel' }));
+  add('أدوات ذكية', 'Relight', [VIDEO(M)], () => svc.relight({ intensity: 1, color: '#ffd9a8' }));
+  add('أدوات ذكية', 'Beat cut', [{ kind: 'footage', name: 'Beat', file: M.beat }, SHAPE('A'), SHAPE('B'), SHAPE('C')], () => svc.beatCut({ every: 2, cut: true }));
   add('قوالب', 'Template scan', [TEXT('Title'), SHAPE('Box')], () => svc.templateScan());
   // جرافيكس
   for (const st of Object.keys(motionKit.COUNTER_STYLES)) for (const f of [{}, { format: 'currency', currency: 'USD' }, { format: 'percent', to: 87 }, { arabic: true, compact: true, to: 1500000 }]) add('عدّاد', 'Counter ' + st + ' ' + (f.format || (f.arabic ? 'arabic' : 'plain')), [], () => svc.counterAdd(Object.assign({ style: st, label: 'Sales', to: 12500, duration: 2 }, f)));

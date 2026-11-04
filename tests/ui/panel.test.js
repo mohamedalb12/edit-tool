@@ -640,8 +640,12 @@ test('الصوت: clean voice (strength/loudness) and duck music', async () => {
   await page.locator('.seg button', { hasText: 'يوتيوب -14' }).click();
   await clickText('نضّف الصوت');
   await clickText('وطّي الموسيقى تحت الكلام');
+  await clickText('افصل الصوت عن المزيكا'); await page.waitForTimeout(150);
   const c = await page.evaluate(() => window.__calls);
+  assert.deepEqual(c.find(x => x.name === 'separateAudio').args, { track: 0 });
   assert.deepEqual(c.find(x => x.name === 'cleanAudio').args, { track: 0, strength: 'strong', loudness: -14 });
+  assert.equal(await page.evaluate(() => window.__cleanMode), 'studio', 'studio (Auphonic-style) by default');
+  assert.match(await page.locator('.audio-report').textContent(), /-27\.4 LUFS\s*←\s*-14 LUFS[\s\S]*وزن كهربا 50Hz/);
   assert.deepEqual([c.find(x => x.name === 'duckMusic').args.voiceTrack, c.find(x => x.name === 'duckMusic').args.musicTrack], [0, 1]);
 });
 

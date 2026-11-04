@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'claude', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'claude', 'smart', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -296,6 +296,25 @@ test('settings: "test every tool" runs the self-test and shows a copyable report
   assert.match(await page.locator('.ft-report').inputValue(), /Logo PNG 3d/);
   assert.ok(await page.locator('button', { hasText: 'انسخ التقرير' }).isVisible());
   assert.match(await page.locator('.card', { hasText: 'اختبر كل الأدوات' }).first().textContent(), /1 من 2 فيهم مشكلة/);
+});
+
+test('أدوات ذكية: voice / music apart, face track, relight with its sliders, slow motion speed + blending, beat cut', async () => {
+  await open('smart'); await clear();
+  await page.locator('button', { hasText: 'افصل الصوت' }).click(); await page.waitForTimeout(150);
+  assert.ok(await call('separateAudio'));
+  assert.match(await page.locator('.smart-step').first().textContent(), /EF Voice/);
+  await page.locator('button', { hasText: 'تتبّع الوش' }).last().click(); await page.waitForTimeout(150);
+  assert.ok(await call('faceTrack'));
+  await page.locator('button', { hasText: 'ضيف الإضاءة' }).click(); await page.waitForTimeout(150);
+  assert.deepEqual(await call('relight'), { intensity: 0.8, glow: 35, color: '#ffd9a8', softness: 60 });
+  await page.locator('.seg button', { hasText: '25%' }).click();
+  await page.locator('.seg button', { hasText: 'Frame Mix' }).click();
+  await page.locator('button', { hasText: 'طبّق' }).click(); await page.waitForTimeout(150);
+  assert.deepEqual(await call('slowMotion'), { speed: 25, blend: 'mix', motionBlur: true });
+  await page.locator('.card', { hasText: 'قص على إيقاع' }).locator('.seg button', { hasText: '4' }).click();
+  await page.locator('button', { hasText: 'قطّع على البيت' }).click(); await page.waitForTimeout(150);
+  assert.deepEqual(await call('beatCut'), { every: 4, cut: true });
+  await page.screenshot({ path: path.join(SHOTS, 'ae-smart.png'), fullPage: true });
 });
 
 test('Claude tab: chat right here — setup, Enter sends, clients with their own profile + memory + conversation, expired login → token', async () => {

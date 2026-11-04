@@ -423,6 +423,21 @@ The "اختبر كل الأدوات" button, the first card in AE settings, work
    - Threshold = the noise floor (15th percentile) + 25–61 % (by sensitivity) of the gap to the speech level (85th percentile). If speech and noise are less than 8 dB apart, there are no pauses to cut.
    - minclip 0.12 s (a click or breath doesn't split a pause); mincut = the minimum pause length.
    - A fixed dB threshold cuts into quiet speech, finds nothing in a noisy room, and leaves clicks splitting pauses.
+23. **Studio voice (Auphonic-style), chosen per recording, measured with SI-SDR on real speech (JFK sample):**
+   - Profile the pauses (quietest 30 %): mains hum = Goertzel power at 50 / 60 Hz × 3 harmonics more than 10 dB over ±8 Hz; "low" rumble = more than 75 % of noise energy under 400 Hz.
+   - Hum → a notch at 4 harmonics + a light FFT pass (+12 dB). Rumble → RNNoise via ffmpeg `arnndn` with the Xiph `std.rnnn` model, shipped in assets (+5 dB). Otherwise → `afftdn`, because RNNoise hurt steady hiss and keyboard clicks.
+   - Never notch without hum (−2 dB on a clean voice).
+   - Then de-ess → `speechnorm` leveler → gentle compression → two-pass loudnorm (−14 / −16 / −23 LUFS, TP −1.5).
+   - Report LUFS, true peak, and noise floor before and after.
+   - In ffmpeg filter args, escape model paths (`C\:/…`).
+24. **Voice / music separation = Demucs on fal.ai** (`fal-ai/demucs`, about $0.0007/s):
+   - Upload ≤ 5-min 192 k MP3 chunks as data URIs. The answer holds stem urls (`{url}` or string) for vocals, drums, bass, and other.
+   - Music = the non-vocal stems re-mixed. Check the key before anything else.
+25. **Face track:** face-api TinyFaceDetector in the panel (already used for reels) samples faces at 10 fps.
+   - Follow one face: start from the biggest one or the clicked one. Each frame, take the nearest face within reach, where reach grows with the time since it was last seen, and **reject a different size (±20 %)**. A passer-by is near for a moment but never the same size.
+   - Fill gaps linearly, then a moving average (±2).
+   - The result is a null with position and scale keys (scale = face width / first width); the selected layers get parented to it.
+26. **AE extras:** relight (adjustment layer with Exposure + a soft-light coloured solid, both masked by a `createPath` ellipse sized from a slider, parented to a null that follows "EF Face"); slow motion (`timeRemapEnabled`, two keys spreading the same source over `span × 100 / speed`, `FrameBlendingType.PIXEL_MOTION`, motion blur); beat cut (`markerProperty.setValueAtTime(t, new MarkerValue(…))`, layers laid one per N beats).
 
 ---
 

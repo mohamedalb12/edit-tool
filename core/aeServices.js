@@ -60,7 +60,8 @@ function styleSummary(scene) {
 }
 
 class AEServices {
-  constructor({ host, fetchImpl, log } = {}) {
+  constructor({ host, fetchImpl, log, analyzeFaces } = {}) {
+    this.analyzeFacesImpl = analyzeFaces || null;
     this.hostRaw = host;
     this.host = host;
     this.fetch = fetchImpl || nodeFetch;
@@ -994,6 +995,53 @@ class AEServices {
     step('بيبني الإبراز…');
     const r = await this.host('highlightBuild', Object.assign({ layer: L.name, name, look: lk, extra: ex.spec.layers }, a));
     return Object.assign({}, r, { frames: fr.frames.length, mode, warnings: ex.warnings });
+  }
+
+  /* ---------- MEGZ-style tools: voice / music, face track, relight, slow motion, beats ---------- */
+  /** the selected layer's voice and music as two layers (Demucs on fal.ai), its own audio off */
+  async separateAudio({ onStep } = {}) {
+    if (!this.settings.keys.fal) throw new Error('فصل الصوت عن المزيكا محتاج مفتاح fal.ai (الإعدادات) — بيتعمل بموديل Demucs');
+    const src = await this.host('mediaOf', { need: 'audio' }), L = src.layer;
+    const r = await require('./stems').separate({ ffmpeg: this.ffmpeg(), file: L.file, start: Math.max(0, L.inPoint - L.startTime), duration: L.outPoint - L.inPoint, key: this.settings.keys.fal, fetchImpl: this.fetch, dir: path.join(config.dataDir(), 'stems'), onStep });
+    const placed = await this.host('stemsApply', { layer: L.name, vocals: r.vocals, music: r.music });
+    return Object.assign({}, placed, { cost: r.cost });
+  }
+  /**
+   * Text / a picture that follows a face: faces found in every frame (face-api, on this machine) → one smooth path →
+   * a null ("EF Face") that moves and scales with the face; the selected layers ride on it.
+   * pick: [x, y] 0–1 on the frame to choose which face (the biggest otherwise).
+   */
+  async faceTrack({ pick = null, seconds = 0, fps = 10, onStep } = {}) {
+    if (!this.analyzeFacesImpl) throw new Error('تتبّع الوش محتاج البانل (مش متاح هنا)');
+    const src = await this.host('trackSource', {}), L = src.layer, C = src.comp;
+    const start = Math.max(0, C.time - L.startTime), duration = Math.max(0.5, Math.min(seconds || (L.outPoint - C.time), 120, C.duration - C.time));
+    const samples = await this.analyzeFacesImpl({ ffmpeg: this.ffmpeg(), file: L.file, start, duration, srcW: L.srcW, srcH: L.srcH, fps, onProgress: p => onStep && onStep('بيدوّر على الوش ' + Math.round(p * 100) + '%') });
+    const fp = require('./faceTrack').path(samples, { pick });
+    if (!fp.length) throw new Error('مالقيتش وش في الجزء ده من الفيديو');
+    const w0 = fp[0].w, a = { name: 'EF Face', times: fp.map(p => +(C.time + p.t).toFixed(4)),
+      position: fp.map(p => track.toComp([p.cx * L.srcW, p.cy * L.srcH], L)), scale: fp.map(p => +(100 * p.w / w0).toFixed(2)), attach: (src.others || []).map(o => o.name) };
+    const r = await this.host('applyTrack', a);
+    return Object.assign({}, r, { frames: fp.length, found: fp.filter(p => p.seen).length });
+  }
+  /** a soft light on the subject: at [x, y] 0–1 of the comp, or on the face ("EF Face" null) when there is one */
+  async relight({ at = null, intensity = 0.8, glow = 35, color = '#ffd9a8', softness = 60, size = 0, follow = 'auto' } = {}) {
+    const info = await this.compInfo();
+    if (!info.comp) throw new Error('افتح الكومب الأول');
+    const C = info.comp, n = C.layers.filter(l => / Controls$/.test(l.name) && /^EF Light/.test(l.name)).length + 1;
+    const face = follow === 'auto' ? (C.layers.find(l => /^EF Face/.test(l.name)) || {}).name : follow;
+    const sel = (C.selected || [])[0];
+    return this.host('relight', { name: 'EF Light ' + n, x: at ? at[0] * C.width : undefined, y: at ? at[1] * C.height : undefined, intensity, glow, color, softness, radius: size || undefined, follow: face || null, above: sel ? sel.name : null });
+  }
+  /** slow / smooth motion on the selected layers: speed % (Time Remap), Pixel Motion frame blending, motion blur */
+  slowMotion({ speed = 50, blend = 'pixel', motionBlur = true } = {}) { return this.host('slowMotion', { speed, blend, motionBlur }); }
+  /** the music's beats as comp markers; cut: the selected layers laid one per `every` beats */
+  async beatCut({ every = 2, cut = true } = {}) {
+    const src = await this.host('mediaOf', { need: 'audio' }), L = src.layer;
+    const srcIn = Math.max(0, L.inPoint - L.startTime), r = await beats.detect(this.ffmpeg(), L.file, { start: srcIn, duration: L.outPoint - L.inPoint });
+    const times = r.beats.map(b => +(L.inPoint + b).toFixed(4));
+    if (times.length < 2) throw new Error('مالقيتش إيقاع واضح في الصوت ده');
+    const out = await this.host('beatCut', { times, every, cut, label: 'beat' });
+    return Object.assign({}, out, { bpm: r.bpm ? Math.round(r.bpm) : null, beats: times.length });
   }
 
   async selfTest() { return this.host('selfTest', {}); }

@@ -204,6 +204,7 @@ class Layer {
   constructor(comp, name, kind) {
     this.containingComp = comp; this.name = name; this.kind = kind; this.parent = null; this._3d = false; this.guideLayer = false; this.enabled = true; this.shy = false;
     this.inPoint = 0; this.outPoint = comp.duration; this.startTime = 0; this.nullLayer = kind === 'null'; this.source = null; this.label = 0; this.id = IDS++;
+    this.audioEnabled = true; this.frameBlendingType = 4012; this.motionBlur = false;
     this.root = new Group('ADBE Layer', name); this.root.parentProperty = this;
     const tr = this.root.add(new Group('ADBE Transform Group', 'Transform'));
     tr.add(new Prop('ADBE Anchor Point', 'Anchor Point', [0, 0, 0], PVT.ThreeD_SPATIAL));
@@ -223,6 +224,14 @@ class Layer {
   }
   get startTime() { return this._st || 0; }
   set startTime(v) { const d = v - (this._st || 0); this._st = v; if (this.outPoint !== undefined) { this.inPoint += d; this.outPoint += d; } }
+  // time remapping (footage only): turning it on adds the Time Remap property, as AE does
+  get canSetTimeRemapEnabled() { return !!(this.source && this.source.hasVideo && this.source.duration); }
+  get timeRemapEnabled() { return !!this._tr; }
+  set timeRemapEnabled(v) {
+    if (v && !this.canSetTimeRemapEnabled) throw new Error('After Effects error: can not enable time remapping on this layer');
+    this._tr = !!v;
+    if (v && !this.root.property('ADBE Time Remapping')) this.root.add(new Prop('ADBE Time Remapping', 'Time Remap', 0, PVT.OneD));
+  }
   get threeDLayer() { return this._3d; }
   set threeDLayer(v) {
     this._3d = !!v;
@@ -295,6 +304,7 @@ function loadAE({ dir } = {}) {
   function newComp(name, { width = 1920, height = 1080, fps = 25, duration = 10 } = {}) {
     const c = Object.assign(new K.CompItem(), { name, id: IDS++, width, height, frameDuration: 1 / fps, duration, time: 0, layerList: [], selectedLayers: [], selectedProperties: [], _egp: [], motionGraphicsTemplateName: '', renderer: 'ADBE Advanced 3d', renderers: ['ADBE Advanced 3d', 'ADBE Calder', 'ADBE Ernst', 'ADBE Picasso'], parentFolder: project.rootFolder });
     c.layer = i => typeof i === 'string' ? c.layerList.find(L => L.name === i) : c.layerList[i - 1];
+    c.markerProperty = new Prop('ADBE Marker', 'Marker', null, PVT.MARKER); c.frameBlending = false; c.motionBlur = false; c.shutterAngle = 180;
     Object.defineProperty(c, 'numLayers', { get: () => c.layerList.length });
     const push = (L, twoDim = true) => { if (twoDim) twoD(L); c.layerList.unshift(L); return L; };
     c.layers = {
@@ -384,7 +394,7 @@ function loadAE({ dir } = {}) {
   };
   const ctx = vm.createContext({
     app, File, ImportOptions, KeyframeEase, PropertyType, PropertyValueType: PVT, KeyframeInterpolationType: KIT,
-    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, ParagraphJustification: { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7415, RIGHT_JUSTIFY: 7414 }, Shape, MaskMode: { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 }, TrackMatteType: { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 }, BlendingMode: { LIGHTEN: 5213, DARKEN: 5214, DIFFERENCE: 5226, NORMAL: 5212, ADD: 5220, SCREEN: 5219, MULTIPLY: 5216, OVERLAY: 5224, SOFT_LIGHT: 5225, COLOR_DODGE: 5221 },
+    LightType: { PARALLEL: 4401, SPOT: 4402, POINT: 4403, AMBIENT: 4404 }, FrameBlendingType: { FRAME_MIX: 4013, NO_FRAME_BLEND: 4012, PIXEL_MOTION: 4014 }, MarkerValue: function MarkerValue(comment) { this.comment = comment; }, ParagraphJustification: { LEFT_JUSTIFY: 7413, CENTER_JUSTIFY: 7415, RIGHT_JUSTIFY: 7414 }, Shape, MaskMode: { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 }, TrackMatteType: { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 }, BlendingMode: { LIGHTEN: 5213, DARKEN: 5214, DIFFERENCE: 5226, NORMAL: 5212, ADD: 5220, SCREEN: 5219, MULTIPLY: 5216, OVERLAY: 5224, SOFT_LIGHT: 5225, COLOR_DODGE: 5221 },
     ...K, Math, String, Number, Array, Object, Error, isFinite, parseInt, parseFloat
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', '..', 'host', 'ae.jsx'), 'utf8'), ctx);

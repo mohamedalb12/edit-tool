@@ -1613,6 +1613,122 @@ EFMAPI.selfTest = function () {
   return r;
 };
 
+/* ---------------- voice / music stems, slow motion, relight, beat cuts (MEGZ-style tools) ---------------- */
+/** the selected footage layer (or the first one) with its file: for the audio tools (video or audio only) */
+EFMAPI.mediaOf = function (a) {
+  var c = EFM.comp(), L = null, i, sel = c.selectedLayers, want = (a && a.need) || 'any';
+  var ok = function (x) { try { return x.source && x.source.file && (want === 'audio' ? x.source.hasAudio : want === 'video' ? x.source.hasVideo : true); } catch (e) { return false; } };
+  for (i = 0; i < sel.length && !L; i++) if (ok(sel[i])) L = sel[i];
+  for (i = 1; i <= c.numLayers && !L; i++) if (ok(c.layer(i))) L = c.layer(i);
+  if (!L) throw new Error(want === 'audio' ? '\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0641\u064a\u0647 \u0635\u0648\u062a' : '\u0627\u062e\u062a\u0627\u0631 \u0644\u064a\u0631 \u0627\u0644\u0641\u064a\u062f\u064a\u0648');
+  return { comp: { name: c.name, width: c.width, height: c.height, fps: 1 / c.frameDuration, time: c.time, duration: c.duration },
+    layer: { name: L.name, file: L.source.file.fsName, startTime: L.startTime, inPoint: L.inPoint, outPoint: L.outPoint, hasAudio: !!L.source.hasAudio, hasVideo: !!L.source.hasVideo } };
+};
+/** a = { layer, vocals, music } -> the two stems as audio layers right above the footage, the footage's own audio off */
+EFMAPI.stemsApply = function (a) {
+  var c = EFM.comp(), L = EFM.layerByName(c, a.layer);
+  if (!L) throw new Error('\u0645\u0634 \u0644\u0627\u0642\u064a \u0627\u0644\u0644\u064a\u0631: ' + a.layer);
+  return EFM.undo('\u0641\u0635\u0644 \u0627\u0644\u0635\u0648\u062a', function () {
+    var out = [], list = [['vocals', ' (EF Voice)'], ['music', ' (EF Music)']], i;
+    for (i = 0; i < list.length; i++) {
+      var f = a[list[i][0]]; if (!f) continue;
+      var item = app.project.importFile(new ImportOptions(new File(f)));
+      try { item.parentFolder = EFM.folder('EditFast Audio'); } catch (eF) {}
+      var S = c.layers.add(item); S.name = L.name + list[i][1];
+      S.startTime = L.inPoint; S.inPoint = L.inPoint; S.outPoint = Math.min(L.outPoint, L.inPoint + item.duration);
+      S.moveBefore(L); out.push(S.name);
+    }
+    try { L.audioEnabled = false; } catch (eA) {}
+    return { layers: out, muted: L.name };
+  });
+};
+/**
+ * Slow motion / smooth motion on the selected layers. a = { speed: % (50 = half speed), blend: 'pixel'|'mix'|'none',
+ * motionBlur: bool }. Footage: time remap stretched by 100/speed + frame blending (Pixel Motion = optical flow, no
+ * stutter); animated layers: motion blur on.
+ */
+EFMAPI.slowMotion = function (a) {
+  var c = EFM.comp(), L = EFM.selected(c), speed = Math.max(5, Math.min(400, +a.speed || 50)), n = 0, i;
+  var blend = a.blend === 'mix' ? FrameBlendingType.FRAME_MIX : a.blend === 'none' ? FrameBlendingType.NO_FRAME_BLEND : FrameBlendingType.PIXEL_MOTION;
+  return EFM.undo('\u0633\u0644\u0648 \u0645\u0648\u0634\u0646', function () {
+    for (i = 0; i < L.length; i++) {
+      var X = L[i];
+      if (speed !== 100 && X.canSetTimeRemapEnabled) {
+        var span = X.outPoint - X.inPoint, srcIn = X.inPoint - X.startTime, len = span * 100 / speed;
+        X.timeRemapEnabled = true;
+        var tr = X.property('ADBE Time Remapping');
+        while (tr.numKeys) tr.removeKey(1);
+        X.outPoint = X.inPoint + len;
+        tr.setValueAtTime(X.inPoint, srcIn); tr.setValueAtTime(X.inPoint + len, srcIn + span);
+        n++;
+      }
+      try { if (X.frameBlendingType !== undefined) X.frameBlendingType = blend; } catch (eB) {}
+      if (a.motionBlur !== false) { try { X.motionBlur = true; } catch (eM) {} }
+    }
+    try { c.frameBlending = blend !== FrameBlendingType.NO_FRAME_BLEND; } catch (eC) {}
+    if (a.motionBlur !== false) { try { c.motionBlur = true; c.shutterAngle = 180; } catch (eS) {} }
+    return { remapped: n, layers: L.length, speed: speed };
+  });
+};
+/**
+ * Relight: a soft pool of light on the subject / product, every look value a slider on "<name> Controls".
+ * a = { name, x, y (comp px), radius, softness, intensity (exposure stops), warmth 0-100, color, follow: layer name }
+ * Built as: [color glow (soft light)] + [adjustment with Exposure], both masked by a feathered ellipse, both
+ * parented to a null that sits on the subject (and follows a face / track null when given).
+ */
+EFMAPI.relight = function (a) {
+  var c = EFM.comp(), N = a.name || 'EF Light', q = function (s) { return 'thisComp.layer("' + N + ' Controls").effect("' + s + '")(1)'; };
+  return EFM.undo('\u0625\u0636\u0627\u0621\u0629', function () {
+    var C = c.layers.addNull(c.duration); C.name = N + ' Controls'; try { C.label = 11; } catch (eL) {}
+    var setC = function (nm, match, v) { EFM.effect(C, match, nm); EFM.effect(C, match, nm).property(1).setValue(v); };
+    setC('Intensity', 'ADBE Slider Control', a.intensity === undefined ? 0.8 : a.intensity);
+    setC('Size', 'ADBE Slider Control', a.radius || Math.round(Math.min(c.width, c.height) * 0.45));
+    setC('Softness', 'ADBE Slider Control', a.softness === undefined ? 60 : a.softness);
+    setC('Glow', 'ADBE Slider Control', a.glow === undefined ? 35 : a.glow);
+    setC('Color', 'ADBE Color Control', EFM.fromHex(a.color || '#ffd9a8'));
+    var P = c.layers.addNull(c.duration); P.name = N; P.guideLayer = true;
+    EFM.tr(P, 'ADBE Position').setValue([a.x === undefined ? c.width / 2 : a.x, a.y === undefined ? c.height * 0.42 : a.y]);
+    if (a.follow) { var F = EFM.layerByName(c, a.follow); if (F) { P.parent = F; EFM.tr(P, 'ADBE Position').setValue([0, 0]); } }
+    var mk = function (L) {
+      // an ellipse mask the size of the "Size" slider, feathered by "Softness", centred on the layer's own centre
+      L.property('ADBE Mask Parade').addProperty('ADBE Mask Atom');
+      var m = L.property('ADBE Mask Parade').property(1); m.name = 'EF Light';
+      m.property('ADBE Mask Shape').expression = 'var r=' + q('Size') + ',k=0.5523*r,cx=width/2,cy=height/2;createPath([[cx,cy-r],[cx+r,cy],[cx,cy+r],[cx-r,cy]],[[-k,0],[0,-k],[k,0],[0,k]],[[k,0],[0,k],[-k,0],[0,-k]],true)';
+      L.property('ADBE Mask Parade').property(1).property('ADBE Mask Feather').expression = 'var f=' + q('Size') + '*' + q('Softness') + '/100;[f,f]';
+      L.parent = P; EFM.tr(L, 'ADBE Position').setValue([0, 0]);
+    };
+    var A = c.layers.addSolid([1, 1, 1], N + ' Exposure', c.width, c.height, 1, c.duration); A.adjustmentLayer = true; mk(A);
+    A.property('ADBE Effect Parade').addProperty('ADBE Exposure2');
+    EFM.find(A.property('ADBE Effect Parade').property(1), 'Exposure').expression = q('Intensity');
+    var G = c.layers.addSolid([1, 0.85, 0.65], N + ' Glow', c.width, c.height, 1, c.duration); mk(G);
+    try { G.blendingMode = BlendingMode.SOFT_LIGHT; } catch (eBm) {}
+    G.property('ADBE Effect Parade').addProperty('ADBE Fill');
+    G.property('ADBE Effect Parade').property(1).property('ADBE Fill-0002').expression = q('Color');
+    EFM.tr(G, 'ADBE Opacity').expression = q('Glow');
+    if (a.above) { var T = EFM.layerByName(c, a.above); if (T) { A.moveBefore(T); G.moveBefore(A); } }
+    return { name: N, controls: C.name, layers: [A.name, G.name], follows: a.follow || null };
+  });
+};
+/** a = { times: [comp s], every: n, labels } -> comp markers on the beats; with cut: the selected layers laid one per n beats */
+EFMAPI.beatCut = function (a) {
+  var c = EFM.comp(), t = a.times || [], i, n = 0;
+  return EFM.undo('\u0639\u0644\u0649 \u0627\u0644\u0625\u064a\u0642\u0627\u0639', function () {
+    var mk = c.markerProperty;
+    for (i = 0; i < t.length; i++) { try { mk.setValueAtTime(t[i], new MarkerValue(a.label || 'beat')); n++; } catch (eM) {} }
+    var cut = 0;
+    if (a.cut) {
+      var L = EFM.selected(c, false), every = Math.max(1, a.every || 1), k = 0;
+      L.sort(function (x, y) { return x.index - y.index; });
+      for (i = 0; i < L.length && k + every < t.length; i++) {
+        var X = L[i], src = X.inPoint - X.startTime;
+        X.startTime = t[k] - src; X.inPoint = t[k]; X.outPoint = t[Math.min(t.length - 1, k + every)];
+        k += every; cut++;
+      }
+    }
+    return { markers: n, cut: cut };
+  });
+};
+
 /* ---------------- effects dictionary: what each effect's parameters are really called in THIS After Effects ---------------- */
 /**
  * a = { matches: ['ADBE Glo2', ...] } -> { 'ADBE Glo2': { name, params: [{ i, matchName, name, type }] } | { missing: true } }
