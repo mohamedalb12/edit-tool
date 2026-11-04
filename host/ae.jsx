@@ -481,7 +481,7 @@ EFM.EXPR = {
   'float': { label: 'Float', sliders: [['EF Float Amp', 12], ['EF Float Speed', 1]], prop: 'position', expr: 'var a=effect("EF Float Amp")("ADBE Slider Control-0001"),s=effect("EF Float Speed")("ADBE Slider Control-0001");value+[0,Math.sin(time*s*2*Math.PI)*a]' },
   squash: { label: 'Squash & stretch', sliders: [['EF Squash', 25]], prop: 'scale', expr: 'var v=transform.position.velocity,sp=Math.min(1,Math.sqrt(v[0]*v[0]+v[1]*v[1])/3000)*effect("EF Squash")("ADBE Slider Control-0001")/100;[value[0]*(1-sp*0.5),value[1]*(1+sp)]' },
   pendulum: { label: 'Pendulum', sliders: [['EF Swing deg', 25], ['EF Swing Speed', 1], ['EF Swing Decay', 0.4]], prop: 'rotation', expr: 'var a=effect("EF Swing deg")("ADBE Slider Control-0001"),f=effect("EF Swing Speed")("ADBE Slider Control-0001"),d=effect("EF Swing Decay")("ADBE Slider Control-0001"),t=time-inPoint;value+a*Math.sin(t*f*Math.PI*2)*Math.exp(-d*t)' },
-  typewriter: { label: 'Typewriter', sliders: [['EF Chars/s', 18]], prop: 'text', expr: 'var n=Math.floor((time-inPoint)*effect("EF Chars/s")("ADBE Slider Control-0001"));text.sourceText.substr(0,Math.max(0,n))' }
+  typewriter: { label: 'Typewriter', sliders: [['EF Chars/s', 18]], prop: 'text', expr: 'var n=Math.floor((time-inPoint)*effect("EF Chars/s")("ADBE Slider Control-0001"));String(value).substr(0,Math.max(0,n))' }
 };
 /**
  * Add an expression (with its own sliders) to the selected properties, or to the property it's made for on the

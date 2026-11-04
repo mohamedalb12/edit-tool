@@ -412,6 +412,17 @@ The "اختبر كل الأدوات" button, the first card in AE settings, work
    - Node checks every param the tools set: missing → failure; the name doesn't contain the expected word (e.g. "Radius") → "maybe the wrong param"; plugin not installed → listed.
    - This runs as part of the self-test, and the dictionary is saved to `~/.editfast/ae-effects.json`.
    - Never trust a match-name list from the web; match names can change between AE versions.
+20. **Type-check the generated expressions too:** every expression the tools write is checked against the AE expression API with **expression-globals-typescript** (github.com/motiondeveloper/expression-globals-typescript, MIT; vendored). Every member of `Layer`, `Property`, and `PathProperty` is in scope unqualified, plus `thisComp`, `thisLayer`, and `thisProperty`. Unknown functions, misspelled members, and wrong argument counts fail. Known typing gaps (a property used as its value, `random()`'s union return, 2D/3D vectors) are allowlisted with reasons. Example caught: the typewriter used `text.sourceText.substr` instead of `String(value).substr`.
+21. **Shot detection = PySceneDetect's AdaptiveDetector** (github.com/Breakthrough/PySceneDetect, BSD-3), ported to Node:
+   - Score = the mean HSV delta to the previous frame (OpenCV HSV scale), compared with the mean of 2 frames either side. A cut needs ratio ≥ 3 and score ≥ 15, with a minimum shot length of 0.6 s.
+   - Frames stream from ffmpeg at 160 px and 15 fps.
+   - Unlike PySceneDetect, the first frame is not a cut, so a cut early in a mid-clip range isn't dropped.
+   - A fixed `ffmpeg scene>0.32` both invents cuts in fast pans and misses cuts between dark shots; keep it only as a fallback.
+22. **Silence cutting = auto-editor's smoothing** (github.com/WyattBlue/auto-editor, public domain) **+ a threshold measured from the recording:**
+   - Stream the peak dBFS per 20 ms.
+   - Threshold = the noise floor (15th percentile) + 25–61 % (by sensitivity) of the gap to the speech level (85th percentile). If speech and noise are less than 8 dB apart, there are no pauses to cut.
+   - minclip 0.12 s (a click or breath doesn't split a pause); mincut = the minimum pause length.
+   - A fixed dB threshold cuts into quiet speech, finds nothing in a noisy room, and leaves clicks splitting pauses.
 
 ---
 

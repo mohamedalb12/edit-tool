@@ -3,6 +3,7 @@ const { TMP, FFMPEG } = require('../helpers');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const fs = require('fs');
 const { execFileSync } = require('child_process');
 const vision = require('../../core/vision');
 
@@ -33,4 +34,43 @@ test('vision: frame grab is a real JPEG of the right moment, packed as an OpenAI
   assert.ok(raw[mid + 2] > 150 && raw[mid] < 80, 'blue frame at 1.8s');
   const msg = vision.imageMessage([{ time: 1.8, b64, label: '1.8s' }]);
   assert.equal(msg.role, 'user'); assert.equal(msg.content[1].type, 'image_url'); assert.match(msg.content[1].image_url.url, /^data:image\/jpeg;base64,/);
+});
+
+// the adaptive detector (PySceneDetect's method, core/shots): the two cases the fixed ffmpeg threshold gets wrong
+function lavfiVideo(name, inputs) {
+  const out = path.join(TMP, name);
+  if (!fs.existsSync(out)) {
+    const args = ['-hide_banner', '-loglevel', 'error', '-y'];
+    for (const i of inputs) args.push('-f', 'lavfi', '-i', i);
+    args.push('-filter_complex', inputs.map((_, k) => '[' + k + ']').join('') + 'concat=n=' + inputs.length + ':v=1:a=0,format=yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', out);
+    execFileSync(FFMPEG, args);
+  }
+  return out;
+}
+test('shots: a fast camera move inside one shot is not a cut (the fixed threshold calls it one)', async () => {
+  const f = lavfiVideo('shots-pan.mp4', ['testsrc2=s=640x360:r=25:d=3',
+    "mandelbrot=s=1600x900:r=25,crop=640:360:'mod(t*900,900)':'120+60*sin(t*5)',trim=duration=3,setpts=PTS-STARTPTS",
+    'smptebars=s=640x360:r=25:d=3']);
+  const cuts = await vision.detectShots(FFMPEG, f);
+  assert.deepEqual(cuts.map(t => Math.round(t)), [3, 6], JSON.stringify(cuts));
+  const fixed = await vision.detectShotsFixed(FFMPEG, f);
+  assert.ok(fixed.length > 2, 'the old fixed threshold saw a cut in the pan: ' + JSON.stringify(fixed));
+});
+test('shots: cuts between dark, low-contrast shots are found (the fixed threshold misses them)', async () => {
+  const dim = ',eq=brightness=-0.42:contrast=0.35';
+  const f = lavfiVideo('shots-dark.mp4', ['testsrc2=s=640x360:r=25:d=3' + dim, 'cellauto=s=640x360:r=25,trim=duration=3,setpts=PTS-STARTPTS' + dim, 'testsrc=s=640x360:r=25:d=3' + dim]);
+  const cuts = await vision.detectShots(FFMPEG, f);
+  assert.deepEqual(cuts.map(t => Math.round(t)), [3, 6], JSON.stringify(cuts));
+  assert.equal((await vision.detectShotsFixed(FFMPEG, f)).length, 0, 'the old one found none');
+});
+test('shots: the adaptive rule itself — a spike over its neighbours, a minimum shot length', () => {
+  const shots = require('../../core/shots');
+  const flat = [0, 2, 2, 2, 2, 60, 2, 2, 2, 2, 2, 2, 2];
+  assert.deepEqual(shots.adaptiveCuts(flat, 10), [5]);
+  const moving = [0, 30, 32, 35, 31, 40, 33, 30, 34, 31, 30, 32, 30];
+  assert.deepEqual(shots.adaptiveCuts(moving, 10), [], 'steady high motion is not a cut');
+  const twoClose = [0, 1, 1, 1, 50, 1, 50, 1, 1, 1, 1];
+  assert.deepEqual(shots.adaptiveCuts(twoClose, 10), [4], 'two cuts closer than 0.6 s → one');
+  const [H, S, V] = shots.toHSV(Buffer.from([255, 0, 0, 0, 0, 255, 255, 255, 255]), 3);
+  assert.deepEqual([...H], [0, 120, 0]); assert.deepEqual([...S], [255, 255, 0]); assert.deepEqual([...V], [255, 255, 255]);
 });

@@ -1,0 +1,2 @@
+fbaf59af49424b827183825ded92955e2b681871 2025-07-15
+https://github.com/motiondeveloper/expression-globals-typescript

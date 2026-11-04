@@ -61,6 +61,14 @@ function dangling(list) {
   }
   return [...new Set(bad)];
 }
+// gaps in the expression typings (each verified against After Effects' expression reference), not bugs in ours
+const EXPR_API_GAPS = [
+  [/Argument of type 'Property<[^']*>' is not assignable/, 'AE passes a property where a value is wanted as its value (fromComp(layer.transform.position))'],
+  [/(left|right)-hand side of an arithmetic operation must be/, 'arithmetic on a property / slider reads its value in AE (effect("x")("Slider")*2)'],
+  [/Operator '[^']+' cannot be applied to types ('[^']*Property<[^']*>'|'[^']*' and '[^']*Property<[^']*>')/, 'a property in arithmetic or a comparison is its value in AE'],
+  [/Operator '[^']+' cannot be applied to types ('number \| \[\]'|'[^']*' and 'number \| \[\]')|Argument of type 'number \| \[\]' is not assignable/, 'random(min, max) with numbers returns a number (the typings say number | [])'],
+  [/Type 'Vector' is not assignable to type 'Vector2D'/, '2D vs 3D vector arrays: AE takes either']
+];
 function build(raw) {
   const ae = loadAE(), n = S.normalize(raw, {});
   ae.call('buildScene', { spec: JSON.parse(JSON.stringify(n.spec)) });
@@ -107,6 +115,10 @@ test('every generated expression parses (scenes, kit, logo, 3D photo, kinetic, c
   assert.deepEqual(bad, [], bad.slice(0, 10).join('\n'));
   const refs = dangling(found);
   assert.deepEqual(refs, [], refs.slice(0, 20).join('\n'));
+  // the expression API itself (expression-globals-typescript): only functions / properties AE has, right argument counts
+  const api = require('./exprTypes').check(found, { ignore: EXPR_API_GAPS.map(g => g[0]) });
+  const apiMsgs = [...new Set(api.map(a => a.error + '  ← ' + a.where.split(' · ')[0] + '\n      ' + a.code.slice(0, 200)))];
+  assert.deepEqual(apiMsgs, [], apiMsgs.slice(0, 25).join('\n'));
 });
 
 test('3D: the comp gets the real Advanced 3D (ADBE Calder) or Cinema 4D renderer — never Classic 3D, which cannot extrude', () => {

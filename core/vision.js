@@ -2,8 +2,19 @@
 // عين المونتير الذكي: كشف اللقطات (أوفلاين) + صور فريمات تتبعت لموديل بيشوف صور.
 const { run } = require('./ffmpeg');
 
-/** Shot boundaries (source time) via ffmpeg scene detection. */
+/**
+ * Shot boundaries (source time): the adaptive detector (core/shots — PySceneDetect's method: catches cuts between
+ * dark / low-contrast shots and ignores fast camera moves), falling back to ffmpeg's fixed scene threshold.
+ */
 async function detectShots(ffmpeg, file, { start = 0, duration = 0, threshold = 0.32 } = {}) {
+  if (/\.(png|jpe?g|webp|bmp|tiff?|gif|psd)$/i.test(file)) return [];
+  try {
+    const end = duration > 0 ? start + duration : Infinity;
+    return (await require('./shots').detect(ffmpeg, file, { start, duration })).filter(t => t > start && t < end);
+  } catch (_) { return detectShotsFixed(ffmpeg, file, { start, duration, threshold }); }
+}
+/** ffmpeg's own scene score over a fixed threshold (the fallback) */
+async function detectShotsFixed(ffmpeg, file, { start = 0, duration = 0, threshold = 0.32 } = {}) {
   const args = ['-hide_banner', '-nostdin'];
   if (start > 0) args.push('-ss', String(start));
   args.push('-i', file);
@@ -34,4 +45,4 @@ function imageMessage(frames, intro) {
   };
 }
 
-module.exports = { detectShots, frameJpeg, imageMessage };
+module.exports = { detectShots, detectShotsFixed, frameJpeg, imageMessage };

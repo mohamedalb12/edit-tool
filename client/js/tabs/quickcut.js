@@ -7,7 +7,7 @@
       var S = EF.services, q = Object.assign({}, S.settings.quickCut), last = null;
       var silence = EF.node('silence');
       var paramsTxt = h('span', { class: 'hint ltr' });
-      function updParams() { var p = silence.sensitivityToParams(q.sensitivity); paramsTxt.textContent = p.thresholdDb + ' dB · ≥ ' + p.minSilence + 's'; }
+      function updParams() { var p = silence.sensitivityToParams(q.sensitivity); paramsTxt.textContent = 'الحد بيتقاس من صوت التسجيل نفسه · سكتة ≥ ' + p.minSilence + 's · الكليكات والنفَس مش بيقطعوا السكتة'; }
       var result = h('div');
       var trackSel = h('select'); trackSel.appendChild(h('option', { value: '' }, 'تلقائي'));
       var keepBox = h('div', { class: 'row keep-tracks' });
