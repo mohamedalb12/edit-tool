@@ -85,6 +85,31 @@
           input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
           function token() { return (S && S.settings && S.settings.keys && S.settings.keys.claudeToken) || ''; }
+          function gateway() { var g = S && S.settings && S.settings.keys && S.settings.keys.claudeGateway; return g && g.url && g.key ? g : null; }
+          function gwKey(g) { return g ? g.url + '|' + g.key + '|' + (g.model || '') : ''; }
+          // an API key instead of the subscription: Anthropic's own (api.anthropic.com) or a gateway that serves /v1/messages
+          function gatewayCard() {
+            var g = gateway() || {};
+            var url = h('input', { class: 'grow ltr claude-gw-url', value: g.url || '', placeholder: 'https://api.anthropic.com أو رابط الـ API بتاع الموقع' });
+            var key = h('input', { class: 'grow ltr claude-gw-key', type: 'password', value: g.key || '', placeholder: 'المفتاح (sk-…)' });
+            var model = h('input', { class: 'grow ltr claude-gw-model', value: g.model || '', placeholder: 'اسم الموديل زي ما الموقع كاتبه (اختياري)' });
+            var res = h('div', { class: 'hint claude-gw-res' });
+            return UI.card('مفتاح API بدل الاشتراك',
+              UI.hint('لو معاك مفتاح من console.anthropic.com أو من موقع وسيط بيقدّم Claude: حط رابط الـ API (Base URL) من صفحة الـ Docs بتاعة الموقع — مش رابط الداشبورد — والمفتاح. لازم الموقع يكون "Anthropic compatible" (/v1/messages). المفتاح بيتحفظ على جهازك بس.'),
+              UI.row(h('label', null, 'الرابط'), url), UI.row(h('label', null, 'المفتاح'), key), UI.row(h('label', null, 'الموديل'), model),
+              UI.row(UI.btn('احفظ المفتاح واتأكد', function () {
+                var C2 = chatMod(), ng = C2.gatewayOf({ url: url.value, key: key.value, model: model.value });
+                if (!ng) { res.textContent = 'محتاج الرابط والمفتاح الاتنين'; return; }
+                url.value = ng.url;
+                S.saveSettings({ keys: { claudeGateway: ng } });
+                res.textContent = 'بيجرّب على ' + ng.url + '…';
+                return C2.verify({ bin: state.cc && state.cc.bin, gateway: ng }).then(function (r) {
+                  res.textContent = r.ok ? '✓ Claude رد من الموقع: ' + r.message : '✗ ' + r.message;
+                  if (r.ok) { state.authFailed = false; state.engine = null; state.showGw = false; check(true); }
+                });
+              }, 'primary'), gateway() ? UI.btn('ارجع للاشتراك', function () { S.saveSettings({ keys: { claudeGateway: { url: '', key: '', model: '' } } }); state.engine = null; state.showGw = false; check(true); }, 'small') : null),
+              res);
+          }
           function clientObj() { return state.client && K ? K.get(state.client) : null; }
           function loadConversation() {
             var rec = null;
@@ -167,7 +192,13 @@
             UI.empty(setupBox);
             var cs = state.cc;
             if (!cs) { setupBox.appendChild(UI.hint('بيدوّر على Claude Code…')); return; }
-            if (cs.installed && cs.loggedIn && !state.authFailed) { setupBox.appendChild(h('div', { class: 'claude-st ok' }, h('b', null, '✓'), ' Claude Code ' + (cs.version || '') + (cs.method === 'token' ? ' متربط بتوكن ثابت' : ' متسجّل') + ' — اكتب وهو يشتغل هنا (باشتراكك، من غير مفتاح API)')); return; }
+            if (cs.installed && cs.loggedIn && !state.authFailed) {
+              var gw = cs.method === 'gateway' && gateway();
+              setupBox.appendChild(UI.row(h('div', { class: 'claude-st ok grow' }, h('b', null, '✓'), ' Claude Code ' + (cs.version || '') + (gw ? ' شغّال بمفتاح API على ' + gw.url.replace(/^https?:\/\//, '') : (cs.method === 'token' ? ' متربط بتوكن ثابت' : ' متسجّل') + ' — اكتب وهو يشتغل هنا (باشتراكك، من غير مفتاح API)')),
+                UI.btn(gw ? 'المفتاح' : 'مفتاح API', function () { state.showGw = !state.showGw; drawSetup(); }, 'small')));
+              if (state.showGw) setupBox.appendChild(gatewayCard());
+              return;
+            }
             if (!cs.installed) {
               setupBox.appendChild(UI.card('عشان تكلّم Claude هنا',
                 h('div', { class: 'claude-st bad' }, h('b', null, '1'), ' ثبّت Claude Code (مرة واحدة — دقيقة)'),
@@ -198,13 +229,14 @@
               res,
               UI.hint('أو تسجيل دخول عادي: ' + (C ? C.terminalCommand('login') : '')),
               UI.row(UI.btn('سجّل دخول عادي', function () { term('login'); }, 'small'), UI.btn('اتأكد تاني', function () { state.authFailed = false; check(true); }, 'small'))));
+            setupBox.appendChild(gatewayCard());
           }
           function term(kind) { try { C.openTerminal(kind); UI.toast(kind === 'install' ? 'التيرمنال فتح وبيسطّب — لما يخلص دوس "اتأكد تاني"' : kind === 'token' ? 'التيرمنال فتح — وافق في المتصفح وانسخ التوكن اللي هيظهر' : 'التيرمنال فتح — كمّل تسجيل الدخول في المتصفح'); } catch (e) { UI.toast(e.message, true); } }
           function check(force) {
             if (!C) { state.cc = { installed: false }; return drawSetup(); }
             if (state.cc && !force && Date.now() - state.ccAt < 60000) return drawSetup();
             if (force) { state.cc = null; drawSetup(); }
-            C.status({ token: token() }).then(function (r) { state.cc = r; state.ccAt = Date.now(); drawSetup(); }).catch(function () { state.cc = { installed: false }; drawSetup(); });
+            C.status({ token: token(), gateway: gateway() }).then(function (r) { state.cc = r; state.ccAt = Date.now(); drawSetup(); }).catch(function () { state.cc = { installed: false }; drawSetup(); });
           }
           function send(textArg) {
             var text = (textArg || input.value).trim();
@@ -212,8 +244,9 @@
             if (!state.bridge) return UI.toast('البانل لسه بيجهّز الاتصال — ثانية وجرّب', true);
             if (!state.cc || !state.cc.installed || !state.cc.loggedIn) { check(true); return UI.toast('ثبّت Claude Code واربط حسابك الأول (فوق)', true); }
             var c = clientObj();
-            if (!state.engine || state.engine.bin !== state.cc.bin || state.engine.token !== (token() || null)) {
-              state.engine = new C.ClaudeChat({ bin: state.cc.bin, app: state.app, mcp: EF.node('mcpBridge').mcpConfig(state.bridge), token: token() || null, client: c ? c.name : null, session: state.sessionId, onEvent: onChat });
+            if (!state.engine || state.engine.bin !== state.cc.bin || state.engine.token !== (token() || null) || state.engineGw !== gwKey(gateway())) {
+              state.engineGw = gwKey(gateway());
+              state.engine = new C.ClaudeChat({ bin: state.cc.bin, app: state.app, mcp: EF.node('mcpBridge').mcpConfig(state.bridge), token: token() || null, gateway: gateway(), client: c ? c.name : null, session: state.sessionId, onEvent: onChat });
             }
             if (state.engine.busy) return;
             if (state.bridge.setClient) state.bridge.setClient(state.client);

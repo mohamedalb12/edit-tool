@@ -19,13 +19,14 @@ window.__installClaudeFakes = function (toolName) {
     saveSession: function (id, app, s) { if (store[id]) store[id].sessions[app] = JSON.parse(JSON.stringify(s)); return store[id]; }
   };
   window.__fakeChat = {
-    status: function (o) { var c = JSON.parse(JSON.stringify(window.__cc)); if (o && o.token && c.installed) { c.loggedIn = true; c.method = 'token'; } return Promise.resolve(c); },
+    gatewayOf: function (g) { return g && g.url && g.key ? { url: (/^https?:/.test(g.url) ? g.url : 'https://' + g.url).replace(/\/dashboard.*$/, ''), key: g.key, model: g.model || null } : null; },
+    status: function (o) { var c = JSON.parse(JSON.stringify(window.__cc)); if (o && o.gateway && c.installed) { c.loggedIn = true; c.method = 'gateway'; return Promise.resolve(c); } if (o && o.token && c.installed) { c.loggedIn = true; c.method = 'token'; } return Promise.resolve(c); },
     isToken: function (t) { return /^sk-ant-oat01-/.test(t); },
-    verify: function (o) { return Promise.resolve(o.token ? { ok: true, message: 'تمام' } : { ok: false, auth: true, message: 'منتهي' }); },
+    verify: function (o) { if (o.gateway) return Promise.resolve(o.gateway.key === 'good' ? { ok: true, message: 'تمام' } : { ok: false, auth: true, message: 'الموقع رفض المفتاح' }); return Promise.resolve(o.token ? { ok: true, message: 'تمام' } : { ok: false, auth: true, message: 'منتهي' }); },
     terminalCommand: function (k) { return k === 'install' ? 'curl -fsSL https://claude.ai/install.sh | bash' : k === 'token' ? 'claude setup-token' : 'claude auth login'; },
     openTerminal: function (k) { window.__term = k; },
     ClaudeChat: function (o) {
-      var self = this; this.bin = o.bin; this.token = o.token; this.client = o.client; this.session = o.session; this.busy = false;
+      var self = this; this.bin = o.bin; this.token = o.token; this.client = o.client; this.session = o.session; this.busy = false; window.__gw = o.gateway || null;
       this.stop = function () {}; this.reset = function () { window.__reset = true; self.session = null; };
       this.send = function (t, opt) {
         self.busy = true; window.__sent.push(t); window.__ctx.push(opt && opt.context || null); window.__lastClient = self.client;

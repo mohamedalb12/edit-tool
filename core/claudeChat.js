@@ -27,13 +27,34 @@ function candidates(home = os.homedir(), env = process.env) {
 }
 function find(o) { for (const f of candidates(o && o.home, o && o.env)) { try { if (fs.statSync(f).isFile()) return f; } catch (_) {} } return null; }
 /** PATH for the child: Adobe's plus where node / claude usually are (an npm-installed claude needs node) */
-function childEnv(bin, token) {
+/**
+ * An Anthropic-compatible gateway instead of the subscription: { url, key, model } (a base URL that serves
+ * /v1/messages — Anthropic's own API, or a company / third-party gateway). → normalised or null
+ */
+function gatewayOf(g) {
+  if (!g || !g.url || !g.key) return null;
+  let url = String(g.url).trim().replace(/\s+/g, '');
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  // pasted from the browser: drop the dashboard page / the endpoint, Claude Code adds /v1/messages itself
+  url = url.replace(/[?#].*$/, '').replace(/\/(dashboard|console|keys?|docs)(\/.*)?$/i, '').replace(/\/v1(\/messages)?\/?$/i, '').replace(/\/+$/, '');
+  return { url, key: String(g.key).trim(), model: String(g.model || '').trim() || null };
+}
+function childEnv(bin, token, gateway) {
   const extra = WIN ? [] : ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin')];
   const env = Object.assign({}, process.env, { PATH: [path.dirname(bin)].concat(extra, (process.env.PATH || '').split(path.delimiter)).filter(Boolean).join(path.delimiter) });
   // the subscription, never a stray API key from the environment
   delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN;
   // a long-lived token from `claude setup-token`: no Keychain, no refresh (the panel's own process can't always refresh)
   if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token; else delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  const g = gatewayOf(gateway);
+  if (g) {
+    // an API key on a gateway: both headers (x-api-key and Bearer) — gateways accept one or the other
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    env.ANTHROPIC_BASE_URL = g.url; env.ANTHROPIC_API_KEY = g.key; env.ANTHROPIC_AUTH_TOKEN = g.key;
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+    // the background small model too, or Claude Code asks the gateway for a model it may not serve
+    if (g.model) { env.ANTHROPIC_MODEL = g.model; env.ANTHROPIC_DEFAULT_HAIKU_MODEL = g.model; env.ANTHROPIC_SMALL_FAST_MODEL = g.model; }
+  } else delete env.ANTHROPIC_BASE_URL;
   return env;
 }
 const AUTH_ERR = /failed to authenticate|oauth|authentication_error|invalid api key|please run \/login|login expired|not logged in|invalid bearer|401/i;
@@ -52,18 +73,19 @@ function extractToken(text) {
   for (let i = 1; i < lines.length; i++) { const l = lines[i].trim(); if (!/^[\w-]+$/.test(l)) break; tok += l; }
   return isToken(tok) ? tok : '';
 }
-function run(bin, args, timeout = 20000, token) {
+function run(bin, args, timeout = 20000, token, gateway) {
   return new Promise(resolve => {
     const shell = WIN && /\.cmd$/i.test(bin);
-    execFile(bin, args, { timeout, env: childEnv(bin, token), shell, windowsHide: true }, (err, stdout, stderr) => resolve({ code: err ? (err.code || 1) : 0, out: String(stdout || ''), err: String(stderr || '') }));
+    execFile(bin, args, { timeout, env: childEnv(bin, token, gateway), shell, windowsHide: true }, (err, stdout, stderr) => resolve({ code: err ? (err.code || 1) : 0, out: String(stdout || ''), err: String(stderr || '') }));
   });
 }
 /** → { installed, bin, version, loggedIn, method } (a saved setup-token counts as logged in) */
-async function status({ token } = {}) {
+async function status({ token, gateway } = {}) {
   const bin = find();
   if (!bin) return { installed: false };
   const v = await run(bin, ['--version']);
   const version = (v.out.match(/\d+\.\d+\.\d+/) || [''])[0];
+  if (gatewayOf(gateway)) return { installed: true, bin, version, loggedIn: true, method: 'gateway' };
   if (isToken(token)) return { installed: true, bin, version, loggedIn: true, method: 'token' };
   const a = await run(bin, ['auth', 'status']);
   let j = null; try { j = JSON.parse(a.out); } catch (_) {}
@@ -71,13 +93,14 @@ async function status({ token } = {}) {
   return { installed: true, bin, version, loggedIn: a.code === 0 && method !== 'none', method: method || null };
 }
 /** a real one-line request: does Claude answer from inside the panel? → { ok, auth, message } */
-async function verify({ bin, token } = {}) {
+async function verify({ bin, token, gateway } = {}) {
   bin = bin || find();
   if (!bin) return { ok: false, message: 'Claude Code مش متسطب' };
-  const r = await run(bin, ['-p', 'رد بكلمة واحدة: تمام', '--output-format', 'json', '--tools', '', '--max-turns', '1'], 90000, token);
+  const r = await run(bin, ['-p', 'رد بكلمة واحدة: تمام', '--output-format', 'json', '--tools', '', '--max-turns', '1'], 90000, token, gateway);
   let j = null; try { j = JSON.parse(r.out); } catch (_) {}
   const text = (j && j.result) || r.err || r.out;
   if (j && !j.is_error) return { ok: true, message: String(j.result || 'تمام').slice(0, 80) };
+  if (gatewayOf(gateway)) return { ok: false, auth: AUTH_ERR.test(text), message: (AUTH_ERR.test(text) ? 'الموقع رفض المفتاح: ' : 'الموقع ماردش صح: ') + String(text).slice(0, 240) };
   return { ok: false, auth: AUTH_ERR.test(text), message: AUTH_ERR.test(text) ? 'تسجيل الدخول منتهي أو مش واصل للبانل — اربط بتوكن ثابت (تحت)' : String(text).slice(0, 300) };
 }
 /** the one-line install / login, run in a visible terminal (the user watches and answers the browser login) */
@@ -102,8 +125,9 @@ const SYSTEM = {
  * { type: 'text', text } · { type: 'tool', name, input } · { type: 'tool_result', isError, text } · { type: 'done', isError, result, cost } · { type: 'error', message }
  */
 class ClaudeChat {
-  constructor({ bin, app, mcp, cwd, model, token, client, session, onEvent }) {
-    this.bin = bin; this.app = app; this.mcp = mcp; this.model = model; this.token = token || null; this.client = client || null; this.onEvent = onEvent || (() => {});
+  constructor({ bin, app, mcp, cwd, model, token, gateway, client, session, onEvent }) {
+    this.gateway = gatewayOf(gateway);
+    this.bin = bin; this.app = app; this.mcp = mcp; this.model = model || (this.gateway && this.gateway.model) || null; this.token = token || null; this.client = client || null; this.onEvent = onEvent || (() => {});
     this.cwd = cwd || path.join(os.tmpdir(), 'editfast-claude'); fs.mkdirSync(this.cwd, { recursive: true });
     this.session = session || null; this.proc = null;
   }
@@ -124,7 +148,7 @@ class ClaudeChat {
     const emit = e => { try { this.onEvent(e); } catch (_) {} };
     return new Promise(resolve => {
       const shell = WIN && /\.cmd$/i.test(this.bin);
-      const p = this.proc = spawn(this.bin, this.args(text), { cwd: this.cwd, env: childEnv(this.bin, this.token), shell, windowsHide: true });
+      const p = this.proc = spawn(this.bin, this.args(text), { cwd: this.cwd, env: childEnv(this.bin, this.token, this.gateway), shell, windowsHide: true });
       let authed = false;
       const auth = t => { if (!authed) { authed = true; emit({ type: 'auth', message: 'Claude مش قادر يسجّل دخول من جوه البانل (' + String(t).slice(0, 120) + ') — اربط بتوكن ثابت من فوق، مرة واحدة وخلاص.' }); } };
       let buf = '', errTxt = '', final = null;
@@ -169,4 +193,4 @@ function friendly(err, code) {
   return 'Claude وقف' + (code ? ' (' + code + ')' : '') + (e.trim() ? ': ' + e.trim().split('\n').slice(-3).join(' ').slice(0, 300) : '');
 }
 
-module.exports = { ClaudeChat, labelOf, verify, isToken, extractToken, childEnv, status, find, candidates, terminalCommand, openTerminal, SYSTEM, friendly };
+module.exports = { ClaudeChat, labelOf, verify, isToken, extractToken, childEnv, gatewayOf, status, find, candidates, terminalCommand, openTerminal, SYSTEM, friendly };

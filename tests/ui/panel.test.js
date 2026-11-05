@@ -425,6 +425,21 @@ test('Claude tab: chat right here — setup, Enter sends, clients with their own
   await page.locator('button', { hasText: 'محادثة جديدة' }).click();
   assert.equal(await page.locator('.claude-chat .msg').count(), 0);
   await page.selectOption('.claude-client-pick', '');
+  // an API key (Anthropic's, or a gateway site) instead of the subscription: the dashboard link is cleaned, a bad key is said, a good one is used
+  await page.locator('button', { hasText: 'مفتاح API' }).click(); await page.waitForTimeout(100);
+  await page.fill('.claude-gw-url', 'api.example.dev/dashboard'); await page.fill('.claude-gw-key', 'bad');
+  await page.locator('button', { hasText: 'احفظ المفتاح واتأكد' }).click(); await page.waitForTimeout(150);
+  assert.match(await page.locator('.claude-gw-res').textContent(), /✗ الموقع رفض المفتاح/);
+  assert.equal(await page.locator('.claude-gw-url').inputValue(), 'https://api.example.dev');
+  await page.fill('.claude-gw-key', 'good');
+  await page.locator('button', { hasText: 'احفظ المفتاح واتأكد' }).click(); await page.waitForTimeout(250);
+  assert.match(await page.locator('#view').textContent(), /شغّال بمفتاح API على api\.example\.dev/);
+  await page.fill('.claude-input', 'جرّب'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => window.__gw && window.__gw.key), 'good', 'the chat runs through the gateway');
+  await page.locator('button', { hasText: 'المفتاح' }).first().click(); await page.waitForTimeout(100);
+  await page.locator('button', { hasText: 'ارجع للاشتراك' }).click(); await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => EF.services.settings.keys.claudeGateway.key), '');
+  assert.match(await page.locator('#view').textContent(), /متربط بتوكن ثابت|متسجّل/);
 });
 
 test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {

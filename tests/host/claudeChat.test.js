@@ -100,6 +100,27 @@ test('an expired Claude Code login is said plainly, and a setup-token (long-live
   } finally { delete process.env.FAKE_CLAUDE_EXPIRED; delete process.env.ANTHROPIC_API_KEY; delete process.env.CLAUDE_BIN; }
 });
 
+test('an API key through an Anthropic-compatible gateway: the base URL is cleaned, the key and model reach Claude Code, the subscription stays out', async () => {
+  assert.deepEqual(chat.gatewayOf({ url: ' https://api.example.dev/dashboard ', key: ' k ' }), { url: 'https://api.example.dev', key: 'k', model: null });
+  assert.equal(chat.gatewayOf({ url: 'api.example.dev/v1/messages', key: 'k' }).url, 'https://api.example.dev');
+  assert.equal(chat.gatewayOf({ url: 'https://x.dev/anthropic/v1/', key: 'k' }).url, 'https://x.dev/anthropic');
+  assert.equal(chat.gatewayOf({ url: 'https://x.dev', key: '' }), null);
+  const env = chat.childEnv(FAKE, 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123', { url: 'https://x.dev', key: 'k', model: 'claude-x' });
+  assert.equal(env.ANTHROPIC_BASE_URL, 'https://x.dev'); assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined); assert.equal(env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-x');
+  assert.equal(chat.childEnv(FAKE, null).ANTHROPIC_BASE_URL, undefined, 'no gateway → no stray base URL');
+  process.env.FAKE_CLAUDE_EXPIRED = '1';
+  try {
+    const good = await chat.verify({ bin: FAKE, token: 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123', gateway: { url: 'https://gw.test/dashboard', key: 'gw-good-key', model: 'claude-m' } });
+    assert.equal(good.ok, true, JSON.stringify(good)); assert.match(good.message, /gw\.test/);
+    const bad = await chat.verify({ bin: FAKE, gateway: { url: 'https://gw.test', key: 'wrong' } });
+    assert.equal(bad.ok, false); assert.equal(bad.auth, true); assert.match(bad.message, /الموقع رفض المفتاح/);
+    process.env.CLAUDE_BIN = FAKE;
+    const st = await chat.status({ gateway: { url: 'https://gw.test', key: 'gw-good-key' } });
+    assert.equal(st.method, 'gateway'); assert.equal(st.loggedIn, true);
+    assert.equal(new chat.ClaudeChat({ bin: FAKE, app: 'ae', mcp: {}, gateway: { url: 'gw.test', key: 'k', model: 'claude-m' } }).args('x').join(' ').includes('--model claude-m'), true);
+  } finally { delete process.env.FAKE_CLAUDE_EXPIRED; delete process.env.CLAUDE_BIN; }
+});
+
 test('clients: a profile per client, Claude reads it and saves what it learns; each client keeps its own conversation', async () => {
   config.save({ ...config.DEFAULTS });
   const K = require('../../core/clients');

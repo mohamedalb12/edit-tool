@@ -10,8 +10,15 @@ if (argv[0] === 'auth' && argv[1] === 'status') { console.log(JSON.stringify({ l
 const arg = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : undefined; };
 // FAKE_CLAUDE_EXPIRED: the stored login is dead — only a setup-token (CLAUDE_CODE_OAUTH_TOKEN) gets through
 const tokenOk = /^sk-ant-oat01-/.test(process.env.CLAUDE_CODE_OAUTH_TOKEN || '');
-const authDead = !!process.env.FAKE_CLAUDE_EXPIRED && !tokenOk;
-if (process.env.ANTHROPIC_API_KEY) { process.stderr.write('an API key leaked into the child env'); process.exit(4); }
+// a gateway (ANTHROPIC_BASE_URL + key): only the key 'gw-good-key' is accepted, and the subscription is not used
+const gw = process.env.ANTHROPIC_BASE_URL;
+if (gw && arg('--output-format') === 'json') {
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) { process.stderr.write('subscription token sent along with a gateway'); process.exit(5); }
+  if (process.env.ANTHROPIC_API_KEY !== 'gw-good-key' || process.env.ANTHROPIC_AUTH_TOKEN !== 'gw-good-key') { out({ type: 'result', is_error: true, result: 'Invalid API key · 401' }); process.exit(1); }
+  out({ type: 'result', is_error: false, result: 'تمام via ' + gw + ' ' + (arg('--model') || process.env.ANTHROPIC_MODEL || '') }); process.exit(0);
+}
+const authDead = !!process.env.FAKE_CLAUDE_EXPIRED && !tokenOk && !gw;
+if (process.env.ANTHROPIC_API_KEY && !gw) { process.stderr.write('an API key leaked into the child env'); process.exit(4); }
 if (arg('--output-format') === 'json') {
   if (authDead) { out({ type: 'result', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' }); process.exit(1); }
   out({ type: 'result', is_error: false, result: 'تمام' }); process.exit(0);
