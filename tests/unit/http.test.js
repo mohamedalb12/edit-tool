@@ -33,7 +33,7 @@ test('node http client: json POST, headers, redirects, errors, streaming downloa
     assert.equal(d.bytes, big.length); assert.ok(prog.length > 0 && prog.at(-1) === 1);
     assert.ok(!fs.existsSync(dest + '.part'));
     await assert.rejects(downloader.download(base + '/missing', path.join(TMP, 'm2.bin')), /404/);
-    assert.equal(downloader.WHISPER_MODELS.length, 4);
+    assert.equal(downloader.WHISPER_MODELS.length, 5);
     assert.match(downloader.whisperUrl('large-v3-turbo'), /ggml-large-v3-turbo\.bin$/);
   } finally { srv.close(); }
 });

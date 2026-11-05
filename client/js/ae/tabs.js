@@ -674,6 +674,7 @@
       var out = h('pre', { class: 'ltr hint' });
       view.appendChild(UI.card('مفتاح OpenRouter (لمساعد الموشن)', UI.row(key, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { openrouter: key.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); })),
         UI.hint('المفاتيح والمكتبة والإعدادات واحدة مع EditFast في بريمير.')));
+      if (EF.claude && EF.claude.providerCard) view.appendChild(EF.claude.providerCard('mwapi'));
       var gq = h('input', { class: 'grow ltr', type: 'password', value: S().settings.keys.groq || '', placeholder: 'gsk_…' });
       view.appendChild(UI.card('مفتاح Groq (تفريغ الكلام)', UI.row(gq, action('احفظ', 'بيحفظ', function () { S().saveSettings({ keys: { groq: gq.value.trim() } }); ok('اتحفظ ✓ (نفس مفتاح بريمير)'); }), UI.btn('هات مفتاح', function () { EF.openUrl('https://console.groq.com/keys'); }, 'small')),
         UI.hint('للكلام المتحرك مع الصوت و"صوتك ← فيديو": أدق بكتير من التفريغ على الجهاز.')));

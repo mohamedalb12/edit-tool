@@ -5,6 +5,7 @@
     { id: 'templates', label: 'قوالبي', title: 'قوالبي (لبريمير)', icon: 'templates', members: ['templates'] },
     { id: 'director', label: 'المونتير', title: 'المونتير الذكي', icon: 'auto', members: ['director'] },
     { id: 'claude', label: 'Claude', title: 'Claude يمنتج هنا', icon: 'claude', members: ['claude'] },
+    { id: 'mcp', label: 'MCP', title: 'MCP — Claude من برا البانل', icon: 'mcp', members: ['mcp'] },
     { id: 'smart', label: 'أدوات ذكية', title: 'أدوات ذكية', icon: 'agent', members: ['smart'] },
     { id: 'estate', label: 'عقارات', title: 'إبراز مبنى (عقارات)', icon: 'templates', members: ['estate'] },
     { id: 'studio', label: 'لوجو و3D', title: 'لوجو، مورف، وثري دي', icon: 'cube', members: ['studio'] },

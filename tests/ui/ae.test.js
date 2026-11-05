@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'claude', 'smart', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'claude', 'mcp', 'smart', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -377,12 +377,14 @@ test('Claude tab: chat right here — setup, Enter sends, clients with their own
   await page.selectOption('.claude-client-pick', '');
 });
 
-test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
+test('MCP tab (apart from the Claude chat): status, install + Claude Code command, a live log of what Claude does, pause', async () => {
   await open('claude');
-  assert.match(await page.locator('#tab-title').textContent(), /Claude/);
+  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
+  assert.equal(await page.locator('.claude-status').count(), 0, 'the MCP status is not in the Claude tab');
+  await open('mcp');
+  assert.match(await page.locator('#tab-title').textContent(), /MCP/);
   assert.match(await page.locator('.claude-status').textContent(), /البانل مش جاهز|جاهز لـ Claude/);
   assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
-  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
   assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
   await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'ae_build_scene', args: {} }); });
   await page.waitForTimeout(100);
@@ -398,6 +400,9 @@ test('Claude tab: status, install + Claude Code command, examples to copy, a liv
   assert.equal(await page.evaluate(() => EF.claude.info().paused), true);
   await page.locator('button', { hasText: 'شغّل Claude تاني' }).click(); await page.waitForTimeout(100);
   assert.equal(await page.evaluate(() => EF.claude.info().paused), false);
+  // the MWAPI card in the AE settings too
+  await open('settings');
+  assert.match(await page.locator('#view').textContent(), /MWAPI \(API\)/);
 });
 
 test('no page errors in the After Effects panel', () => { assert.deepEqual(errors, []); });

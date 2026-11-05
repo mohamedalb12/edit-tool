@@ -59,13 +59,13 @@ async function open(id) {
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 13 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
+test('boots: 14 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'claude', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 13);
+  assert.deepEqual(ids, ['agent', 'claude', 'mcp', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 14);
   // every screen lives inside some tool ("organize" is back, next to relink)
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
-  assert.equal(members.length, 30); assert.ok(members.includes('organize'));
+  assert.equal(members.length, 31); assert.ok(members.includes('organize'));
   assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
@@ -442,12 +442,15 @@ test('Claude tab: chat right here — setup, Enter sends, clients with their own
   assert.match(await page.locator('#view').textContent(), /متربط بتوكن ثابت|متسجّل/);
 });
 
-test('Claude tab: status, install + Claude Code command, examples to copy, a live log of what Claude does, pause', async () => {
+test('MCP tab (apart from the Claude chat): status, install + Claude Code command, a live log of what Claude does, pause', async () => {
   await open('claude');
-  assert.match(await page.locator('#tab-title').textContent(), /Claude/);
+  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
+  assert.equal(await page.locator('.claude-status').count(), 0, 'the MCP status is not in the Claude tab');
+  assert.equal(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).count(), 0);
+  await open('mcp');
+  assert.match(await page.locator('#tab-title').textContent(), /MCP/);
   assert.match(await page.locator('.claude-status').textContent(), /البانل مش جاهز|جاهز لـ Claude/);
   assert.ok(await page.locator('button', { hasText: 'ثبّت في Claude Desktop' }).isVisible());
-  assert.ok(await page.locator('.claude-examples .chip').count() >= 4);
   assert.match(await page.locator('.claude-log').textContent(), /لسه Claude ماعملش حاجة/);
   await page.evaluate(() => { EF.claude._event({ phase: 'seen' }); EF.claude._event({ phase: 'start', name: 'premiere_add_captions', args: {} }); });
   await page.waitForTimeout(100);
@@ -463,6 +466,26 @@ test('Claude tab: status, install + Claude Code command, examples to copy, a liv
   assert.equal(await page.evaluate(() => EF.claude.info().paused), true);
   await page.locator('button', { hasText: 'شغّل Claude تاني' }).click(); await page.waitForTimeout(100);
   assert.equal(await page.evaluate(() => EF.claude.info().paused), false);
+});
+
+test('Settings: an MWAPI card — the site link filled in, a real connection test that says why, the models it serves, a switch for the Claude chat', async () => {
+  await open('settings'); await page.waitForTimeout(100);
+  assert.equal(await page.locator('.gw-url').inputValue(), 'https://api.mwapi.dev');
+  await page.fill('.gw-key', 'bad');
+  await page.locator('button', { hasText: 'احفظ واختبر الاتصال' }).click(); await page.waitForTimeout(200);
+  assert.match(await page.locator('.gw-res').textContent(), /✗ المفتاح مرفوض \(401\)/);
+  await page.fill('.gw-key', 'good');
+  await page.locator('.gw-on').check(); await page.waitForTimeout(100);
+  await page.locator('button', { hasText: 'احفظ واختبر الاتصال' }).click(); await page.waitForTimeout(200);
+  assert.match(await page.locator('.gw-res').textContent(), /^شغّال ✓ — claude-b رد: تمام · 2 موديل متاح/);
+  assert.equal(await page.locator('.gw-model').inputValue(), 'claude-b', 'the model is filled in from the site');
+  const keys = await page.evaluate(() => EF.services.settings.keys);
+  assert.deepEqual(keys.mwapi, { url: 'https://api.mwapi.dev', key: 'good', model: 'claude-b' });
+  assert.equal(keys.claudeGateway.provider, 'mwapi'); assert.equal(keys.claudeGateway.key, 'good');
+  await page.screenshot({ path: path.join(SHOTS, 'settings-mwapi.png'), fullPage: true });
+  await page.locator('.gw-on').uncheck(); await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => EF.services.settings.keys.claudeGateway.key), '', 'off → the chat is back on the subscription');
+  assert.equal(await page.evaluate(() => EF.services.settings.keys.mwapi.key), 'good', 'the key itself stays saved');
 });
 
 test('no page errors across the whole session', () => { assert.deepEqual(errors, []); });

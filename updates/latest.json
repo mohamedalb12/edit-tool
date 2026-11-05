@@ -1,8 +1,8 @@
 {
-  "version": "2.9.1",
-  "url": "EditFast-2.9.1.zip",
-  "sha256": "08dec1a85910277fbfaaeb2a462aa29bda371ba272ed89812f6362c128dbb4fa",
-  "size": 3744570,
-  "notes": "Claude tab: run the chat with an API key (Anthropic or an Anthropic-compatible gateway) instead of the subscription",
+  "version": "2.10.0",
+  "url": "EditFast-2.10.0.zip",
+  "sha256": "8762c50d3b7f7208493779a348f7f92ef31c15f435f054bca1c39a44a0ff5881",
+  "size": 3748831,
+  "notes": "MWAPI card in settings with a real connection test; MCP in its own tab; Whisper Large v3 as the default",
   "date": "2026-11-05"
 }
