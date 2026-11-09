@@ -1,8 +1,8 @@
 {
-  "version": "2.10.0",
-  "url": "EditFast-2.10.0.zip",
-  "sha256": "8762c50d3b7f7208493779a348f7f92ef31c15f435f054bca1c39a44a0ff5881",
-  "size": 3748831,
-  "notes": "MWAPI card in settings with a real connection test; MCP in its own tab; Whisper Large v3 as the default",
-  "date": "2026-11-05"
+  "version": "2.10.1",
+  "url": "EditFast-2.10.1.zip",
+  "sha256": "47fbdc64ff2d6ccd80fe5bae5b2db10288aa1e56811bebf06a97a42103e78316",
+  "size": 3746888,
+  "notes": "The whole plugin in shades of blue",
+  "date": "2026-11-09"
 }
