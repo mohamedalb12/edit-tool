@@ -1229,6 +1229,34 @@ ${JSON.stringify(lite)}
   }
 
   /** voice and music apart (Demucs on fal.ai): each clip of the track → a voice clip and a music clip on new tracks, the original muted */
+  /* ——— سكيلز من فيديوهات مرجعية (core/refSkill) ——— */
+  skills() { return require('./refSkill').list(); }
+  skillGet(id) { return require('./refSkill').get(id); }
+  skillRemove(id) { const R = require('./refSkill'); if (this.settings.activeSkill === id) this.saveSettings({ activeSkill: '' }); return R.remove(id); }
+  skillUpdate(id, patch) { return require('./refSkill').update(id, patch || {}); }
+  activeSkill() { const id = this.settings.activeSkill; return id ? require('./refSkill').get(id) : null; }
+  setActiveSkill(id) { this.saveSettings({ activeSkill: id || '' }); return this.activeSkill(); }
+  async skillCreate({ name, files, onStep } = {}) {
+    const s = await require('./refSkill').create({ ffmpeg: this.ffmpeg(), name, files, onStep });
+    if (!this.settings.activeSkill) this.saveSettings({ activeSkill: s.id });
+    return s;
+  }
+  /** an AI look at the references (captions, text animation, transitions, graphics) → the skill's notes */
+  async skillDescribe(id) {
+    if (!this.settings.keys.openrouter) throw new Error('الوصف بالصور محتاج مفتاح OpenRouter — أو خلّي Claude يبص عليهم من تاب Claude (بيستخدم السكيل لوحده)');
+    const R = require('./refSkill'), s = R.get(id);
+    if (!s) throw new Error('السكيل مش موجود');
+    return R.describe(this.llm, this.model('thumbnail'), s);
+  }
+  /** the skill on this sequence: its zoom (density / style / size) and, when its cuts follow the beat, a beat montage */
+  async skillApply({ id, zoom = true, beat = true, onProgress } = {}) {
+    const s = id ? this.skillGet(id) : this.activeSkill();
+    if (!s || !s.settings) throw new Error('اختار سكيل الأول');
+    const g = s.settings, out = { skill: s.name };
+    if (beat && g.beat.on) out.beat = await this.beatMontage({ every: g.beat.every });
+    if (zoom && g.zoom.density) out.zoom = await this.autoZoom({ density: g.zoom.density, style: g.zoom.style, scale: g.zoom.scale, onProgress });
+    return out;
+  }
   async separateAudio({ track, onProgress } = {}) {
     const g = await this.audioTracksGuess();
     const ti = track ?? g.voice, tr = g.seq.audio[ti];

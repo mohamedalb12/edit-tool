@@ -999,6 +999,25 @@ class AEServices {
 
   /* ---------- MEGZ-style tools: voice / music, face track, relight, slow motion, beats ---------- */
   /** the selected layer's voice and music as two layers (Demucs on fal.ai), its own audio off */
+  /* ——— سكيلز من فيديوهات مرجعية (core/refSkill) ——— */
+  skills() { return require('./refSkill').list(); }
+  skillGet(id) { return require('./refSkill').get(id); }
+  skillRemove(id) { const R = require('./refSkill'); if (this.settings.activeSkill === id) this.saveSettings({ activeSkill: '' }); return R.remove(id); }
+  skillUpdate(id, patch) { return require('./refSkill').update(id, patch || {}); }
+  activeSkill() { const id = this.settings.activeSkill; return id ? require('./refSkill').get(id) : null; }
+  setActiveSkill(id) { this.saveSettings({ activeSkill: id || '' }); return this.activeSkill(); }
+  async skillCreate({ name, files, onStep } = {}) {
+    const s = await require('./refSkill').create({ ffmpeg: this.ffmpeg(), name, files, onStep });
+    if (!this.settings.activeSkill) this.saveSettings({ activeSkill: s.id });
+    return s;
+  }
+  /** an AI look at the references (captions, text animation, transitions, graphics) → the skill's notes */
+  async skillDescribe(id) {
+    if (!this.settings.keys.openrouter) throw new Error('الوصف بالصور محتاج مفتاح OpenRouter — أو خلّي Claude يبص عليهم من تاب Claude (بيستخدم السكيل لوحده)');
+    const R = require('./refSkill'), s = R.get(id);
+    if (!s) throw new Error('السكيل مش موجود');
+    return R.describe(this.llm, this.model('thumbnail'), s);
+  }
   async separateAudio({ onStep } = {}) {
     if (!this.settings.keys.fal) throw new Error('فصل الصوت عن المزيكا محتاج مفتاح fal.ai (الإعدادات) — بيتعمل بموديل Demucs');
     const src = await this.host('mediaOf', { need: 'audio' }), L = src.layer;

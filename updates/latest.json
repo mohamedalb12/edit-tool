@@ -1,8 +1,8 @@
 {
-  "version": "2.10.1",
-  "url": "EditFast-2.10.1.zip",
-  "sha256": "47fbdc64ff2d6ccd80fe5bae5b2db10288aa1e56811bebf06a97a42103e78316",
-  "size": 3746888,
-  "notes": "The whole plugin in shades of blue",
+  "version": "2.11.0",
+  "url": "EditFast-2.11.0.zip",
+  "sha256": "0067b960532124f1d40561a98017fa2ec67c84d23e1686a831dffa3329593bc9",
+  "size": 3761598,
+  "notes": "Skills from reference videos: pace, zoom, flashes, colours and beat analysed on your machine, applied by the panel or by Claude",
   "date": "2026-11-09"
 }

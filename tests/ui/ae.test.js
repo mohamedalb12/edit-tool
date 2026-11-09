@@ -38,7 +38,7 @@ const shot = name => page.waitForTimeout(500).then(() => page.screenshot({ path:
 
 test('After Effects panel boots with its own tools, connected to AE', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['templates', 'director', 'claude', 'mcp', 'smart', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
+  assert.deepEqual(ids, ['templates', 'director', 'claude', 'skills', 'mcp', 'smart', 'estate', 'studio', 'track', 'character', 'fx', 'info', 'motion', 'text', 'expr', '3d', 'routine', 'ai', 'library', 'settings']);
   await page.waitForFunction(() => /After Effects/.test(document.getElementById('status').textContent));
   assert.match(await page.textContent('.brand .name'), /Motion/);
 });
@@ -375,6 +375,40 @@ test('Claude tab: chat right here — setup, Enter sends, clients with their own
   await page.locator('button', { hasText: 'محادثة جديدة' }).click();
   assert.equal(await page.locator('.claude-chat .msg').count(), 0);
   await page.selectOption('.claude-client-pick', '');
+});
+
+test('Skills: reference videos → a skill (pace, zoom, beat, palette), pick it, apply it, describe it, notes; Claude gets it with the next message', async () => {
+  await open('skills'); await page.waitForTimeout(100);
+  assert.match(await page.locator('#view').textContent(), /لسه مفيش/);
+  await page.evaluate(() => { window.__pfKeep = window.EF.test.pickFiles; window.EF.test.pickFiles = () => ['/refs/a.mp4', '/refs/b.mov']; });
+  await page.fill('.skill-name', 'ريلز سريعة');
+  await page.locator('button', { hasText: 'اختار الفيديوهات' }).click(); await page.waitForTimeout(50);
+  assert.match(await page.locator('.skill-files').textContent(), /a\.mp4[\s\S]*b\.mov/);
+  await page.locator('button', { hasText: 'حلّل واعمل السكيل' }).click(); await page.waitForTimeout(250);
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(c => c.name === 'skillCreate').pop().args), { name: 'ريلز سريعة', files: ['/refs/a.mp4', '/refs/b.mov'] });
+  assert.match(await page.locator('.skill-step').textContent(), /✓ السكيل "ريلز سريعة" جاهز — سريع · بانش سريع/);
+  const stats = await page.locator('.skill-stats').textContent();
+  assert.match(stats, /سريع · 1\.6 ث للقطة/); assert.match(stats, /بانش سريع · كتير · 112%/); assert.match(stats, /على البيت · كل 3 · 120 BPM/);
+  assert.equal(await page.locator('.skill-palette .swatch').count(), 2);
+  assert.match(await page.locator('.skill-active').textContent(), /المختار/, 'the first skill is picked');
+  if ('ae' === 'premiere') {
+    await page.locator('button', { hasText: 'طبّقه على السيكوينس' }).click(); await page.waitForTimeout(150);
+    assert.match(await page.locator('.skill-res').textContent(), /اتقطّع على البيت · 9 زووم/);
+  }
+  await page.locator('button', { hasText: 'وصف بالصور (AI)' }).click(); await page.waitForTimeout(150);
+  assert.match(await page.locator('.skill-notes').inputValue(), /كابشن أبيض كبير/);
+  await page.screenshot({ path: path.join(SHOTS, 'ae-skills.png'), fullPage: true });
+  // Claude reads the picked skill with the next message
+  await page.addScriptTag({ path: path.join(__dirname, 'claudeFakes.js') });
+  await page.evaluate(t => window.__installClaudeFakes(t), 'x');
+  await page.evaluate(() => { window.__cc = { installed: true, loggedIn: true, version: '2.1.300', bin: '/x/claude' }; });
+  await open('claude'); await page.waitForTimeout(150);
+  await page.fill('.claude-input', 'منتج بالسكيل'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.match(await page.evaluate(() => window.__ctx.pop()), /السكيل: ريلز سريعة — سريع[\s\S]*skill_get/);
+  await open('skills'); await page.waitForTimeout(100);
+  await page.locator('button', { hasText: /^امسح$/ }).click(); await page.locator('button', { hasText: 'متأكد؟' }).click(); await page.waitForTimeout(100);
+  assert.match(await page.locator('#view').textContent(), /لسه مفيش/);
+  await page.evaluate(() => { window.EF.test.pickFiles = window.__pfKeep; });
 });
 
 test('MCP tab (apart from the Claude chat): status, install + Claude Code command, a live log of what Claude does, pause', async () => {

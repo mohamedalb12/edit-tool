@@ -59,13 +59,13 @@ async function open(id) {
 async function clickText(text) { await page.locator('button', { hasText: text }).first().click(); await page.waitForTimeout(250); }
 async function shot(name) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(SHOTS, name + '.png') }); }
 
-test('boots: 14 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
+test('boots: 15 tools in the sidebar (each groups related screens), RTL Arabic, connected to host, no errors', async () => {
   const ids = await page.$$eval('#nav button', bs => bs.map(b => b.dataset.id));
-  assert.deepEqual(ids, ['agent', 'claude', 'mcp', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
-  assert.equal(await page.locator('#nav button svg').count(), 14);
+  assert.deepEqual(ids, ['agent', 'claude', 'skills', 'mcp', 'transcribe', 'quickcut', 'audio', 'reels', 'motion', 'templates', 'library', 'download', 'revisions', 'relink', 'settings']);
+  assert.equal(await page.locator('#nav button svg').count(), 15);
   // every screen lives inside some tool ("organize" is back, next to relink)
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
-  assert.equal(members.length, 31); assert.ok(members.includes('organize'));
+  assert.equal(members.length, 32); assert.ok(members.includes('organize'));
   assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
@@ -440,6 +440,40 @@ test('Claude tab: chat right here — setup, Enter sends, clients with their own
   await page.locator('button', { hasText: 'ارجع للاشتراك' }).click(); await page.waitForTimeout(150);
   assert.equal(await page.evaluate(() => EF.services.settings.keys.claudeGateway.key), '');
   assert.match(await page.locator('#view').textContent(), /متربط بتوكن ثابت|متسجّل/);
+});
+
+test('Skills: reference videos → a skill (pace, zoom, beat, palette), pick it, apply it, describe it, notes; Claude gets it with the next message', async () => {
+  await open('skills'); await page.waitForTimeout(100);
+  assert.match(await page.locator('#view').textContent(), /لسه مفيش/);
+  await page.evaluate(() => { window.__pfKeep = window.EF.test.pickFiles; window.EF.test.pickFiles = () => ['/refs/a.mp4', '/refs/b.mov']; });
+  await page.fill('.skill-name', 'ريلز سريعة');
+  await page.locator('button', { hasText: 'اختار الفيديوهات' }).click(); await page.waitForTimeout(50);
+  assert.match(await page.locator('.skill-files').textContent(), /a\.mp4[\s\S]*b\.mov/);
+  await page.locator('button', { hasText: 'حلّل واعمل السكيل' }).click(); await page.waitForTimeout(250);
+  assert.deepEqual(await page.evaluate(() => window.__calls.filter(c => c.name === 'skillCreate').pop().args), { name: 'ريلز سريعة', files: ['/refs/a.mp4', '/refs/b.mov'] });
+  assert.match(await page.locator('.skill-step').textContent(), /✓ السكيل "ريلز سريعة" جاهز — سريع · بانش سريع/);
+  const stats = await page.locator('.skill-stats').textContent();
+  assert.match(stats, /سريع · 1\.6 ث للقطة/); assert.match(stats, /بانش سريع · كتير · 112%/); assert.match(stats, /على البيت · كل 3 · 120 BPM/);
+  assert.equal(await page.locator('.skill-palette .swatch').count(), 2);
+  assert.match(await page.locator('.skill-active').textContent(), /المختار/, 'the first skill is picked');
+  if ('premiere' === 'premiere') {
+    await page.locator('button', { hasText: 'طبّقه على السيكوينس' }).click(); await page.waitForTimeout(150);
+    assert.match(await page.locator('.skill-res').textContent(), /اتقطّع على البيت · 9 زووم/);
+  }
+  await page.locator('button', { hasText: 'وصف بالصور (AI)' }).click(); await page.waitForTimeout(150);
+  assert.match(await page.locator('.skill-notes').inputValue(), /كابشن أبيض كبير/);
+  await page.screenshot({ path: path.join(SHOTS, 'premiere-skills.png'), fullPage: true });
+  // Claude reads the picked skill with the next message
+  await page.addScriptTag({ path: path.join(__dirname, 'claudeFakes.js') });
+  await page.evaluate(t => window.__installClaudeFakes(t), 'x');
+  await page.evaluate(() => { window.__cc = { installed: true, loggedIn: true, version: '2.1.300', bin: '/x/claude' }; });
+  await open('claude'); await page.waitForTimeout(150);
+  await page.fill('.claude-input', 'منتج بالسكيل'); await page.locator('.claude-input').press('Enter'); await page.waitForTimeout(250);
+  assert.match(await page.evaluate(() => window.__ctx.pop()), /السكيل: ريلز سريعة — سريع[\s\S]*skill_get/);
+  await open('skills'); await page.waitForTimeout(100);
+  await page.locator('button', { hasText: /^امسح$/ }).click(); await page.locator('button', { hasText: 'متأكد؟' }).click(); await page.waitForTimeout(100);
+  assert.match(await page.locator('#view').textContent(), /لسه مفيش/);
+  await page.evaluate(() => { window.EF.test.pickFiles = window.__pfKeep; });
 });
 
 test('MCP tab (apart from the Claude chat): status, install + Claude Code command, a live log of what Claude does, pause', async () => {

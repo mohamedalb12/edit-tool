@@ -103,5 +103,24 @@
     selfTest: function () { return rec('selfTest', null, { version: '25.0', mogrtExport: true }); },
     fullTest: function (o) { o.onStep('(1/2) لوجو · Logo PNG 3d'); return rec('fullTest', {}, { ok: 1, fail: 1, total: 2, report: 'EditFast Motion — اختبار كل الأدوات\n✗ لوجو · Logo PNG 3d → renderer', results: [] }); }
   };
+  // skills from reference videos: an in-memory store with a real-looking analysed skill
+  (function () {
+    var store = {}, seq = 0;
+    function made(name, files) {
+      var id = 'k' + (++seq);
+      return { id: id, name: name, notes: '', refs: files.map(function (f, i) { return { name: f.split('/').pop(), file: f, sheet: null, duration: 30 }; }),
+        stats: { refs: files.length, seconds: 30 * files.length, shotAvg: 1.6, shotP10: 0.8, shotP90: 2.6, cutsPerMin: 37, punchPerMin: 7, punchAmount: 12, smoothShare: 0.1, smoothRate: 4, motion: 9, flashesPerMin: 2, brightness: 120, contrast: 64, saturation: 0.5, warmth: 4, bpm: 120, onBeat: 0.8, chance: 0.4, palette: [{ hex: '#1d4ed8', share: 0.4 }, { hex: '#f8fafc', share: 0.3 }] },
+        settings: { pace: 'سريع', motion: 'متوسطة', grade: ['متوسط الإضاءة', 'كونتراست عالي', 'ألوان مشبّعة', 'محايد'], zoom: { density: 'high', style: 'jump', scale: 112 }, beat: { on: true, every: 3, bpm: 120 }, shots: { min: 0.8, max: 2.6 }, flashes: 'فلاشات بين اللقطات', colors: ['#1d4ed8', '#f8fafc'] } };
+    }
+    S.skills = function () { return Object.keys(store).map(function (k) { var s = store[k]; return { id: s.id, name: s.name, refs: s.refs.length, pace: s.settings.pace, colors: s.settings.colors, ready: true }; }); };
+    S.skillGet = function (id) { return store[id] ? JSON.parse(JSON.stringify(store[id])) : null; };
+    S.skillCreate = function (o) { calls.push({ name: 'skillCreate', args: { name: o.name, files: o.files } }); if (o.onStep) o.onStep('بيحلل 1 / ' + o.files.length); var s = made(o.name, o.files); store[s.id] = s; if (!settings.activeSkill) settings.activeSkill = s.id; return Promise.resolve(JSON.parse(JSON.stringify(s))); };
+    S.skillUpdate = function (id, p) { calls.push({ name: 'skillUpdate', args: { id: id, patch: p } }); if (p.notes !== undefined) store[id].notes = p.notes; return store[id]; };
+    S.skillRemove = function (id) { calls.push({ name: 'skillRemove', args: id }); delete store[id]; if (settings.activeSkill === id) settings.activeSkill = ''; return true; };
+    S.setActiveSkill = function (id) { calls.push({ name: 'setActiveSkill', args: id }); settings.activeSkill = id || ''; return store[id] || null; };
+    S.activeSkill = function () { return store[settings.activeSkill] || null; };
+    S.skillApply = function (o) { return rec('skillApply', o, { skill: 'x', beat: { cuts: 4 }, zoom: { zooms: 9 } }); };
+    S.skillDescribe = function (id) { calls.push({ name: 'skillDescribe', args: id }); store[id].notes = 'كابشن أبيض كبير كلمة كلمة · ترانزيشن فلاش'; return Promise.resolve(store[id]); };
+  })();
   window.EF_TEST = { node: load, services: S, host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'After Effects (test)' } : {}); } };
 })();

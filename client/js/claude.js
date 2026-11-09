@@ -50,6 +50,7 @@
   function bundle() { try { return EF.node('mcpBundle'); } catch (e) { return null; } }
   function chatMod() { try { return EF.node('claudeChat'); } catch (e) { return null; } }
   function clientsMod() { try { return EF.node('clients'); } catch (e) { return null; } }
+  function skillMod() { try { return EF.node('refSkill'); } catch (e) { return null; } }
   function gatewayMod() { try { return EF.node('gateway'); } catch (e) { return null; } }
 
   /**
@@ -298,6 +299,9 @@
             // the client's profile goes with the message whenever it changed since Claude last read it
             var ctx = null;
             if (c && K) { var hs = K.hashOf(c); if (hs !== state.seen) { ctx = K.profileText(c); state.seen = hs; } }
+            // the skill picked in the Skills tab: its guide goes with the message whenever it changed
+            var sk = S && S.activeSkill ? S.activeSkill() : null, R = skillMod();
+            if (sk && R) { var hk = R.hashOf(sk); if (hk !== state.skillSeen) { ctx = (ctx ? ctx + '\n\n' : '') + R.guideText(sk, state.app) + '\n(صور المرجع: ' + (state.app === 'ae' ? 'ae' : 'premiere') + '_skill_get)'; state.skillSeen = hk; } }
             input.value = '';
             state.chat.push({ role: 'user', text: text });
             drawChat();

@@ -179,9 +179,26 @@ function clientTools(app) {
   ];
 }
 
+/* ---------------- skills made from reference videos (the panel's Skills tab) ---------------- */
+function skillTools(app) {
+  const R = require('./refSkill'), pre = app === 'ae' ? 'ae_' : 'premiere_';
+  const pick = (svc, id) => { const s = id ? R.get(id) : svc.activeSkill(); if (!s) throw new Error(id ? 'السكيل مش موجود' : 'مفيش سكيل مختار — شوف ' + pre + 'skills أو المونتير يختار واحد من تاب السكيلز'); return s; };
+  const tools = [
+    { name: pre + 'skills', app, description: 'السكيلز اللي المونتير عملها من فيديوهات مرجعية (ستايل مونتاج متحلل: الإيقاع، الزووم، الفلاشات، الألوان، البيت)، واللي مختار منها دلوقتي.', inputSchema: obj(),
+      run: async svc => ({ data: { active: svc.settings.activeSkill || null, skills: R.list() } }) },
+    { name: pre + 'skill_get', app, description: 'السكيل بالتفصيل + صور من الفيديوهات المرجعية (كل صورة 12 فريم من فيديو). اقراه وبص على الصور قبل ما تمنتج بالستايل ده، والتزم بأرقامه. من غير id = السكيل المختار.', inputSchema: obj({ id: str('id السكيل (اختياري)') }),
+      run: async (svc, a) => { const s = pick(svc, a.id); return { text: R.guideText(s, app), images: R.sheets(s, 4) }; } },
+    { name: pre + 'skill_note', app, description: 'اكتب في السكيل اللي شفته في صور المرجع ومش بيتقاس بالأرقام (شكل الكابشن، الكلام المتحرك، الترانزيشنز، الجرافيك، الإحساس) — عشان المرة الجاية. بيستبدل الملاحظات القديمة.', inputSchema: obj({ notes: str('الملاحظات بالعامية، سطور قصيرة'), id: str('id السكيل (اختياري)') }, ['notes']),
+      run: async (svc, a) => { const s = R.update(pick(svc, a.id).id, { notes: a.notes }); return { text: 'اتحفظ في سكيل ' + s.name + ' ✓' }; } }
+  ];
+  if (app === 'premiere') tools.push({ name: 'premiere_skill_apply', app, description: 'طبّق السكيل على السيكوينس المفتوحة: الزووم بنفس كثافته وستايله وحجمه، والقطع على البيت لو المرجع بيقطع على البيت.', inputSchema: obj({ id: str('id السكيل (اختياري)'), zoom: { type: 'boolean' }, beat: { type: 'boolean' } }),
+    run: async (svc, a) => ({ data: await svc.skillApply({ id: a.id, zoom: a.zoom !== false, beat: a.beat !== false }) }) });
+  return tools;
+}
+
 /* ---------------- shared ---------------- */
 let cache = null;
-function all() { if (!cache) cache = premiereTools().concat(clientTools('premiere'), aeTools(), clientTools('ae')); return cache; }
+function all() { if (!cache) cache = premiereTools().concat(clientTools('premiere'), skillTools('premiere'), aeTools(), clientTools('ae'), skillTools('ae')); return cache; }
 const forApp = app => all().filter(t => t.app === app);
 /** a tool's raw result → MCP content (text JSON + images) */
 async function run(tool, svc, args, ctx) {

@@ -695,3 +695,14 @@ input[type=checkbox], input[type=radio] { accent-color: #3b82f6; }
 .claude-memory { display: grid; gap: 4px; margin-bottom: 8px; }
 .claude-memory .claude-row { grid-template-columns: 14px 1fr auto; }
 .claude-token { min-height: 60px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; resize: vertical; }
+
+/* سكيلز من فيديوهات مرجعية */
+.skill-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; margin: 6px 0 10px; }
+.skill-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: rgba(59,130,246, .08); border: 1px solid rgba(96,165,250, .18); }
+.skill-stat .hint { margin: 0; font-size: 11px; }
+.skill-stat b { font-size: 12.5px; }
+.skill-palette { margin: 4px 0 8px; }
+.skill-palette .swatch { width: 26px; height: 26px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .2); display: inline-block; }
+.skill-sheet { width: 100%; border-radius: 10px; border: 1px solid var(--line-2); margin: 4px 0; display: block; }
+.skill-active { background: rgba(59,130,246, .2); border: 1px solid rgba(96,165,250, .5); color: var(--text); padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.skill-files .chip-x { background: none; border: 0; color: inherit; cursor: pointer; margin-inline-start: 4px; opacity: .7; }

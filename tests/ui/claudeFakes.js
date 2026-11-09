@@ -45,7 +45,7 @@ window.__installClaudeFakes = function (toolName) {
     test: function (v) { window.__gwTests.push(v); return Promise.resolve(v.key === 'good' ? { ok: true, format: 'anthropic', models: ['claude-a', 'claude-b'], model: v.model || 'claude-b', message: 'شغّال ✓ — ' + (v.model || 'claude-b') + ' رد: تمام' } : { ok: false, models: [], message: 'المفتاح مرفوض (401): invalid key' }); }
   };
   var orig = EF.test.node;
-  EF.test.node = function (m) { return m === 'claudeChat' ? window.__fakeChat : m === 'clients' ? window.__fakeClients : m === 'gateway' ? window.__fakeGateway : m === 'mcpBridge' ? { mcpConfig: function () { return {}; } } : orig(m); };
+  EF.test.node = function (m) { return m === 'claudeChat' ? window.__fakeChat : m === 'clients' ? window.__fakeClients : m === 'gateway' ? window.__fakeGateway : m === 'refSkill' ? { hashOf: function (k) { return k ? k.id + '|' + k.notes : null; }, guideText: function (k, app) { return 'السكيل: ' + k.name + ' — ' + k.settings.pace + ' (' + app + ')'; } } : m === 'mcpBridge' ? { mcpConfig: function () { return {}; } } : orig(m); };
   window.__bridgeClient = null;
   EF.claude._setBridge({ pause: function () {}, setClient: function (id) { window.__bridgeClient = id; } });
   EF.claude._testReset();

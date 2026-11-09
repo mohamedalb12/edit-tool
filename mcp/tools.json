@@ -1429,6 +1429,69 @@
   }
  },
  {
+  "name": "premiere_skills",
+  "description": "السكيلز اللي المونتير عملها من فيديوهات مرجعية (ستايل مونتاج متحلل: الإيقاع، الزووم، الفلاشات، الألوان، البيت)، واللي مختار منها دلوقتي.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_skill_get",
+  "description": "السكيل بالتفصيل + صور من الفيديوهات المرجعية (كل صورة 12 فريم من فيديو). اقراه وبص على الصور قبل ما تمنتج بالستايل ده، والتزم بأرقامه. من غير id = السكيل المختار.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "id السكيل (اختياري)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "premiere_skill_note",
+  "description": "اكتب في السكيل اللي شفته في صور المرجع ومش بيتقاس بالأرقام (شكل الكابشن، الكلام المتحرك، الترانزيشنز، الجرافيك، الإحساس) — عشان المرة الجاية. بيستبدل الملاحظات القديمة.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "notes": {
+     "type": "string",
+     "description": "الملاحظات بالعامية، سطور قصيرة"
+    },
+    "id": {
+     "type": "string",
+     "description": "id السكيل (اختياري)"
+    }
+   },
+   "required": [
+    "notes"
+   ]
+  }
+ },
+ {
+  "name": "premiere_skill_apply",
+  "description": "طبّق السكيل على السيكوينس المفتوحة: الزووم بنفس كثافته وستايله وحجمه، والقطع على البيت لو المرجع بيقطع على البيت.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "id السكيل (اختياري)"
+    },
+    "zoom": {
+     "type": "boolean"
+    },
+    "beat": {
+     "type": "boolean"
+    }
+   },
+   "required": []
+  }
+ },
+ {
   "name": "ae_guide",
   "description": "اقرا ده الأول: لغة المشاهد (JSON) اللي بتبني بيها أي موشن جرافيك في الأفتر، قواعد التصميم، المكتبة، والأدوات.",
   "inputSchema": {
@@ -1680,6 +1743,49 @@
     }
    },
    "required": []
+  }
+ },
+ {
+  "name": "ae_skills",
+  "description": "السكيلز اللي المونتير عملها من فيديوهات مرجعية (ستايل مونتاج متحلل: الإيقاع، الزووم، الفلاشات، الألوان، البيت)، واللي مختار منها دلوقتي.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "ae_skill_get",
+  "description": "السكيل بالتفصيل + صور من الفيديوهات المرجعية (كل صورة 12 فريم من فيديو). اقراه وبص على الصور قبل ما تمنتج بالستايل ده، والتزم بأرقامه. من غير id = السكيل المختار.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "id السكيل (اختياري)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "ae_skill_note",
+  "description": "اكتب في السكيل اللي شفته في صور المرجع ومش بيتقاس بالأرقام (شكل الكابشن، الكلام المتحرك، الترانزيشنز، الجرافيك، الإحساس) — عشان المرة الجاية. بيستبدل الملاحظات القديمة.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "notes": {
+     "type": "string",
+     "description": "الملاحظات بالعامية، سطور قصيرة"
+    },
+    "id": {
+     "type": "string",
+     "description": "id السكيل (اختياري)"
+    }
+   },
+   "required": [
+    "notes"
+   ]
   }
  }
 ]
