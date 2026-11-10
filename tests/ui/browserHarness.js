@@ -230,6 +230,9 @@
     S.skillApply = function (o) { return rec('skillApply', o, { skill: 'x', beat: { cuts: 4 }, zoom: { zooms: 9 } }); };
     S.skillDescribe = function (id) { calls.push({ name: 'skillDescribe', args: id }); store[id].notes = 'كابشن أبيض كبير كلمة كلمة · ترانزيشن فلاش'; return Promise.resolve(store[id]); };
   })();
+  S.hdrScan = function () { return rec('hdrScan', null, [{ file: '/m/iphone.mov', name: 'iphone.mov', uses: 3, hdr: 'hlg', label: 'Dolby Vision' }, { file: '/m/talk.mp4', name: 'talk.mp4', uses: 1, hdr: null, label: 'SDR' }]); };
+  S.hdrPreview = function (o) { return rec('hdrPreview', o, { after: '/9j/4AAQ', naive: '/9j/4AAQ', info: { label: 'Dolby Vision' } }); };
+  S.hdrConvert = function (o) { var a = Object.assign({}, o); delete a.onProgress; if (o.onProgress) o.onProgress(0.5, 'iphone.mov'); return rec('hdrConvert', a, { done: o.files.map(function (f) { return { file: f, out: f.replace(/\.mov$/, '_SDR.mov'), replaced: 1 }; }), failed: [] }); };
   window.EF_TEST = {
     node: load, services: S,
     host: function (n, a) { return rec('host:' + n, a, n === 'ping' ? { app: 'Premiere Pro (test)' } : {}); },

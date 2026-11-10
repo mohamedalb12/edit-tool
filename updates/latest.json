@@ -1,8 +1,8 @@
 {
-  "version": "2.11.1",
-  "url": "EditFast-2.11.1.zip",
-  "sha256": "6568aefb5e8420a0ec6453a0c6e427a807bda122118ace4ebbfb9430899ddc6a",
-  "size": 3762965,
-  "notes": "Captions fall back to text clips when Premiere refuses a caption track; Whisper Large v3 really in use (Groq migrated, local large-v3 picked, one-click download)",
+  "version": "2.12.0",
+  "url": "EditFast-2.12.0.zip",
+  "sha256": "21ad46fc10e662044520de6d7b20c6e65dab82fb1598227a1fcc4f1e9ca5415b",
+  "size": 3770710,
+  "notes": "HDR to SDR with the same colours: HLG / HDR10 / Dolby Vision clips tone-mapped to Rec.709 10-bit, swapped in the project",
   "date": "2026-11-10"
 }

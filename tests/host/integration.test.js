@@ -797,3 +797,18 @@ test('Whisper Large v3 is the model in use: Groq moves off Turbo once, and a dow
     assert.equal(e.engine, 'local'); assert.equal(e.model, 'large-v3'); assert.equal(e.large, true);
   } finally { fs.unlinkSync(big); }
 });
+
+test('HDR → SDR in the project: the HDR clip is found in the sequence, converted, and every use of it now plays the SDR copy', async () => {
+  const { FFMPEG } = require('../helpers'), { execFileSync } = require('child_process');
+  const src = path.join(TMP, 'phone.mov');
+  execFileSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=25:d=1', '-vf', 'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt2020,zscale=t=arib-std-b67:m=bt2020nc:npl=100,format=yuv420p10le',
+    '-c:v', 'libx265', '-x265-params', 'log-level=error', '-color_primaries', 'bt2020', '-color_trc', 'arib-std-b67', '-colorspace', 'bt2020nc', src]);
+  const { S, h } = world({ clipFile: src, clipLen: 1 });
+  const scan = await S.hdrScan();
+  assert.equal(scan.length, 1); assert.equal(scan[0].hdr, 'hlg'); assert.equal(scan[0].uses, 1);
+  const r = await S.hdrConvert({ files: [src], codec: 'h264' });
+  assert.deepEqual(r.failed, []);
+  assert.equal(r.done[0].out, path.join(TMP, 'phone_SDR.mp4')); assert.equal(r.done[0].replaced, 1);
+  assert.equal(h.pr.project.activeSeq.v[0].items[0].projectItem.mediaPath, r.done[0].out, 'the timeline now uses the SDR copy');
+  assert.ok(fs.existsSync(src), 'the original is kept');
+});

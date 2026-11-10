@@ -1128,6 +1128,19 @@ EFAPI.relinkMedia = function (a) {
   return { name: it.name, path: a.path };
 };
 
+/** every project item that uses the file a.from now uses a.to (an HDR clip swapped for its SDR copy, everywhere it is cut in) */
+EFAPI.replaceMediaPath = function (a) {
+  var norm = function (p) { return String(p || '').replace(/\\/g, '/').toLowerCase(); };
+  var all = EF.walk(app.project.rootItem, '', []), i, it, n = 0, failed = 0;
+  for (i = 0; i < all.length; i++) {
+    if (all[i].isBin) continue;
+    it = all[i].item;
+    if (norm(EF.mediaPath(it)) !== norm(a.from)) continue;
+    try { if (it.changeMediaPath(a.to, true) === false) failed++; else n++; } catch (e) { failed++; }
+  }
+  return { replaced: n, failed: failed };
+};
+
 EFAPI.projectPath = function () { return { path: app.project.path || '' }; };
 EFAPI.importFiles = function (a) { return { imported: EF.importMany(a.paths, a.bin || 'EditFast').length }; };
 

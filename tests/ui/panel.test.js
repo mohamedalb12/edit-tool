@@ -65,7 +65,7 @@ test('boots: 15 tools in the sidebar (each groups related screens), RTL Arabic, 
   assert.equal(await page.locator('#nav button svg').count(), 15);
   // every screen lives inside some tool ("organize" is back, next to relink)
   const members = await page.evaluate(() => EF.GROUPS.flatMap(g => g.members));
-  assert.equal(members.length, 32); assert.ok(members.includes('organize'));
+  assert.equal(members.length, 33); assert.ok(members.includes('organize'));
   assert.deepEqual(await page.evaluate(() => EF.tabs.map(t => t.id).filter(id => !EF.GROUPS.some(g => g.members.includes(id)))), []);
   assert.equal(await page.getAttribute('html', 'dir'), 'rtl');
   await page.waitForFunction(() => /متصل/.test(document.getElementById('status').textContent));
@@ -474,6 +474,24 @@ test('Skills: reference videos → a skill (pace, zoom, beat, palette), pick it,
   await page.locator('button', { hasText: /^امسح$/ }).click(); await page.locator('button', { hasText: 'متأكد؟' }).click(); await page.waitForTimeout(100);
   assert.match(await page.locator('#view').textContent(), /لسه مفيش/);
   await page.evaluate(() => { window.EF.test.pickFiles = window.__pfKeep; });
+});
+
+test('HDR → SDR: finds the HDR clips in the sequence, before/after preview, converts with the chosen look and file, swaps them in the project', async () => {
+  await open('hdr'); await page.waitForTimeout(100);
+  await page.locator('button', { hasText: 'دوّر في السيكوينس' }).click(); await page.waitForTimeout(150);
+  assert.equal(await page.locator('.hdr-item').count(), 2);
+  assert.match(await page.locator('.hdr-item.is-hdr').textContent(), /iphone\.mov[\s\S]*Dolby Vision · 3×/);
+  assert.equal(await page.locator('.hdr-item:not(.is-hdr) .hdr-pick').isDisabled(), true, 'SDR files cannot be picked');
+  assert.match(await page.locator('.hdr-step').textContent(), /1 فيديو HDR من 2/);
+  await page.locator('button', { hasText: 'هايلايت أنعم' }).click();
+  await page.locator('button', { hasText: 'HEVC 10-bit' }).click();
+  await page.locator('button', { hasText: 'شوف قبل وبعد' }).click(); await page.waitForTimeout(150);
+  assert.equal(await page.locator('.hdr-pair img').count(), 2);
+  await page.locator('button', { hasText: 'حوّل لـ SDR' }).click(); await page.waitForTimeout(200);
+  const call = await page.evaluate(() => window.__calls.filter(c => c.name === 'hdrConvert').pop().args);
+  assert.deepEqual(call, { files: ['/m/iphone.mov'], codec: 'hevc', look: 'soft', brightness: 0, saturation: 1, replace: true });
+  assert.match(await page.locator('.hdr-step').textContent(), /✓ 1 فيديو اتحوّل واتبدّل في المشروع: iphone_SDR\.mov/);
+  await page.screenshot({ path: path.join(SHOTS, 'hdr.png'), fullPage: true });
 });
 
 test('MCP tab (apart from the Claude chat): status, install + Claude Code command, a live log of what Claude does, pause', async () => {

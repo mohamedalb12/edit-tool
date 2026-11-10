@@ -2319,6 +2319,31 @@ ${JSON.stringify(lite)}
   }
 
   /* ---------- EditFast Link: ربط الملفات الناقصة ---------- */
+  /* ——— HDR → SDR (core/hdr) ——— */
+  /** the video files cut into this sequence and which of them are HDR */
+  async hdrScan() {
+    const H = require('./hdr'), s = await this.seq(), probe = ff.requireTool(this.tools.ffprobe, 'ffprobe'), files = new Map();
+    for (const tr of s.video || []) for (const c of tr.clips || []) if (c.mediaPath && !/\.(png|jpe?g|psd|ai|svg|gif|tiff?|webp|mogrt|aep|prproj)$/i.test(c.mediaPath)) files.set(c.mediaPath, (files.get(c.mediaPath) || 0) + 1);
+    const out = [];
+    for (const [file, uses] of files) { let i = null; try { i = await H.info(probe, file); } catch (_) {} out.push({ file, name: path.basename(file), uses, hdr: i ? i.hdr : null, label: i ? i.label : 'مش مقروء', info: i }); }
+    return out.sort((a, b) => (b.hdr ? 1 : 0) - (a.hdr ? 1 : 0));
+  }
+  async hdrPreview(o = {}) { return require('./hdr').preview({ ffmpeg: this.ffmpeg(), ffprobe: ff.requireTool(this.tools.ffprobe, 'ffprobe'), ...o }); }
+  /** HDR files → SDR copies (next to each original) and, with replace, every use in the project swapped to the copy */
+  async hdrConvert({ files = [], codec = 'prores', look = 'natural', brightness = 0, saturation = 1, replace = true, onProgress } = {}) {
+    const H = require('./hdr'), probe = ff.requireTool(this.tools.ffprobe, 'ffprobe'), done = [], failed = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const r = await H.convert({ ffmpeg: this.ffmpeg(), ffprobe: probe, file, codec, look, brightness, saturation, onProgress: p => onProgress && onProgress((i + p) / files.length, path.basename(file)) });
+        let replaced = 0;
+        if (replace) replaced = (await this.host('replaceMediaPath', { from: file, to: r.out })).replaced;
+        done.push({ file, out: r.out, replaced, from: r.info.label });
+      } catch (e) { failed.push({ file, error: e.message }); }
+    }
+    return { done, failed };
+  }
+
   async relinkScan({ dirs = [], onProgress } = {}) {
     const R = require('./relink');
     const r = await this.hostRaw('listOffline', {});
