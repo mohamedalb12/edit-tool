@@ -38,7 +38,7 @@
       }, 'primary');
       function saveC() { S.saveSettings({ captions: c }); }
       var cap = UI.btn('كابشن بريمير', function () {
-        UI.safe('بيعمل الكابشن', function () { return S.addCaptions(c).then(function (r) { UI.toast(r.cues + ' كارت كابشن ✓ — عدّلهم من Essential Graphics أو Text'); }); }, cap);
+        UI.safe('بيعمل الكابشن', function () { return S.addCaptions(c).then(function (r) { UI.toast(r.fallback ? 'بريمير رفض تراك الكابشن (' + (r.reason || '') + ') — نزّلته ' + r.cues + ' كابشن كنص على تراك فوق الفيديو ✓' : r.cues + ' كارت كابشن ✓ — عدّلهم من Essential Graphics أو Text', !!r.fallback); }); }, cap);
       }, 'primary');
       var exportBtn = UI.btn('احفظ SRT', function () {
         UI.safe('بيحفظ', function () {
@@ -69,8 +69,31 @@
         UI.safe('بيقص', function () { return S.cutRanges({ ranges: r }).then(function (x) { UI.toast('اتشال ' + (x.ranges || 0) + ' جزء ✓ على نسخة: ' + (x.sequence || '')); struck = {}; cutInfo(); S.transcript = null; drawWords(); }); }, doCut);
       }, 'small');
       var S0 = EF.services, groqOn = !!(S0.settings.keys.groq && S0.settings.transcribeEngine !== 'local');
-      var engineNote = h('p', { class: 'hint' }, groqOn ? '⚡ بيفرّغ على Groq (Whisper Large v3) — أدق وأسرع.' : 'بيفرّغ على جهازك. للدقة الأعلى في العربي حط مفتاح Groq من الإعدادات (ببلاش).',
-        groqOn ? null : h('button', { type: 'button', class: 'btn small', onclick: function () { EF.show('settings'); } }, 'حط مفتاح Groq'));
+      // which engine and which Whisper model this run will use — Large v3 is the one to have
+      var engineNote = h('div', { class: 'engine-note' });
+      function drawEngine() {
+        UI.empty(engineNote);
+        var E = S0.transcribeEngine ? S0.transcribeEngine() : { engine: groqOn ? 'groq' : 'local', large: groqOn, ready: true, model: groqOn ? 'whisper-large-v3' : '' };
+        if (E.engine === 'groq') {
+          engineNote.appendChild(h('p', { class: 'hint' }, '⚡ بيفرّغ على Groq بموديل ' + (E.large ? 'Whisper Large v3 (الأدق) ✓' : E.model)));
+          if (!E.large) engineNote.appendChild(UI.btn('خلّيه Large v3', function () { S0.saveSettings({ groqModel: 'whisper-large-v3' }); drawEngine(); UI.toast('Groq هيفرّغ بـ Large v3 ✓'); }, 'small'));
+          return;
+        }
+        engineNote.appendChild(h('p', { class: 'hint' }, 'بيفرّغ على جهازك بموديل: ' + (E.model ? E.model + (E.large ? ' (الأدق) ✓' : '') : 'مفيش موديل') + (E.whisper === false ? ' · ⚠ whisper.cpp مش متسطب' : '')));
+        if (!E.large) {
+          var bar = UI.progress ? UI.progress() : null;
+          var dl = UI.btn('حمّل Large v3 (3.1 جيجا) وخلّيه الأساسي', function () {
+            UI.safe('بيحمّل Whisper Large v3', function () {
+              var DL = EF.node('downloader'), dest = EF.node('config').dataDir() + '/models/ggml-large-v3.bin';
+              return DL.download(DL.whisperUrl('large-v3'), dest, { onProgress: function (p) { if (bar) bar.set(p); UI.status('بيحمّل Large v3 ' + Math.round(p * 100) + '%', 'busy'); } })
+                .then(function () { S0.saveSettings({ paths: { whisperModel: dest } }); UI.toast('Large v3 بقى الموديل الأساسي ✓'); drawEngine(); });
+            }, dl);
+          }, 'small');
+          engineNote.appendChild(UI.row(dl, h('button', { type: 'button', class: 'btn small', onclick: function () { EF.show('settings'); } }, 'أو حط مفتاح Groq (أسرع)')));
+          if (bar) engineNote.appendChild(bar);
+        }
+      }
+      drawEngine();
       view.appendChild(UI.card(groqOn ? 'التفريغ (Groq)' : 'التفريغ (أوفلاين بـ Whisper)', engineNote, UI.field('اللهجة', dialect), UI.field('تراك الكلام', trackSel), UI.modelPicker('spellfix'),
         UI.hint('التوقيت لكل كلمة. كل ملف بيتفرّغ مرة واحدة بس حتى لو اتقص لحتت. دوس على كلمة تروح لها، ودبل كليك تصحّحها قبل الكابشن. "القص بالكلام": اشطب الكلام اللي مش عايزه وهو يتشال من التايملين.'),
         UI.row(go, prog), UI.row(modeBtn, doCut, cutTxt), words));

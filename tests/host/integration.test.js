@@ -760,3 +760,40 @@ test('مونتاج على البيت: clips laid again on a copy so each cut lan
   assert.deepEqual(items.map(c => Math.round(c._in)), [5, 20, 40, 60], 'each keeps its own In point');
   assert.equal(seq.v[0].items.length, 4, 'original untouched');
 });
+
+test('captions: when Premiere refuses a caption track, the same captions go on as still text clips (not an error)', async () => {
+  process.env.FAKE_WHISPER_WORDS = 'النهارده هنتكلم عن المونتاج السريع';
+  try {
+    const f = makeAudio('talk-fallback.wav', [{ tone: 250, dur: 4 }]);
+    const { S, h } = world({ clipFile: f, clipLen: 4, settings: { keys: { openrouter: '' } } });
+    await S.transcribe({ dialect: 'egyptian' });
+    const orig = h.call; h.call = (n, a) => { if (n === 'createCaptions') throw new Error('Premiere refused the caption track'); return orig(n, a); };
+    let rendered = null;
+    S.renderCaptionsImpl = async o => { rendered = o; return o.cues.map((c, i) => { const file = path.join(TMP, 'cap-' + i + '.png'); fs.writeFileSync(file, 'png'); return { file, start: c.start, end: c.end }; }); };
+    const r = await S.addCaptions({ maxWords: 3 });
+    assert.equal(r.fallback, 'still'); assert.match(r.reason, /refused/);
+    assert.equal(rendered.style.still, true);
+    assert.ok(r.cues >= 2 && r.clips === r.cues);
+    await assert.rejects(S.addCaptions({ maxWords: 3, noFallback: true }), /refused/);
+  } finally { delete process.env.FAKE_WHISPER_WORDS; }
+});
+
+test('Whisper Large v3 is the model in use: Groq moves off Turbo once, and a downloaded large-v3 file is picked over an older model', async () => {
+  const { S } = world({ settings: { groqModel: 'whisper-large-v3-turbo', largeV3Default: false, keys: { groq: 'gsk_x', openrouter: '' } } });
+  assert.equal(S.settings.groqModel, 'whisper-large-v3');
+  assert.deepEqual(S.transcribeEngine(), { engine: 'groq', model: 'whisper-large-v3', large: true, ready: true });
+  S.saveSettings({ groqModel: 'whisper-large-v3-turbo' });
+  assert.equal(S.settings.groqModel, 'whisper-large-v3-turbo', 'a later choice of Turbo stays');
+  // on this machine: the large-v3 file, once it is downloaded, replaces the old model
+  S.saveSettings({ keys: { groq: '' } });
+  assert.equal(S.transcribeEngine().large, false);
+  const big = path.join(config.dataDir(), 'models', 'ggml-large-v3.bin');
+  fs.mkdirSync(path.dirname(big), { recursive: true });
+  const fd = fs.openSync(big, 'w'); fs.ftruncateSync(fd, 3.1e9); fs.closeSync(fd); // sparse: no real 3 GB on disk
+  try {
+    S.reload();
+    assert.equal(S.settings.paths.whisperModel, big);
+    const e = S.transcribeEngine();
+    assert.equal(e.engine, 'local'); assert.equal(e.model, 'large-v3'); assert.equal(e.large, true);
+  } finally { fs.unlinkSync(big); }
+});

@@ -14,6 +14,7 @@ const DEFAULTS = {
   transcribeEngine: 'auto', // auto (Groq when there's a key) | groq | local
   groqModel: 'whisper-large-v3',
   activeSkill: '',
+  largeV3Default: false,
   style: null, // ذوقك — بيتملى مرة واحدة
   quickCut: { sensitivity: 5, padding: 0.08, minSilence: 0.35, crossfadeFrames: 2, onCopy: true },
   captions: { maxWords: 4, maxDuration: 2.5, singleWord: false, snap: true },

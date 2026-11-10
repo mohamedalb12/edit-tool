@@ -297,9 +297,30 @@ class Services {
 
   reload() {
     this.settings = config.load();
+    this.preferLargeV3();
     this.tools = ff.resolveTools(this.settings);
     this.llm = new OpenRouter({ apiKey: this.settings.keys.openrouter, fetchImpl: this.fetch, onUsage: (model, u) => this.recordSpend(model, u) });
     return this.settings;
+  }
+
+  /**
+   * Whisper Large v3 (the most accurate for Arabic) is the model in use: Groq on large-v3 (once, over an old Turbo
+   * choice), and on this machine the full large-v3 file whenever it is there.
+   */
+  preferLargeV3() {
+    const st = this.settings, patch = {};
+    if (!st.largeV3Default) { patch.largeV3Default = true; if (st.groqModel !== 'whisper-large-v3') patch.groqModel = 'whisper-large-v3'; }
+    const want = path.join(config.dataDir(), 'models', 'ggml-large-v3.bin');
+    try { if (!/ggml-large-v3\.bin$/.test(st.paths.whisperModel || '') && fs.statSync(want).size > 2.5e9) patch.paths = { whisperModel: want }; } catch (_) {}
+    if (Object.keys(patch).length) { try { config.update(patch); this.settings = config.load(); } catch (_) {} }
+  }
+  /** what a transcription will run on now: { engine: 'groq'|'local', model, large, ready, file } */
+  transcribeEngine() {
+    const st = this.settings, groq = !!st.keys.groq && st.transcribeEngine !== 'local';
+    if (groq) return { engine: 'groq', model: st.groqModel || 'whisper-large-v3', large: (st.groqModel || 'whisper-large-v3') === 'whisper-large-v3', ready: true };
+    const f = st.paths.whisperModel || '', name = path.basename(f).replace(/^ggml-|\.bin$/g, '');
+    let ok = false; try { ok = fs.statSync(f).size > 30e6; } catch (_) {}
+    return { engine: 'local', model: name || null, large: name === 'large-v3', ready: ok && !!this.tools.whisper, file: f, whisper: !!this.tools.whisper };
   }
 
   /* ---------- كام اتصرف ---------- */
@@ -730,7 +751,14 @@ class Services {
     const cues = captions.buildCues(await this.syncedCaptionWords(t), c);
     const file = path.join(config.cacheDir('captions'), `captions-${hash(JSON.stringify(cues))}.srt`);
     fs.writeFileSync(file, '\ufeff' + captions.toSRT(cues), 'utf8');
-    await this.host('createCaptions', { srtPath: file, start: 0 });
+    if (!cues.length) throw new Error('مفيش كلام اتفرّغ — فرّغ الكلام الأول وشوف إن الكلمات ظهرت');
+    try { await this.host('createCaptions', { srtPath: file, start: 0 }); }
+    catch (e) {
+      // some Premiere versions refuse captions from a script: the same captions as still text clips on a track instead
+      if (!this.renderCaptionsImpl || opts.noFallback) throw e;
+      const r = await this.addAnimatedCaptions({ ...opts, style: { ...(opts.style || {}), still: true } });
+      return { ...r, file, fallback: 'still', reason: String(e.message || e).slice(0, 200) };
+    }
     return { cues: cues.length, file };
   }
 
