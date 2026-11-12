@@ -1,6 +1,6 @@
 'use strict';
 // تفريغ الكلام على Groq (Whisper large v3 على سيرفراتهم — أسرع وأدق بكتير من اللي على الجهاز، خصوصًا في العربي).
-// الصوت بيتصغّر (mono 16k FLAC) ويتقسّم لحتت ≤ 10 دقايق عشان حد الـ 25 ميجا — والقطع بيبقى في سكتة (عمره ما يقص
+// الصوت بيتصغّر (mono 16k FLAC) ويتقسّم لحتت ≤ 30 ثانية كل واحدة لوحدها (Whisper مايفضلش يكرر نفسه) — والقطع بيبقى في سكتة (عمره ما يقص
 // كلمة في النص)، والكلمات بترجع بتوقيتها ومعاها بيانات كل جملة (احتمال إن مفيش كلام، الثقة) عشان فلتر الهلوسة.
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +8,10 @@ const { run } = require('./ffmpeg');
 
 const URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const MODELS = { 'whisper-large-v3': 'Whisper Large v3 (الأدق)', 'whisper-large-v3-turbo': 'Whisper Large v3 Turbo (أسرع وأرخص)' };
-const CHUNK = 600; // seconds per request
+// seconds per request: each piece is transcribed on its own, so one stuck stretch can't run on. Measured on 15 min of
+// Egyptian speech with pauses / music (bench/captions): one long request 54.6% word errors (a 2-minute loop ate real
+// speech), 30 s pieces cut in pauses 30.2%.
+const CHUNK = 30;
 
 /** multipart/form-data body from fields + one file */
 function multipart(fields, file) {
@@ -40,7 +43,7 @@ function segmentsFrom(json, offset = 0) {
 }
 
 /**
- * Where to cut a long recording into ≤ chunk pieces: in the middle of the longest pause within ±25% of each mark —
+ * Where to cut a long recording into ≤ chunk pieces: in the middle of the longest pause in the last quarter before each mark —
  * never inside a word. silences: [{start, end}] (seconds). → cut times (no 0, no end)
  */
 function cutPoints(duration, silences, chunk = CHUNK) {
@@ -75,7 +78,7 @@ async function transcribe({ ffmpeg, file, start = 0, duration = 0, key, fetchImp
   if (!key) throw new Error('حط مفتاح Groq من الإعدادات (console.groq.com/keys)');
   const dir = fs.mkdtempSync(path.join(tmpDir || require('os').tmpdir(), 'ef-groq-'));
   try {
-    // pieces of ≤ CHUNK s, cut in pauses (a fixed 10-minute cut lands mid-word and loses it)
+    // pieces of ≤ CHUNK s, cut in pauses (a cut at a fixed time lands mid-word and loses it)
     const span = duration > 0 ? duration : await mediaDuration(ffmpeg, file, start);
     let sil = [];
     try { sil = await require('./silence').detectSilence(ffmpeg, file, { thresholdDb: -40, minSilence: 0.3, start, duration: span }); } catch (_) {}
@@ -89,7 +92,7 @@ async function transcribe({ ffmpeg, file, start = 0, duration = 0, key, fetchImp
     if (!chunks.length) throw new Error('مفيش صوت في الملف');
     const words = [], segments = [];
     for (let i = 0; i < chunks.length; i++) {
-      onProgress && onProgress(chunks.length > 1 ? `Groq: جزء ${i + 1} من ${chunks.length}…` : 'Groq بيفرّغ…');
+      onProgress && onProgress(chunks.length > 1 ? `Groq: ${Math.round(100 * i / chunks.length)}%` : 'Groq بيفرّغ…');
       const fields = [['model', model], ['response_format', 'verbose_json'], ['timestamp_granularities[]', 'word'], ['timestamp_granularities[]', 'segment'], ['temperature', '0']];
       if (language) fields.push(['language', language]);
       if (prompt) fields.push(['prompt', prompt.slice(0, 600)]);

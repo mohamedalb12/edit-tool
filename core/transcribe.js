@@ -48,7 +48,9 @@ const VAD_MODEL = path.join(__dirname, '..', 'assets', 'models', 'ggml-silero-v6
 function buildWhisperArgs({ model, wav, outBase, dialectId = 'egyptian', threads, accurate = true, dtw = false, vad = true, vadModel = VAD_MODEL, glossary = '' }) {
   const d = dialect(dialectId);
   const t = threads || Math.max(2, Math.min(8, os.cpus().length));
-  const args = ['-m', model, '-f', wav, '-l', d.lang, '-t', String(t), '--prompt', promptFor(dialectId, glossary), '-ml', '1', '-sow', '-of', outBase, '-np'];
+  // -mc 0: each 30 s window on its own, not continuing the text before it — on long recordings that continuation is
+  // how Whisper gets stuck repeating one line for minutes (bench/captions: 54.6% → 30.2% word errors)
+  const args = ['-m', model, '-f', wav, '-l', d.lang, '-t', String(t), '--prompt', promptFor(dialectId, glossary), '-mc', '0', '-ml', '1', '-sow', '-of', outBase, '-np'];
   if (accurate) args.push('-bs', '5', '-bo', '5'); // beam search: fewer wrong words
   if (vad && vadModel && fs.existsSync(vadModel)) args.push('--vad', '-vm', vadModel, '-vp', '50');
   const preset = dtw && !vad && dtwPreset(model);
@@ -169,12 +171,12 @@ async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 
   const src = `${file}|${start}|${duration}|${dialectId}|${eng === 'groq' ? 'groq:' + groqModel : model}` + (gl ? '|g:' + gl : '');
   // what Whisper heard is kept on its own (raw), so a better clean-up later never needs a new transcription;
   // the cleaned-up result is cached per clean-up version
-  const base = path.join(cacheDir, `tr-${hash(src + '|v4|' + accurate)}`);
+  // v5: Groq in 30 s pieces / whisper.cpp with -mc 0 (a transcript from before may hold a stuck loop: not reused)
+  const base = path.join(cacheDir, `tr-${hash(src + '|v5|' + accurate)}`);
   const rawFile = base + '.raw.json', cached = path.join(cacheDir, `tr-${hash(src + '|' + POST_VERSION + '|' + accurate + '|' + !!(llm && spellModel))}.words.json`);
   if (fs.existsSync(cached)) return JSON.parse(fs.readFileSync(cached, 'utf8'));
   let words = null, segments = null;
   if (fs.existsSync(rawFile)) ({ words, segments = null } = JSON.parse(fs.readFileSync(rawFile, 'utf8')));
-  else if (fs.existsSync(base + '.words.json')) words = JSON.parse(fs.readFileSync(base + '.words.json', 'utf8')).words; // a transcript from before: no new run
   if (!words) {
     onProgress && onProgress('تجهيز الصوت…');
     const wav = await toWav16k(ffmpeg, file, base + '.wav', { start, duration });
@@ -211,7 +213,7 @@ async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 
  *  3. Arabic spelling (rules, then optionally AI — spelling only, never another word)
  *  (0. before all that: words nobody said — core/hallucination)
  */
-const POST_VERSION = 'post6';
+const POST_VERSION = 'post7';
 async function cleanUp(words, { ffmpeg, file, start = 0, duration = 0, dialectId = 'egyptian', llm, spellModel, onProgress, segments = null, guard = true, onDropped } = {}) {
   // the voice under every 50 ms of the span (relative to this recording's own floor)
   let voiced = null; const win = 0.05, T = require('./captionTiming');

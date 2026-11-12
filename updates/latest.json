@@ -1,8 +1,8 @@
 {
-  "version": "2.12.1",
-  "url": "EditFast-2.12.1.zip",
-  "sha256": "704c10fa4ae0328095d37958805f0dcc285235af0d9b6a798de3df2d007c9f66",
-  "size": 3773084,
-  "notes": "HDR to SDR works on any ffmpeg: the conversion is a BT.2100 3D LUT applied with lut3d (no zscale needed)",
+  "version": "2.13.0",
+  "url": "EditFast-2.13.0.zip",
+  "sha256": "f64eb9706a4ba247e58224bab17957d879bdda1cb26191981409203eee6a75fc",
+  "size": 3781609,
+  "notes": "Captions measured on real Egyptian speech: words on the voice, hallucination guard, 30 s independent pieces, spelling-only fixes, readable cards",
   "date": "2026-11-12"
 }

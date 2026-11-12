@@ -18,6 +18,7 @@ test('7 dialects; whisper args carry language + dialect prompt + word timing fla
   const args = tr.buildWhisperArgs({ model: 'm.bin', wav: 'a.wav', outBase: 'o', dialectId: 'gulf' });
   assert.deepEqual(args.slice(0, 6), ['-m', 'm.bin', '-f', 'a.wav', '-l', 'ar']);
   for (const f of ['-ml', '-sow', '-oj', '--prompt']) assert.ok(args.includes(f), f);
+  assert.equal(args[args.indexOf('-mc') + 1], '0', 'each window on its own: no runaway repeats on long recordings');
   assert.match(args[args.indexOf('--prompt') + 1], /الخليجية/);
   assert.equal(tr.buildWhisperArgs({ model: 'm', wav: 'a', outBase: 'o', dialectId: 'english' })[5], 'en');
 });
