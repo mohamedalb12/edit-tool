@@ -1,8 +1,8 @@
 {
-  "version": "2.12.0",
-  "url": "EditFast-2.12.0.zip",
-  "sha256": "21ad46fc10e662044520de6d7b20c6e65dab82fb1598227a1fcc4f1e9ca5415b",
-  "size": 3770710,
-  "notes": "HDR to SDR with the same colours: HLG / HDR10 / Dolby Vision clips tone-mapped to Rec.709 10-bit, swapped in the project",
-  "date": "2026-11-10"
+  "version": "2.12.1",
+  "url": "EditFast-2.12.1.zip",
+  "sha256": "704c10fa4ae0328095d37958805f0dcc285235af0d9b6a798de3df2d007c9f66",
+  "size": 3773084,
+  "notes": "HDR to SDR works on any ffmpeg: the conversion is a BT.2100 3D LUT applied with lut3d (no zscale needed)",
+  "date": "2026-11-12"
 }
