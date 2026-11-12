@@ -607,7 +607,8 @@ class Services {
         file: sp.file, start: Math.max(0, Math.floor(sp.a)), duration: Math.ceil(sp.b) - Math.max(0, Math.floor(sp.a)), dialectId: d,
         cacheDir: config.cacheDir('transcripts'), llm: this.settings.keys.openrouter ? this.llm : null,
         spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null, onProgress: onProgress && (m => onProgress(tag + m)),
-        engine: this.settings.transcribeEngine || 'auto', groqKey: this.settings.keys.groq, groqModel: this.settings.groqModel || 'whisper-large-v3', fetchImpl: this.fetch
+        engine: this.settings.transcribeEngine || 'auto', groqKey: this.settings.keys.groq, groqModel: this.settings.groqModel || 'whisper-large-v3', fetchImpl: this.fetch,
+        glossary: (this.settings.captions || {}).glossary || ''
       });
       words.set(sp.file, r.words);
     }
@@ -733,17 +734,12 @@ class Services {
     return list;
   }
 
-  /** the words for any caption: each phrase snapped to where the voice starts (setting "snap"), then the manual offset */
-  async syncedCaptionWords(t) {
-    let words = t.words;
-    if ((this.settings.captions || {}).snap !== false && this.tools.ffmpeg) {
-      try {
-        const { clips } = await this.audioClips(t.trackIndex);
-        words = captions.snapToOnsets(words, await this.speechOnsets(clips)).words;
-      } catch (_) { /* no audio to listen to: whisper's times as they are */ }
-    }
-    return this.captionWords(words);
-  }
+  /**
+   * the words for any caption, with the manual offset. Each word is already on its voice (transcribe.cleanUp); the
+   * old "snap each phrase to the nearest voice onset" made it worse on real speech (it often picked a breath or a
+   * noise up to 1.2 s away — bench/captions), so it is gone.
+   */
+  async syncedCaptionWords(t) { return this.captionWords(t.words); }
 
   async addCaptions(opts = {}) {
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) };

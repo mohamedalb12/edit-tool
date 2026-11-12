@@ -18,6 +18,13 @@ const DIALECTS = [
 ];
 
 function dialect(id) { return DIALECTS.find(d => d.id === id) || DIALECTS[0]; }
+/** names and words the user spells a certain way ("محمد أيمن، EditFast، شاورما الريم") → a clean list */
+function glossaryList(g) { return String(g || '').split(/[،,\n؛;]+/).map(x => x.trim()).filter(Boolean).slice(0, 40); }
+/** what Whisper is primed with: the dialect + the user's own words (it spells them like that when it hears them) */
+function promptFor(dialectId, glossary) {
+  const d = dialect(dialectId), g = glossaryList(glossary);
+  return (d.prompt + (g.length ? ' ' + g.join('، ') + '.' : '')).slice(0, 600);
+}
 
 /** whisper.cpp alignment preset (-dtw) from the model file name: word timing aligned to the audio, not guessed */
 function dtwPreset(model) {
@@ -38,10 +45,10 @@ const VAD_MODEL = path.join(__dirname, '..', 'assets', 'models', 'ggml-silero-v6
  * - dtw: token-level alignment; off by default (current whisper-cli disables it under flash attention, and its times
  *   aren't mapped when VAD is on).
  */
-function buildWhisperArgs({ model, wav, outBase, dialectId = 'egyptian', threads, accurate = true, dtw = false, vad = true, vadModel = VAD_MODEL }) {
+function buildWhisperArgs({ model, wav, outBase, dialectId = 'egyptian', threads, accurate = true, dtw = false, vad = true, vadModel = VAD_MODEL, glossary = '' }) {
   const d = dialect(dialectId);
   const t = threads || Math.max(2, Math.min(8, os.cpus().length));
-  const args = ['-m', model, '-f', wav, '-l', d.lang, '-t', String(t), '--prompt', d.prompt, '-ml', '1', '-sow', '-of', outBase, '-np'];
+  const args = ['-m', model, '-f', wav, '-l', d.lang, '-t', String(t), '--prompt', promptFor(dialectId, glossary), '-ml', '1', '-sow', '-of', outBase, '-np'];
   if (accurate) args.push('-bs', '5', '-bo', '5'); // beam search: fewer wrong words
   if (vad && vadModel && fs.existsSync(vadModel)) args.push('--vad', '-vm', vadModel, '-vp', '50');
   const preset = dtw && !vad && dtwPreset(model);
@@ -151,56 +158,98 @@ function engineOf({ engine = 'auto', groqKey } = {}) {
   return 'local';
 }
 
-async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 0, dialectId = 'egyptian', cacheDir, llm, spellModel, onProgress, accurate = true, engine = 'auto', groqKey = '', groqModel = 'whisper-large-v3', fetchImpl }) {
+async function transcribe({ ffmpeg, whisper, model, file, start = 0, duration = 0, dialectId = 'egyptian', cacheDir, llm, spellModel, onProgress, accurate = true, engine = 'auto', groqKey = '', groqModel = 'whisper-large-v3', fetchImpl, glossary = '' }) {
   const eng = engineOf({ engine, groqKey });
   requireTool(ffmpeg, 'ffmpeg');
   if (eng === 'local') {
     requireTool(whisper, 'whisper.cpp');
     if (!model || !fs.existsSync(model)) throw new Error('موديل Whisper مش موجود. حمّله من الإعدادات (ggml-*.bin) — أو حط مفتاح Groq (أدق بكتير).');
   }
-  const key = hash(`${file}|${start}|${duration}|${dialectId}|${eng === 'groq' ? 'groq:' + groqModel : model}|v4|${accurate}`); // v4: VAD + segment times
-  const base = path.join(cacheDir, `tr-${key}`);
-  const cached = base + '.words.json';
+  const gl = glossaryList(glossary).join('،');
+  const src = `${file}|${start}|${duration}|${dialectId}|${eng === 'groq' ? 'groq:' + groqModel : model}` + (gl ? '|g:' + gl : '');
+  // what Whisper heard is kept on its own (raw), so a better clean-up later never needs a new transcription;
+  // the cleaned-up result is cached per clean-up version
+  const base = path.join(cacheDir, `tr-${hash(src + '|v4|' + accurate)}`);
+  const rawFile = base + '.raw.json', cached = path.join(cacheDir, `tr-${hash(src + '|' + POST_VERSION + '|' + accurate + '|' + !!(llm && spellModel))}.words.json`);
   if (fs.existsSync(cached)) return JSON.parse(fs.readFileSync(cached, 'utf8'));
-  onProgress && onProgress('تجهيز الصوت…');
-  const wav = await toWav16k(ffmpeg, file, base + '.wav', { start, duration });
-  let words;
-  if (eng === 'groq') {
-    const D = dialect(dialectId);
-    words = await require('./groq').transcribe({ ffmpeg, file: wav, key: groqKey, fetchImpl: fetchImpl || require('./http').nodeFetch, model: groqModel, language: D.lang, prompt: D.prompt, tmpDir: cacheDir, onProgress });
-    words = words.map(w => ({ ...w, start: +(w.start + start).toFixed(3), end: +(w.end + start).toFixed(3) }));
-  } else {
-    onProgress && onProgress('بيفرّغ الكلام على جهازك…');
-    const onStderr = s => { const m = /progress\s*=\s*(\d+)%/.exec(s); if (m && onProgress) onProgress(`تفريغ ${m[1]}%`); };
-    // newest options first; older whisper.cpp builds that don't know them get a simpler run
-    try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate }), { onStderr }); }
-    catch (e) {
-      try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate, vad: false }), { onStderr }); }
-      catch (e2) { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate: false, vad: false }), { onStderr }); }
+  let words = null, segments = null;
+  if (fs.existsSync(rawFile)) ({ words, segments = null } = JSON.parse(fs.readFileSync(rawFile, 'utf8')));
+  else if (fs.existsSync(base + '.words.json')) words = JSON.parse(fs.readFileSync(base + '.words.json', 'utf8')).words; // a transcript from before: no new run
+  if (!words) {
+    onProgress && onProgress('تجهيز الصوت…');
+    const wav = await toWav16k(ffmpeg, file, base + '.wav', { start, duration });
+    if (eng === 'groq') {
+      const D = dialect(dialectId);
+      const g = await require('./groq').transcribe({ ffmpeg, file: wav, key: groqKey, fetchImpl: fetchImpl || require('./http').nodeFetch, model: groqModel, language: D.lang, prompt: promptFor(dialectId, glossary), tmpDir: cacheDir, onProgress });
+      segments = (g.segments || []).map(x => ({ ...x, start: +(x.start + start).toFixed(3), end: +(x.end + start).toFixed(3) }));
+      words = g.map(w => ({ ...w, start: +(w.start + start).toFixed(3), end: +(w.end + start).toFixed(3) }));
+    } else {
+      onProgress && onProgress('بيفرّغ الكلام على جهازك…');
+      const onStderr = s => { const m = /progress\s*=\s*(\d+)%/.exec(s); if (m && onProgress) onProgress(`تفريغ ${m[1]}%`); };
+      // newest options first; older whisper.cpp builds that don't know them get a simpler run
+      try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate, glossary }), { onStderr }); }
+      catch (e) {
+        try { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate, vad: false, glossary }), { onStderr }); }
+        catch (e2) { await run(whisper, buildWhisperArgs({ model, wav, outBase: base, dialectId, accurate: false, vad: false, glossary }), { onStderr }); }
+      }
+      words = parseWhisperJson(fs.readFileSync(base + '.json', 'utf8'), start);
     }
-    words = parseWhisperJson(fs.readFileSync(base + '.json', 'utf8'), start);
+    fs.writeFileSync(rawFile, JSON.stringify({ words, segments, engine: eng }), 'utf8');
+    try { fs.unlinkSync(wav); } catch (_) {}
   }
-  // align to the actual speech (silences measured on the same audio)
+  words = await cleanUp(words, { ffmpeg, file, start, duration, dialectId, llm, spellModel, onProgress, segments });
+  const result = { words, text: words.map(w => w.text).join(' '), dialect: dialectId, file, start, duration, engine: eng };
+  fs.writeFileSync(cached, JSON.stringify(result), 'utf8');
+  return result;
+}
+
+/**
+ * What Whisper heard → caption-ready words. Each step is measured on real Egyptian speech (bench/captions):
+ *  1. words that start / end inside a silence move onto the voice (silencedetect at this recording's level)
+ *  2. each word moved onto the voice under it — after a pause Whisper starts a word ~0.45 s before the voice
+ *     (where the word before it ended); this brings it to ~0.05 s (core/captionTiming)
+ *  3. Arabic spelling (rules, then optionally AI — spelling only, never another word)
+ *  (0. before all that: words nobody said — core/hallucination)
+ */
+const POST_VERSION = 'post6';
+async function cleanUp(words, { ffmpeg, file, start = 0, duration = 0, dialectId = 'egyptian', llm, spellModel, onProgress, segments = null, guard = true, onDropped } = {}) {
+  // the voice under every 50 ms of the span (relative to this recording's own floor)
+  let voiced = null; const win = 0.05, T = require('./captionTiming');
   try {
-    // the silence threshold follows this recording's own level (a quiet lav mic isn't "silence")
-    const thr = await speechThreshold(ffmpeg, wav);
-    const sil = await require('./silence').detectSilence(ffmpeg, wav, { thresholdDb: thr, minSilence: 0.12 });
+    const { rmsEnvelope, toDb } = require('./audio');
+    const pcm = await require('./ffmpeg').decodePCM(ffmpeg, file, { rate: 8000, start, duration });
+    voiced = T.voicing(Array.from(rmsEnvelope(pcm, 8000, win)).map(toDb));
+  } catch (_) {}
+  // 0. what nobody said (outros, loops, the prompt written back) — on Whisper's own times, before anything moves them
+  if (guard) {
+    const share = voiced ? (a, b) => { const i0 = Math.max(0, Math.floor((a - start) / win)), i1 = Math.min(voiced.length, Math.ceil((b - start) / win)); let n = 0; for (let i = i0; i < i1; i++) if (voiced[i]) n++; return i1 > i0 ? n / (i1 - i0) : 0; } : null;
+    const r = require('./hallucination').guard(words, { segments, voiced: share, end: start + (duration > 0 ? duration : (voiced ? voiced.length * win : Infinity)), prompt: dialect(dialectId).prompt });
+    words = r.words; if (onDropped) onDropped(r.dropped);
+  }
+  try {
+    const thr = await speechThreshold(ffmpeg, file, { start, duration });
+    const sil = await require('./silence').detectSilence(ffmpeg, file, { thresholdDb: thr, minSilence: 0.12, start, duration });
     words = refineWithSilence(words, sil.map(x => ({ start: x.start + start, end: x.end + start })));
   } catch (_) {}
+  if (voiced) {
+    words = T.alignToVoice(words.map(w => ({ ...w, start: w.start - start, end: w.end - start })), voiced, win)
+      .map(w => ({ ...w, start: +(w.start + start).toFixed(3), end: +(w.end + start).toFixed(3) }));
+  }
   if (dialect(dialectId).lang === 'ar') {
     words = arabicFix.fixWords(arabicFix.fixPhrasesAcrossWords(words), { dialect: dialectId });
     if (llm && spellModel) { onProgress && onProgress('تصحيح إملائي…'); words = await arabicFix.fixWordsAI(words, llm, spellModel, { dialect: dialectId }); }
   }
-  const result = { words, text: words.map(w => w.text).join(' '), dialect: dialectId, file, start, duration, engine: eng };
-  fs.writeFileSync(cached, JSON.stringify(result), 'utf8');
-  try { fs.unlinkSync(wav); } catch (_) {}
-  return result;
+  return words;
 }
 
 /** a silence threshold relative to the recording's loudness (mean volume − 16 dB, never above −30 dB) */
-async function speechThreshold(ffmpeg, wav) {
+async function speechThreshold(ffmpeg, wav, { start = 0, duration = 0 } = {}) {
   try {
-    const { stderr } = await run(ffmpeg, ['-hide_banner', '-nostdin', '-i', wav, '-af', 'volumedetect', '-f', 'null', '-']);
+    const args = ['-hide_banner', '-nostdin'];
+    if (start > 0) args.push('-ss', String(start));
+    args.push('-i', wav);
+    if (duration > 0) args.push('-t', String(duration));
+    const { stderr } = await run(ffmpeg, args.concat(['-vn', '-af', 'volumedetect', '-f', 'null', '-']));
     const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(stderr));
     if (m) return Math.min(-30, Math.max(-70, +m[1] - 16));
   } catch (_) {}
@@ -218,4 +267,4 @@ function wordsToTimeline(words, clip) {
 /** how much of the source a clip uses (seconds of media), speed included */
 function sourceSpan(clip) { const sp = Math.abs(clip.speed || 1) || 1; return { a: clip.inPoint, b: clip.inPoint + (clip.end - clip.start) * sp }; }
 
-module.exports = { engineOf, VAD_MODEL, DIALECTS, dialect, dtwPreset, buildWhisperArgs, parseWhisperJson, refineWithSilence, speechThreshold, sourceSpan, sentences, transcribe, wordsToTimeline };
+module.exports = { engineOf, VAD_MODEL, DIALECTS, dialect, glossaryList, promptFor, dtwPreset, buildWhisperArgs, parseWhisperJson, refineWithSilence, speechThreshold, sourceSpan, sentences, transcribe, cleanUp, POST_VERSION, wordsToTimeline };

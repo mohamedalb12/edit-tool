@@ -39,13 +39,16 @@ test('arabic spell-fix: hamzas, phrases, punctuation — offline', () => {
   assert.equal(fix.normalizeForSearch('أنَا إسمي مكتبة'), 'انا اسمي مكتبه');
 });
 
-test('arabic spell-fix via AI keeps word count/timings, falls back on mismatch', async () => {
-  const words = W([['انا', 0, 1], ['رحت', 1, 2]]);
-  const good = { json: async () => ({ words: ['أنا', 'روحت'] }) };
+test('arabic spell-fix via AI keeps word count/timings, falls back on mismatch, and never rewords what was said', async () => {
+  const words = W([['انا', 0, 1], ['رحت', 1, 2], ['مدرسه', 2, 3], ['ليها', 3, 4], ['دلوقتي', 4, 5], ['مسئول', 5, 6]]);
+  const good = { json: async () => ({ words: ['أنا', 'روحت', 'مدرسة', 'لها', 'الآن', 'مسؤول'] }) };
   const bad = { json: async () => ({ words: ['أنا روحت'] }) };
-  assert.deepEqual((await fix.fixWordsAI(words, good, 'm')).map(x => x.text), ['أنا', 'روحت']);
-  assert.deepEqual((await fix.fixWordsAI(words, bad, 'm')).map(x => x.text), ['انا', 'رحت']);
+  // spelling (hamza, ة, ؤ/ئ) is taken; a different word — even a "more correct" one — is not
+  assert.deepEqual((await fix.fixWordsAI(words, good, 'm')).map(x => x.text), ['أنا', 'رحت', 'مدرسة', 'ليها', 'دلوقتي', 'مسؤول']);
+  assert.deepEqual((await fix.fixWordsAI(words, bad, 'm')).map(x => x.text), ['انا', 'رحت', 'مدرسه', 'ليها', 'دلوقتي', 'مسئول']);
   assert.equal((await fix.fixWordsAI(words, good, 'm'))[1].start, 1);
+  assert.equal(fix.sameWord('طيب،', 'طيب'), true); assert.equal(fix.sameWord('عشان', 'علشان'), false);
+  assert.equal(fix.normalizeForSearch('نفسه، طيب؟'), 'نفسه طيب', 'Arabic comma / question mark are punctuation');
 });
 
 test('transcribe pipeline end-to-end with a whisper.cpp-compatible CLI (ffmpeg → wav → json → fixes → cache)', async () => {
@@ -77,8 +80,36 @@ test('captions: max words, max duration, single-word mode, SRT round-trip', () =
   assert.ok(cd.every(c => c.end - c.start <= 1.0));
   for (let i = 1; i < c1.length; i++) assert.ok(c1[i - 1].end <= c1[i].start);
   const srt = captions.toSRT(c3);
-  assert.match(srt, /^1\n00:00:00,000 --> 00:00:01,200\nواحد اتنين تلاتة\n/);
+  // up from the first word to the last + 0.2 s to finish reading (never over the next card)
+  assert.match(srt, /^1\n00:00:00,000 --> 00:00:01,210\nواحد اتنين تلاتة\n/, 'the next card starts at 1.25: the hold stops 40 ms before it');
+  assert.equal(c3[1].end, 1.95, 'a lone word stays up 0.7 s (there is room before the next card)');
   assert.deepEqual(captions.parseSRT(srt).map(c => c.text), c3.map(c => c.text));
+});
+
+test('captions: a card never stays up across a pause, keeps to one readable line, and lasts long enough to read', () => {
+  const words = W([['ده', 0, 0.3], ['كلام', 0.35, 0.7], ['بعد', 1.6, 1.9], ['سكتة', 1.95, 2.3], ['وكلمة', 2.35, 2.5]]);
+  const cs = captions.buildCues(words, { maxWords: 5, maxDuration: 5 });
+  assert.deepEqual(cs.map(c => c.text), ['ده كلام', 'بعد سكتة وكلمة'], 'split at the 0.9 s pause');
+  assert.equal(cs[0].end, 0.9, 'last word + 0.2 s'); assert.equal(cs[1].end, 2.7);
+  const long = W(['المونتاج', 'الاحترافي', 'بيحتاج', 'تركيز', 'كبير', 'جدا'].map((t, i) => [t, i * 0.3, i * 0.3 + 0.28]));
+  assert.ok(captions.buildCues(long, { maxWords: 6, maxDuration: 9 }).every(c => c.text.length <= 38), 'one line of ≤ 38 characters');
+  const fast = W([['آه', 0, 0.1], ['لا', 1, 1.1]]);
+  assert.ok(captions.buildCues(fast).every(c => c.end - c.start >= 0.7), 'at least 0.7 s when there is room');
+});
+
+test('captionTiming: a word Whisper starts in the pause before it (where the last word ended) moves onto its voice', () => {
+  const T = require('../../core/captionTiming'), win = 0.05;
+  // voice 0–1.0 s, pause 1.0–1.5, voice 1.5–2.5, pause 2.5–2.7, short voice 2.95–3.1
+  const voiced = Array.from({ length: 70 }, (_, i) => { const t = i * win + 1e-6; return (t < 1.0) || (t >= 1.5 && t < 2.5) || (t >= 2.95 && t < 3.1); });
+  const out = T.alignToVoice([{ text: 'أول', start: 0, end: 1.0 }, { text: 'تاني', start: 1.0, end: 2.0 }, { text: 'تالت', start: 2.0, end: 2.5 }, { text: 'ده', start: 2.5, end: 2.8 }], voiced, win);
+  assert.equal(out[1].start, 1.5, 'after the pause: on the voice, not at the end of the word before');
+  assert.equal(out[2].start, 2.0, 'mid-speech: untouched');
+  assert.equal(out[3].start, 2.95, 'a short word that ends before its voice: found just past its end');
+  assert.ok(out[3].end > out[3].start);
+  assert.equal(out[0].start, 0); assert.equal(out[0].end, 1.0);
+  // a word whose voice is far (> 1.2 s) stays where Whisper put it
+  const far = T.alignToVoice([{ text: 'x', start: 0, end: 3.4 }], Array.from({ length: 70 }, (_, i) => i * win > 3.0), win);
+  assert.equal(far[0].start, 0);
 });
 
 test('repeats: removes stutters and earlier retakes, keeps the last take', () => {
@@ -119,4 +150,17 @@ test('chapters: YouTube rules (starts at 00:00, ≥10s apart) + offline + AI', a
   assert.ok(off.length >= 3 && off[0].time === 0);
   const ai = await chapters.aiChapters({ json: async () => ({ chapters: [{ time: 0, title: 'البداية' }, { time: 120, title: 'التفاصيل' }] }) }, 'm', sents);
   assert.deepEqual(ai.map(c => c.title), ['البداية', 'التفاصيل']);
+});
+
+test('Groq pieces are cut in a pause near each 10-minute mark, never inside a word', () => {
+  const groq = require('../../core/groq');
+  // 25 min; pauses at 8:20 (0.4 s), 9:30 (1.2 s) and 19:10 (0.6 s); nothing near the 30-minute mark is needed
+  const sil = [{ start: 500, end: 500.4 }, { start: 570, end: 571.2 }, { start: 1150, end: 1150.6 }];
+  assert.deepEqual(groq.cutPoints(1500, sil, 600), [570.6, 1150.3], 'the longest pause in the last quarter before each mark');
+  assert.deepEqual(groq.cutPoints(1500, [], 600), [600, 1200], 'no pause found → the mark itself');
+  assert.deepEqual(groq.cutPoints(400, sil, 600), [], 'short: one piece');
+  // words and whisper's per-segment signals come back together
+  const j = { segments: [{ start: 0, end: 2, text: 'a b', no_speech_prob: 0.01, avg_logprob: -0.2, compression_ratio: 1.2 }, { start: 2, end: 4, text: 'c', no_speech_prob: 0.9, avg_logprob: -1.5, compression_ratio: 1 }], words: [{ word: 'a', start: 0.1, end: 0.5 }, { word: 'b', start: 0.6, end: 1 }, { word: 'c', start: 2.5, end: 3 }] };
+  assert.deepEqual(groq.wordsFrom(j, 100, 5).map(w => w.seg), [5, 5, 6]);
+  assert.equal(groq.segmentsFrom(j, 100)[1].noSpeech, 0.9);
 });

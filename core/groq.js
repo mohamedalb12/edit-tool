@@ -1,6 +1,7 @@
 'use strict';
 // تفريغ الكلام على Groq (Whisper large v3 على سيرفراتهم — أسرع وأدق بكتير من اللي على الجهاز، خصوصًا في العربي).
-// الصوت بيتصغّر (mono 16k FLAC) ويتقسّم لحتت ≤ 10 دقايق عشان حد الـ 25 ميجا، والكلمات بترجع بتوقيتها.
+// الصوت بيتصغّر (mono 16k FLAC) ويتقسّم لحتت ≤ 10 دقايق عشان حد الـ 25 ميجا — والقطع بيبقى في سكتة (عمره ما يقص
+// كلمة في النص)، والكلمات بترجع بتوقيتها ومعاها بيانات كل جملة (احتمال إن مفيش كلام، الثقة) عشان فلتر الهلوسة.
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./ffmpeg');
@@ -18,16 +19,39 @@ function multipart(fields, file) {
   return { body: Buffer.concat(parts), type: 'multipart/form-data; boundary=' + boundary };
 }
 
-/** Groq's answer → words [{text, start, end}] (+ offset); falls back to segments split evenly when no word times */
-function wordsFrom(json, offset = 0) {
-  const out = [];
+/**
+ * Groq's answer → words [{text, start, end, seg}] (+ offset); falls back to segments split evenly when no word times.
+ * `seg` = index into segmentsFrom(json) (same order) — whisper's own signals for that stretch.
+ */
+function wordsFrom(json, offset = 0, segBase = 0) {
+  const out = [], segs = json.segments || [];
+  const segOf = t => { for (let k = 0; k < segs.length; k++) if (t >= segs[k].start - 0.05 && t <= segs[k].end + 0.05) return segBase + k; return undefined; };
   if (Array.isArray(json.words) && json.words.length) {
-    for (const w of json.words) { const t = String(w.word || '').trim(); if (t) out.push({ text: t, start: +(w.start + offset).toFixed(3), end: +(Math.max(w.end, w.start + 0.02) + offset).toFixed(3) }); }
+    for (const w of json.words) { const t = String(w.word || '').trim(); if (t) { const o = { text: t, start: +(w.start + offset).toFixed(3), end: +(Math.max(w.end, w.start + 0.02) + offset).toFixed(3) }; const k = segOf(w.start); if (k !== undefined) o.seg = k; out.push(o); } }
   } else for (const s of json.segments || []) {
     const ws = String(s.text || '').trim().split(/\s+/).filter(Boolean), d = (s.end - s.start) / Math.max(1, ws.length);
-    ws.forEach((t, i) => out.push({ text: t, start: +(s.start + i * d + offset).toFixed(3), end: +(s.start + (i + 1) * d + offset).toFixed(3) }));
+    ws.forEach((t, i) => out.push({ text: t, start: +(s.start + i * d + offset).toFixed(3), end: +(s.start + (i + 1) * d + offset).toFixed(3), seg: segBase + segs.indexOf(s) }));
   }
   return out;
+}
+/** whisper's per-segment signals: no_speech_prob, avg_logprob, compression_ratio (+ offset) */
+function segmentsFrom(json, offset = 0) {
+  return (json.segments || []).map(s => ({ start: +(s.start + offset).toFixed(3), end: +(s.end + offset).toFixed(3), text: String(s.text || '').trim(), noSpeech: s.no_speech_prob, logprob: s.avg_logprob, compression: s.compression_ratio }));
+}
+
+/**
+ * Where to cut a long recording into ≤ chunk pieces: in the middle of the longest pause within ±25% of each mark —
+ * never inside a word. silences: [{start, end}] (seconds). → cut times (no 0, no end)
+ */
+function cutPoints(duration, silences, chunk = CHUNK) {
+  const cuts = []; let from = 0;
+  while (duration - from > chunk) {
+    const mark = from + chunk, lo = from + chunk * 0.75;
+    const cand = (silences || []).filter(s => (s.start + s.end) / 2 > lo && (s.start + s.end) / 2 < mark).sort((a, b) => (b.end - b.start) - (a.end - a.start));
+    const at = cand.length ? +((cand[0].start + cand[0].end) / 2).toFixed(3) : mark;
+    cuts.push(at); from = at;
+  }
+  return cuts;
 }
 function friendly(status, text) {
   if (status === 401) return 'مفتاح Groq غلط — اعمل واحد جديد من console.groq.com/keys';
@@ -36,30 +60,40 @@ function friendly(status, text) {
   return 'Groq ' + status + ': ' + String(text || '').slice(0, 200);
 }
 
+async function mediaDuration(ffmpeg, file, start = 0) {
+  const { stderr } = await run(ffmpeg, ['-hide_banner', '-nostdin', '-i', file], { allowFail: true });
+  const m = /Duration:\s*(\d+):(\d+):([\d.]+)/.exec(String(stderr));
+  return m ? Math.max(0, +m[1] * 3600 + +m[2] * 60 + +m[3] - start) : 0;
+}
+
 /**
- * Transcribe [start, start+duration] of a media file on Groq. → words [{text, start, end}] in source seconds.
+ * Transcribe [start, start+duration] of a media file on Groq. → words [{text, start, end}] in source seconds, with
+ * `.segments` (whisper's signals per stretch).
  * language: 'ar' / 'en' / '' (auto) · prompt: a hint (dialect, names) that steers spelling.
  */
-async function transcribe({ ffmpeg, file, start = 0, duration = 0, key, fetchImpl, model = 'whisper-large-v3', language = 'ar', prompt = '', tmpDir, onProgress }) {
+async function transcribe({ ffmpeg, file, start = 0, duration = 0, key, fetchImpl, model = 'whisper-large-v3', language = 'ar', prompt = '', tmpDir, onProgress, chunk = CHUNK }) {
   if (!key) throw new Error('حط مفتاح Groq من الإعدادات (console.groq.com/keys)');
   const dir = fs.mkdtempSync(path.join(tmpDir || require('os').tmpdir(), 'ef-groq-'));
   try {
-    // the whole span as small FLAC chunks
-    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y'];
-    if (start > 0) args.push('-ss', String(start));
-    args.push('-i', file);
-    if (duration > 0) args.push('-t', String(duration));
-    args.push('-vn', '-ac', '1', '-ar', '16000', '-c:a', 'flac', '-f', 'segment', '-segment_time', String(CHUNK), path.join(dir, 'c_%03d.flac'));
-    await run(ffmpeg, args);
-    const chunks = fs.readdirSync(dir).filter(f => /^c_\d+\.flac$/.test(f)).sort();
+    // pieces of ≤ CHUNK s, cut in pauses (a fixed 10-minute cut lands mid-word and loses it)
+    const span = duration > 0 ? duration : await mediaDuration(ffmpeg, file, start);
+    let sil = [];
+    try { sil = await require('./silence').detectSilence(ffmpeg, file, { thresholdDb: -40, minSilence: 0.3, start, duration: span }); } catch (_) {}
+    const bounds = [0].concat(cutPoints(span, sil, chunk), [span]), chunks = [];
+    for (let i = 0; i + 1 < bounds.length; i++) {
+      const name = 'c_' + String(i).padStart(3, '0') + '.flac';
+      const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', String(start + bounds[i]), '-i', file, '-t', String(bounds[i + 1] - bounds[i]), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'flac', path.join(dir, name)];
+      await run(ffmpeg, args);
+      chunks.push({ name, at: bounds[i] });
+    }
     if (!chunks.length) throw new Error('مفيش صوت في الملف');
-    const words = [];
+    const words = [], segments = [];
     for (let i = 0; i < chunks.length; i++) {
       onProgress && onProgress(chunks.length > 1 ? `Groq: جزء ${i + 1} من ${chunks.length}…` : 'Groq بيفرّغ…');
       const fields = [['model', model], ['response_format', 'verbose_json'], ['timestamp_granularities[]', 'word'], ['timestamp_granularities[]', 'segment'], ['temperature', '0']];
       if (language) fields.push(['language', language]);
       if (prompt) fields.push(['prompt', prompt.slice(0, 600)]);
-      const mp = multipart(fields, { name: chunks[i], type: 'audio/flac', data: fs.readFileSync(path.join(dir, chunks[i])) });
+      const mp = multipart(fields, { name: chunks[i].name, type: 'audio/flac', data: fs.readFileSync(path.join(dir, chunks[i].name)) });
       let res, text, tries = 0;
       for (;;) {
         res = await fetchImpl(URL, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': mp.type }, body: mp.body, timeout: 300000 });
@@ -68,10 +102,13 @@ async function transcribe({ ffmpeg, file, start = 0, duration = 0, key, fetchImp
         break;
       }
       if (!res.ok) throw new Error(friendly(res.status, text));
-      words.push(...wordsFrom(JSON.parse(text), start + i * CHUNK));
+      const json = JSON.parse(text);
+      words.push(...wordsFrom(json, start + chunks[i].at, segments.length));
+      segments.push(...segmentsFrom(json, start + chunks[i].at));
     }
+    words.segments = segments; // whisper's per-stretch signals, for the hallucination check
     return words;
   } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {} }
 }
 
-module.exports = { transcribe, wordsFrom, multipart, MODELS, URL, CHUNK };
+module.exports = { transcribe, wordsFrom, segmentsFrom, cutPoints, multipart, MODELS, URL, CHUNK };

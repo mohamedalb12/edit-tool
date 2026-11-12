@@ -86,22 +86,29 @@ async function fixWordsAI(words, llm, model, { dialect = 'egyptian', chunk = 250
     try {
       const res = await llm.json({
         model,
-        system: 'أنت مدقق إملائي للتفريغ الصوتي العربي. صحح الإملاء والهمزات فقط ولا تغيّر اللهجة ولا تعيد الصياغة. أرجع JSON بالشكل {"words":[...]} بنفس عدد الكلمات وبنفس الترتيب بالضبط.',
+        system: 'أنت مدقق إملائي للتفريغ الصوتي العربي. صحح الهمزات والتاء المربوطة والألف المقصورة فقط، ولا تغيّر أي كلمة ولا اللهجة ولا تعيد الصياغة (أي تغيير غير كده هيترفض). أرجع JSON بالشكل {"words":[...]} بنفس عدد الكلمات وبنفس الترتيب بالضبط.',
         user: `اللهجة: ${dialect}\nالكلمات (${src.length}):\n${JSON.stringify(src)}`
       });
       const fixed = res && res.words;
       if (Array.isArray(fixed) && fixed.length === src.length) {
-        fixed.forEach((t, j) => { if (typeof t === 'string' && t.trim()) out[i + j].text = t.trim(); });
+        // spelling only: a change is kept when the word stays the same word (hamza, ة/ه, ى/ي, diacritics, punctuation)
+        fixed.forEach((t, j) => { if (typeof t === 'string' && t.trim() && sameWord(src[j], t.trim())) out[i + j].text = t.trim(); });
       }
     } catch (_) { /* keep rule-based result */ }
   }
   return out;
 }
 
+/**
+ * The same spoken word, spelled differently? (hamza forms, ة/ه, ى/ي, ؤ/ئ, diacritics, tatweel, punctuation around it)
+ * — what a spelling fix may change; anything else would be rewording what the person said.
+ */
+function sameWord(a, b) { const sk = w => normalizeForSearch(String(w).replace(/[ؤئ]/g, 'ء')).replace(/ء/g, ''), k = sk(a); return !!k && k === sk(b); }
+
 function normalizeForSearch(s) {
   return String(s || '').replace(DIACRITICS, '').replace(TATWEEL, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
-    .replace(/[^\u0600-\u06FFa-zA-Z0-9\s]/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
+    .replace(/[\u060C\u061B\u061F\u066A-\u066D\u06D4]/g, ' ').replace(/[^\u0600-\u06FFa-zA-Z0-9\s]/g, ' ').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-module.exports = { fixText, fixWords, fixPhrasesAcrossWords, fixWordsAI, normalizeForSearch, fixPunctuation };
+module.exports = { fixText, fixWords, fixPhrasesAcrossWords, fixWordsAI, normalizeForSearch, fixPunctuation, sameWord };

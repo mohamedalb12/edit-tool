@@ -806,7 +806,7 @@ class AEServices {
   /* ---------- كلام مع الصوت، وصوت → أنيميشن ---------- */
   async transcribeAudio(file, onStep) {
     const t = this.tools(), model = this.settings.paths.whisperModel;
-    const r = await require('./transcribe').transcribe({ ffmpeg: this.ffmpeg(), whisper: t.whisper, model, file, dialectId: this.settings.dialect || 'egyptian', cacheDir: config.cacheDir('transcripts'), onProgress: onStep,
+    const r = await require('./transcribe').transcribe({ ffmpeg: this.ffmpeg(), whisper: t.whisper, model, file, dialectId: this.settings.dialect || 'egyptian', cacheDir: config.cacheDir('transcripts'), onProgress: onStep, glossary: (this.settings.captions || {}).glossary || '',
       engine: this.settings.transcribeEngine || 'auto', groqKey: this.settings.keys.groq, groqModel: this.settings.groqModel || 'whisper-large-v3', fetchImpl: this.fetch,
       llm: this.settings.keys.openrouter ? this.llm : null, spellModel: this.settings.keys.openrouter ? this.model('spellfix') : null });
     if (!r.words.length) throw new Error('مفيش كلام اتسمع في الملف');

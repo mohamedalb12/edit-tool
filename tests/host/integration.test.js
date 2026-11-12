@@ -590,21 +590,21 @@ test('captions follow the timeline as it is NOW: a clip moved / trimmed by hand 
   } finally { T.transcribe = orig; delete process.env.FAKE_WHISPER_WORDS; }
 });
 
-test('Premiere captions start with the voice: every phrase snaps to the real speech onset, even when whisper is late by a different amount each time', async () => {
+test('captions start with the voice: Whisper puts each word after a pause where the last word ended; the clean-up moves it onto the voice', async () => {
   const parts = []; for (let i = 0; i < 6; i++) parts.push({ silence: 1 }, { tone: 260, dur: 1.5 });
-  const f = makeAudio('snap.wav', parts); // speech starts at 1, 3.5, 6, 8.5, 11, 13.5
+  const f = makeAudio('snap.wav', parts); // speech 1–2.5, 3.5–5, 6–7.5, 8.5–10, 11–12.5, 13.5–15
+  const onsets = [1, 3.5, 6, 8.5, 11, 13.5];
+  // what Whisper does on real speech: the first word of each phrase starts right where the phrase before ended
+  const words = onsets.flatMap((o, i) => [{ text: 'كلمة' + i, start: i ? onsets[i - 1] + 1.5 : 0.1, end: o + 0.5 }, { text: 'تانية' + i, start: o + 0.55, end: o + 1.4 }]);
+  const T = require('../../core/transcribe'), { FFMPEG } = require('../helpers');
+  const clean = await T.cleanUp(words, { ffmpeg: FFMPEG, file: f, dialectId: 'egyptian' });
+  onsets.forEach((o, i) => assert.ok(Math.abs(clean[2 * i].start - o) <= 0.06, `phrase ${i}: ${clean[2 * i].start} vs voice at ${o}`));
+  // and the cards follow the words as they are (no second guess on top)
   const { S } = world({ clipFile: f, clipLen: 15 });
-  const onsets = [1, 3.5, 6, 8.5, 11, 13.5], late = [0.3, 0.5, 0.7, 0.4, 0.6, 0.35];
-  S.transcript = { seqId: (await S.seq()).id, words: onsets.flatMap((o, i) => [{ text: 'كلمة' + i, start: o + late[i], end: o + late[i] + 0.4 }, { text: 'تانية' + i, start: o + late[i] + 0.45, end: o + 1.4 }]), dialect: 'egyptian' };
-  const c = await S.addCaptions({ maxWords: 2 });
-  const cues = require('../../core/captions').parseSRT(fs.readFileSync(c.file, 'utf8'));
+  S.transcript = { seqId: (await S.seq()).id, words: clean, dialect: 'egyptian' };
+  const cues = require('../../core/captions').parseSRT(fs.readFileSync((await S.addCaptions({ maxWords: 2 })).file, 'utf8'));
   assert.equal(cues.length, 6);
-  cues.forEach((q, i) => assert.ok(Math.abs(q.start - onsets[i]) < 0.08, `cue ${i}: ${q.start} vs voice at ${onsets[i]}`));
-  // turned off → whisper's own (late) times
-  S.saveSettings({ captions: { ...S.settings.captions, snap: false } });
-  const c2 = await S.addCaptions({ maxWords: 2 });
-  const late2 = require('../../core/captions').parseSRT(fs.readFileSync(c2.file, 'utf8'));
-  assert.ok(Math.abs(late2[2].start - 6.7) < 0.02);
+  cues.forEach((q, i) => assert.ok(Math.abs(q.start - onsets[i]) <= 0.07, `card ${i}: ${q.start} vs ${onsets[i]}`));
 });
 
 test('caption sync: measures that the captions are 0.4 s early against the voice, applies it to SRT and animated captions; speed respected', async () => {

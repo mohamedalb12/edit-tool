@@ -2,24 +2,34 @@
 // الكابشن: تقسيم الكلمات لكروت وتحويلها لـ SRT.
 const { srtTime } = require('./util');
 
-function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false, maxGap = 0.7, minDuration = 0.25, keepWords = false } = {}) {
+/**
+ * Words → caption cards.
+ * A new card on: the word limit, the length limit (maxChars, one readable line), maxDuration, a pause in the voice
+ * (pauseBreak — a card never stays up across the speaker's silence), or the end of a sentence.
+ * Each card is up from its first word to its last + `hold` (time to finish reading), at least `minDuration` when the
+ * gap after it allows — never over the next card.
+ */
+function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false, maxGap, pauseBreak = 0.6, maxChars = 38, minDuration = 0.7, hold = 0.2, keepWords = false } = {}) {
   const limit = singleWord ? 1 : Math.max(1, maxWords | 0);
+  const brk = maxGap !== undefined ? Math.min(maxGap, pauseBreak) : pauseBreak;
   const cues = [];
   let cur = null;
+  const len = c => c.words.reduce((n, w) => n + String(w.text).trim().length + 1, -1);
   for (const w of words) {
     if (!w || !String(w.text).trim()) continue;
-    const startNew = !cur || cur.words.length >= limit || (w.end - cur.start) > maxDuration || (w.start - cur.end) > maxGap
+    const startNew = !cur || cur.words.length >= limit || (w.end - cur.start) > maxDuration || (w.start - cur.end) >= brk
+      || (cur.words.length && len(cur) + 1 + String(w.text).trim().length > maxChars)
       || /[.!?؟]$/.test(cur.words[cur.words.length - 1].text);
     if (startNew) { if (cur) cues.push(cur); cur = { start: w.start, end: w.end, words: [w] }; }
     else { cur.words.push(w); cur.end = w.end; }
   }
   if (cur) cues.push(cur);
-  // fix overlaps + minimum display time
   for (let i = 0; i < cues.length; i++) {
-    const c = cues[i], next = cues[i + 1];
+    const c = cues[i], next = cues[i + 1], room = next ? next.start - 0.04 : Infinity;
     c.text = c.words.map(w => String(w.text).trim()).join(' ');
-    if (c.end - c.start < minDuration) c.end = c.start + minDuration;
+    c.end = Math.min(Math.max(c.end + hold, c.start + minDuration), Math.max(c.end, room));
     if (next && c.end > next.start) c.end = Math.max(c.start + 0.05, next.start);
+    c.end = +c.end.toFixed(3);
     if (keepWords) c.words = c.words.map(w => ({ text: String(w.text).trim(), start: w.start, end: w.end })); else delete c.words;
   }
   return cues;

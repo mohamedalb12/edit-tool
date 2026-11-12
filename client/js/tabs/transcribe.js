@@ -94,7 +94,10 @@
         }
       }
       drawEngine();
-      view.appendChild(UI.card(groqOn ? 'التفريغ (Groq)' : 'التفريغ (أوفلاين بـ Whisper)', engineNote, UI.field('اللهجة', dialect), UI.field('تراك الكلام', trackSel), UI.modelPicker('spellfix'),
+      // names and words spelled a certain way: Whisper is primed with them
+      var gloss = h('input', { class: 'grow glossary', value: (S.settings.captions || {}).glossary || '', placeholder: 'أسامي وكلمات خاصة، بفاصلة: محمد أيمن، EditFast، شاورما الريم' });
+      gloss.addEventListener('change', function () { S.saveSettings({ captions: Object.assign({}, S.settings.captions, { glossary: gloss.value.trim() }) }); UI.toast('اتحفظ — هيتكتبوا كده في التفريغ الجاي'); });
+      view.appendChild(UI.card(groqOn ? 'التفريغ (Groq)' : 'التفريغ (أوفلاين بـ Whisper)', engineNote, UI.field('اللهجة', dialect), UI.field('تراك الكلام', trackSel), UI.field('أسامي خاصة', gloss), UI.modelPicker('spellfix'),
         UI.hint('التوقيت لكل كلمة. كل ملف بيتفرّغ مرة واحدة بس حتى لو اتقص لحتت. دوس على كلمة تروح لها، ودبل كليك تصحّحها قبل الكابشن. "القص بالكلام": اشطب الكلام اللي مش عايزه وهو يتشال من التايملين.'),
         UI.row(go, prog), UI.row(modeBtn, doCut, cutTxt), words));
       // ——— كابشن عادي: من غير أي أنيميشن ———
