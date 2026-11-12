@@ -164,3 +164,9 @@ test('Groq pieces are cut in a pause near each 10-minute mark, never inside a wo
   assert.deepEqual(groq.wordsFrom(j, 100, 5).map(w => w.seg), [5, 5, 6]);
   assert.equal(groq.segmentsFrom(j, 100)[1].noSpeech, 0.9);
 });
+
+test('captions leave out hesitation sounds ("آآ", "اممم") unless asked — never "آه" (yes) or a real word', () => {
+  ['آآ', 'اا', 'اممم', 'امم،', 'ممم', 'آ'].forEach(t => assert.equal(captions.isFiller(t), true, t));
+  ['آه', 'أه', 'ام', 'إمبارح', 'أمل', 'مين'].forEach(t => assert.equal(captions.isFiller(t), false, t));
+  assert.deepEqual(captions.dropFillers(W([['آآ', 0, 0.3], ['النهارده', 0.4, 0.9], ['اممم', 1, 1.3], ['آه', 1.4, 1.6]])).map(w => w.text), ['النهارده', 'آه']);
+});

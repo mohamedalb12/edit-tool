@@ -127,9 +127,10 @@
           });
         }, syncBtn);
       }, 'small');
-      var snapBox = h('label', { title: 'بيسمع الصوت ويخلّي كل جملة تبدأ مع أول صوتك بالظبط (whisper بيتأخر شوية ومش بنفس المقدار)' },
-        h('input', { type: 'checkbox', checked: c.snap !== false, onchange: function (e) { c.snap = e.target.checked; saveC(); } }), ' اربط كل جملة ببداية الصوت (مستحسن)');
-      var syncWrap = h('div', null, UI.row(snapBox), UI.field('تزامن الكابشن', syncSlider), UI.row(syncBtn, syncTxt));
+      // every word is already on its voice (done when transcribing); here: the hesitation sounds in the captions or not
+      var fillBox = h('label', { class: 'keep-fillers', title: 'الكلام نفسه مابيتغيّرش — دي بس الأصوات زي "آآ" و"اممم" ("آه" بمعنى أيوه بتفضل دايمًا)' },
+        h('input', { type: 'checkbox', checked: !!c.keepFillers, onchange: function (e) { c.keepFillers = e.target.checked; saveC(); } }), ' اكتب الآآ والاممم في الكابشن');
+      var syncWrap = h('div', null, UI.row(fillBox), UI.field('تزامن الكابشن', syncSlider), UI.row(syncBtn, syncTxt));
       view.appendChild(UI.card('كابشن عادي (من غير أنيميشن)', syncWrap,
         UI.hint('"كابشن بريمير" بينزل تراك كابشن عادي جوه بريمير: تعدّل الكلام والخط والمكان من Essential Graphics ومن غير رندر. "ثابت بالشكل" بينزل نفس الكابشن بشكل الاستايل اللي مختاره تحت، من غير حركة.'),
         UI.field('عدد الكلمات', UI.slider(1, 10, 1, c.maxWords, function (v) { return v + ' كلمات'; }, function (v) { c.maxWords = v; saveC(); })),

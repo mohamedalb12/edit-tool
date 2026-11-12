@@ -35,6 +35,16 @@ function buildCues(words, { maxWords = 4, maxDuration = 2.5, singleWord = false,
   return cues;
 }
 
+/**
+ * Hesitation sounds Whisper writes ("آآ", "اممم", "ممم") — said, but left out of captions unless asked. "آه" (yes) stays.
+ */
+const FILLER = /^(ا+|ا?م{2,}|ء+|ااه+)$/;
+function isFiller(text) {
+  const t = String(text || '').replace(/[ًٌٍَُِّْـ.،,!?؟…]/g, '').replace(/[أإآٱ]/g, 'ا').trim();
+  return !!t && FILLER.test(t) && t !== 'اه';
+}
+function dropFillers(words) { return words.filter(w => !isFiller(w.text)); }
+
 function toSRT(cues) {
   return cues.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}\n`).join('\n');
 }
@@ -84,4 +94,4 @@ function snapToOnsets(words, onsets, { gap = 0.3, maxEarly = 1.2, maxLate = 0.35
   return { words: out, moved, phrases: phrases.length };
 }
 
-module.exports = { buildCues, toSRT, parseSRT, snapToOnsets };
+module.exports = { buildCues, toSRT, parseSRT, snapToOnsets, isFiller, dropFillers };

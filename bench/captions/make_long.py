@@ -16,7 +16,7 @@ os.makedirs(os.path.join(O, 'clips'), exist_ok=True); os.makedirs(os.path.join(O
 for d in ('models',):
     if not os.path.exists(os.path.join(O, d)): os.symlink(os.path.join(B, d), os.path.join(O, d))
 refs = [r for r in json.load(open(os.path.join(B, 'clips', 'refs.json'), encoding='utf-8'))
-        if json.load(open(os.path.join(B, 'ref', r['id'] + '.json'), encoding='utf-8'))['ok']]
+        if os.path.exists(os.path.join(B, 'ref', r['id'] + '.json')) and json.load(open(os.path.join(B, 'ref', r['id'] + '.json'), encoding='utf-8'))['ok']]
 
 def music(sec, level=0.05):
     t = np.arange(int(sec * SR)) / SR

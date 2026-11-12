@@ -108,3 +108,4 @@ module.exports.pluginNoGuard = {
   async words(rw, { file }) { return transcribe.cleanUp(rw.map(w => ({ text: w.text, start: w.start, end: w.end })), { ffmpeg: FF, file, dialectId: 'egyptian', guard: false }); },
   cues: module.exports.plugin.cues
 };
+module.exports.pluginCaptions = { async words(rw, o) { return captions.dropFillers(await module.exports.plugin.words(rw, o)); }, cues: module.exports.plugin.cues };

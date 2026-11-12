@@ -739,7 +739,10 @@ class Services {
    * old "snap each phrase to the nearest voice onset" made it worse on real speech (it often picked a breath or a
    * noise up to 1.2 s away — bench/captions), so it is gone.
    */
-  async syncedCaptionWords(t) { return this.captionWords(t.words); }
+  async syncedCaptionWords(t) {
+    const c = this.settings.captions || {};
+    return this.captionWords(c.keepFillers ? t.words : captions.dropFillers(t.words));
+  }
 
   async addCaptions(opts = {}) {
     const c = { ...this.settings.captions, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined)) };
